@@ -1497,7 +1497,76 @@ def _consume_stream(stream) -> Tuple[str, List[Dict[str, Any]]]:
 # ==============================================================================
 # SECTION 3: PERSISTENT ATOMIC MEMORY MATRIX
 # ==============================================================================
-def load_memory(filepath: str = MEMORY_FILE) -> Dict[str, Any]:
+# One re-entrant lock guards EVERY read-modify-write of the JSON state files
+# (memory.json, task_state.json, vector_store.json). Atomic file swaps stop
+# half-written files, but only a lock stops two threads from overwriting each
+# other's updates. RLock so a locked function can call another locked one;
+# a single lock (instead of one per file) rules out lock-ordering deadlocks.
+_STATE_LOCK = threading.RLock()
+
+
+def _read_json_state(filepath: str, attempts: int = 5) -> Any:
+    """Read a JSON state file. Retries briefly on OS-level errors (Windows can
+    refuse a read while another process is mid-replace). A file that is
+    genuinely corrupt is moved aside to <name>.corrupt.<timestamp> instead of
+    being left in place to be overwritten, then JSONDecodeError is re-raised.
+    Raises the last OSError if every retry fails."""
+    last_err: Optional[Exception] = None
+    for attempt in range(attempts):
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            quarantine = f"{filepath}.corrupt.{int(time.time())}"
+            try:
+                os.replace(filepath, quarantine)
+                logger.error(f"Corrupt state file moved aside: {quarantine}")
+            except OSError as move_err:
+                logger.error(f"Corrupt state file {filepath} could not be moved aside: {move_err}")
+            raise
+        except OSError as e:
+            last_err = e
+            time.sleep(0.05 * (attempt + 1))
+    raise last_err  # type: ignore[misc]
+
+
+def _atomic_write_json(data: Any, filepath: str, prefix: str = "state_") -> bool:
+    """Write JSON to a temp file in the SAME directory, flush + fsync it, then
+    os.replace() it over the live file. A crash mid-write leaves only a stray
+    temp file (cleaned up here on failure) - the live file is never partial."""
+    temp_path: Optional[str] = None
+    try:
+        with _STATE_LOCK:
+            dir_name = os.path.dirname(filepath) or "."
+            fd, temp_path = tempfile.mkstemp(dir=dir_name, prefix=prefix, suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            for attempt in range(5):
+                try:
+                    os.replace(temp_path, filepath)
+                    break
+                except PermissionError:  # Windows: target briefly held open elsewhere
+                    if attempt == 4:
+                        raise
+                    time.sleep(0.05 * (attempt + 1))
+            temp_path = None
+        return True
+    except Exception as e:
+        logger.error(f"Atomic JSON write failed ({filepath}): {e}")
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+        return False
+
+
+def load_memory(filepath: str = MEMORY_FILE, strict: bool = False) -> Dict[str, Any]:
+    """strict=True is for read-modify-write callers: if the file exists but
+    cannot be read, raise instead of returning empty defaults, so a failed
+    read can never be saved back over your real memory."""
     default_structure = {
         "user_name": "Operator",
         "system_identity": "Prometheus Sovereign Core v6.3",
@@ -1514,28 +1583,27 @@ def load_memory(filepath: str = MEMORY_FILE) -> Dict[str, Any]:
     }
     if os.path.exists(filepath):
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                for key, val in default_structure.items():
-                    if key not in data:
-                        data[key] = val
-                return data
+            with _STATE_LOCK:
+                data = _read_json_state(filepath)
+            if not isinstance(data, dict):
+                raise ValueError("memory file is not a JSON object")
+            for key, val in default_structure.items():
+                if key not in data:
+                    data[key] = val
+            return data
+        except json.JSONDecodeError as e:
+            # Already moved aside to .corrupt.<ts> by _read_json_state, so
+            # starting from defaults cannot destroy the old data.
+            logger.error(f"Memory matrix corrupt, quarantined and reset to defaults: {e}")
         except Exception as e:
             logger.error(f"Memory matrix read error: {e}")
+            if strict:
+                raise
     return default_structure
 
 
 def save_memory_data(data: Dict[str, Any], filepath: str = MEMORY_FILE) -> bool:
-    try:
-        dir_name = os.path.dirname(filepath)
-        fd, temp_path = tempfile.mkstemp(dir=dir_name, prefix="mem_", suffix=".tmp")
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        os.replace(temp_path, filepath)
-        return True
-    except Exception as e:
-        logger.error(f"Atomic memory write failed: {e}")
-        return False
+    return _atomic_write_json(data, filepath, prefix="mem_")
 
 
 def get_memory_context(filepath: str = MEMORY_FILE) -> str:
@@ -1553,13 +1621,15 @@ def get_memory_context(filepath: str = MEMORY_FILE) -> str:
 
 
 def update_memory_fact(fact: str, filepath: str = MEMORY_FILE) -> Dict[str, Any]:
-    mem = load_memory(filepath)
-    facts = mem.setdefault("facts", [])
-    if fact not in facts:
-        facts.append(fact)
-        save_memory_data(mem, filepath)
-        print(f"{tag('MEMORY MATRIX', Color.NEON_GREEN)} Embedded Fact: {fact}")
-        rag_store.add_document(f"Memory Fact: {fact}", metadata={"source": "memory_matrix"})
+    # The lock covers the whole read-modify-write cycle, not just the write.
+    with _STATE_LOCK:
+        mem = load_memory(filepath, strict=True)
+        facts = mem.setdefault("facts", [])
+        if fact not in facts:
+            facts.append(fact)
+            save_memory_data(mem, filepath)
+            print(f"{tag('MEMORY MATRIX', Color.NEON_GREEN)} Embedded Fact: {fact}")
+            rag_store.add_document(f"Memory Fact: {fact}", metadata={"source": "memory_matrix"})
     return mem
 
 
@@ -1583,47 +1653,45 @@ TOOL_RESULT_CHAR_CAP = 6000
 # survive across sessions instead of living only inside one conversation's
 # tool loop. Auto-injected into every turn's context by build_context_block()
 # below whenever a goal is set, the same way RAG results are.
-def load_task_state(filepath: str = TASK_STATE_FILE) -> Dict[str, Any]:
+def load_task_state(filepath: str = TASK_STATE_FILE, strict: bool = False) -> Dict[str, Any]:
     default_state = {"goal": None, "steps": [], "status": "idle", "notes": [], "updated": None}
     if os.path.exists(filepath):
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                for key, val in default_state.items():
-                    if key not in data:
-                        data[key] = val
-                return data
+            with _STATE_LOCK:
+                data = _read_json_state(filepath)
+            if not isinstance(data, dict):
+                raise ValueError("task state file is not a JSON object")
+            for key, val in default_state.items():
+                if key not in data:
+                    data[key] = val
+            return data
+        except json.JSONDecodeError as e:
+            logger.error(f"Task state corrupt, quarantined and reset to defaults: {e}")
         except Exception as e:
             logger.error(f"Task state read error: {e}")
+            if strict:
+                raise
     return default_state
 
 
 def save_task_state(state: Dict[str, Any], filepath: str = TASK_STATE_FILE) -> bool:
     state["updated"] = datetime.datetime.now().isoformat()
-    try:
-        dir_name = os.path.dirname(filepath)
-        fd, temp_path = tempfile.mkstemp(dir=dir_name, prefix="task_", suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, ensure_ascii=False)
-        os.replace(temp_path, filepath)
-        return True
-    except Exception as e:
-        logger.error(f"Task state write error: {e}")
-        return False
+    return _atomic_write_json(state, filepath, prefix="task_")
 
 
 def tool_update_task_state(goal: Optional[str] = None, steps: Optional[List[str]] = None,
                             status: Optional[str] = None, note: Optional[str] = None) -> dict:
-    state = load_task_state()
-    if goal is not None:
-        state["goal"] = goal
-    if steps is not None:
-        state["steps"] = steps
-    if status is not None:
-        state["status"] = status
-    if note:
-        state.setdefault("notes", []).append({"ts": datetime.datetime.now().isoformat(), "note": note})
-    save_task_state(state)
+    with _STATE_LOCK:  # whole read-modify-write cycle
+        state = load_task_state(strict=True)
+        if goal is not None:
+            state["goal"] = goal
+        if steps is not None:
+            state["steps"] = steps
+        if status is not None:
+            state["status"] = status
+        if note:
+            state.setdefault("notes", []).append({"ts": datetime.datetime.now().isoformat(), "note": note})
+        save_task_state(state)
     return {"status": "success", "task_state": state}
 
 
@@ -1676,6 +1744,10 @@ class VectorRAGStore:
         return float(numerator / denominator)
 
     def add_document(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+        with _STATE_LOCK:
+            return self._add_document_unlocked(content, metadata)
+
+    def _add_document_unlocked(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> str:
         # Dedup pass: a document whose normalized first 200 chars match a
         # recent document just refreshes the existing entry's timestamp
         # instead of piling on a near-identical copy. Normalization collapses
@@ -1710,7 +1782,9 @@ class VectorRAGStore:
     def search(self, query: str, top_k: int = 3) -> List[Tuple[float, Dict[str, Any]]]:
         query_vec = self._tokenize(query)
         scores = []
-        for doc in self.documents:
+        with _STATE_LOCK:
+            snapshot = list(self.documents)
+        for doc in snapshot:
             sim = self._cosine_similarity(query_vec, doc["vector"])
             if sim > 0.05:
                 scores.append((sim, doc))
@@ -1720,17 +1794,21 @@ class VectorRAGStore:
     def load(self):
         if os.path.exists(self.filepath):
             try:
-                with open(self.filepath, "r", encoding="utf-8") as f:
-                    self.documents = json.load(f)
+                with _STATE_LOCK:
+                    data = _read_json_state(self.filepath)
+                if not isinstance(data, list):
+                    raise ValueError("vector store file is not a JSON list")
+                self.documents = data
+            except json.JSONDecodeError as e:
+                logger.error(f"Vector store corrupt, quarantined and starting empty: {e}")
             except Exception as e:
                 logger.error(f"Vector store load failed: {e}")
 
     def save(self):
-        try:
-            with open(self.filepath, "w", encoding="utf-8") as f:
-                json.dump(self.documents, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"Vector store save failed: {e}")
+        # Atomic temp-file + os.replace under the shared lock (this used to
+        # write straight into the live file, so a crash or a concurrent writer
+        # could leave truncated JSON).
+        _atomic_write_json(self.documents, self.filepath, prefix="vec_")
 
 
 rag_store = VectorRAGStore()
@@ -2937,11 +3015,12 @@ def execute(**kwargs):
         with open(tool_file, "w", encoding="utf-8") as f:
             f.write(file_content)
 
-        mem = load_memory()
-        syn = mem.setdefault("synthesized_tools", [])
-        if safe_name not in syn:
-            syn.append(safe_name)
-            save_memory_data(mem)
+        with _STATE_LOCK:
+            mem = load_memory(strict=True)
+            syn = mem.setdefault("synthesized_tools", [])
+            if safe_name not in syn:
+                syn.append(safe_name)
+                save_memory_data(mem)
 
         return {"status": "success", "message": f"Dynamic tool '{safe_name}' compiled and saved to {tool_file}."}
     except Exception as e:
@@ -3001,11 +3080,15 @@ def _resolve_workspace_path(path: str) -> str:
     BASE_DIR. This is a guardrail for the model, not a security sandbox —
     but it stops the obvious "oops, wrote over a system directory" class of
     mistake. Protected self-source files are rejected by the callers below."""
-    resolved = os.path.abspath(os.path.expanduser(path))
-    if os.path.isdir(resolved):
-        return resolved
-    base = os.path.abspath(BASE_DIR)
-    inside_base = os.path.commonpath([resolved, base]) == base if os.path.exists(base) else resolved.startswith(base)
+    expanded = os.path.expanduser(path)
+    if not os.path.isabs(expanded):
+        expanded = os.path.join(BASE_DIR, expanded)  # relative paths mean "inside the workspace"
+    resolved = os.path.realpath(expanded)  # follows symlinks, so they can't point outside
+    base = os.path.realpath(BASE_DIR)
+    try:
+        inside_base = os.path.commonpath([resolved, base]) == base
+    except ValueError:  # e.g. a different drive on Windows
+        inside_base = False
     if not inside_base:
         raise PermissionError(
             f"Refusing to touch '{path}': outside the workspace ({base}). "
@@ -3014,12 +3097,19 @@ def _resolve_workspace_path(path: str) -> str:
     return resolved
 
 
+def _is_secret_file(path: str) -> bool:
+    name = os.path.basename(path).lower()
+    return name == ".env" or (name.startswith(".env.") and name != ".env.example")
+
+
 def _guard_protected(path: str) -> None:
     if os.path.basename(path).lower() in WORKSPACE_PROTECTED_FILES:
         raise PermissionError(
             f"'{os.path.basename(path)}' is Prometheus's own source — use the "
             "propose_code_change / apply_pending_patch pipeline instead."
         )
+    if _is_secret_file(path):
+        raise PermissionError("'.env' files hold API keys and are off-limits to the workspace tools.")
 
 
 def tool_write_file(path: str, content: str, append: bool = False) -> dict:
@@ -3103,6 +3193,8 @@ def tool_read_file(path: str, offset_line: int = 1, max_lines: int = 400) -> dic
     whether more lines remain, so the model can page through big files."""
     try:
         resolved = _resolve_workspace_path(path)
+        if _is_secret_file(resolved):
+            return {"status": "error", "message": "'.env' files hold API keys and are off-limits to the workspace tools."}
         if not os.path.exists(resolved):
             return {"status": "error", "message": f"Path '{path}' not found."}
         if os.path.isdir(resolved):
@@ -3537,10 +3629,27 @@ TOOLS: List[Dict[str, Any]] = [{"type": "function", "function": spec} for spec i
 # Tools with real-world side effects — gui_orb.py's PrometheusWorker pauses
 # and asks the operator to explicitly approve/deny before dispatching these,
 # unless "auto-approve" is toggled on in the HUD.
-DANGEROUS_TOOLS = {
+class _DangerousToolRegistry(set):
+    """The built-in dangerous tool names, PLUS any synthesized tool that exists
+    as a file in dynamic_tools/. Those modules run unsandboxed inside this
+    process, so calling one needs the same operator confirmation as any other
+    dangerous tool. A set subclass so existing `name in DANGEROUS_TOOLS`
+    checks (here and in gui_orb.py) pick this up without any other change."""
+
+    def __contains__(self, name: object) -> bool:
+        if set.__contains__(self, name):
+            return True
+        try:
+            return bool(re.fullmatch(r"[A-Za-z0-9_]+", str(name))) and os.path.isfile(
+                os.path.join(DYNAMIC_TOOLS_DIR, f"{name}.py"))
+        except Exception:
+            return False
+
+
+DANGEROUS_TOOLS = _DangerousToolRegistry({
     "run_code_forge", "ghost_control", "sculpt_workspace", "synthesize_dynamic_tool",
     "apply_pending_patch", "execute_shell", "write_file", "edit_file",
-}
+})
 
 
 def dispatch_tool(name: str, arguments: Union[Dict[str, Any], str]) -> Dict[str, Any]:
@@ -3655,7 +3764,9 @@ def dispatch_tool(name: str, arguments: Union[Dict[str, Any], str]) -> Dict[str,
 
         else:
             dynamic_path = os.path.join(DYNAMIC_TOOLS_DIR, f"{name}.py")
-            if os.path.exists(dynamic_path):
+            # The name comes from the model: only plain identifiers may map to
+            # a file, so "../../x" can never load a module from elsewhere.
+            if re.fullmatch(r"[A-Za-z0-9_]+", str(name)) and os.path.exists(dynamic_path):
                 spec = importlib.util.spec_from_file_location(name, dynamic_path)
                 mod = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(mod)
@@ -3781,7 +3892,7 @@ def handle_slash_command(cmd: str) -> bool:
             "  /forge <code>     - Execute code inside the sandboxed Code Forge\n"
             "  /memory           - Display active long-term facts & PARA memory\n"
             "  /rag <query>      - Query zero-dependency Vector Semantic RAG Store\n"
-            "  /search <query>   - Live web search (requires TAVILY_API_KEY in .env)"
+            "  /search <query>   - Live web search (requires TAVILY_API_KEY in .env)\n"
             "  /task             - Show the persistent multi-session task scratchpad\n"
             "  /patches          - List pending self-modification patches awaiting review\n"
             "  /resume [id]      - List saved sessions, or resume one by id\n"
@@ -3971,9 +4082,15 @@ def main():
             # ---- context compaction: summarize the oldest overflow ----------
             if len(history) > CONTEXT_WINDOW_TURNS:
                 overflow_count = len(history) - CONTEXT_WINDOW_TURNS + (CONTEXT_WINDOW_TURNS // 2)
-                overflow = history[:overflow_count]
-                del history[:overflow_count]
-                session["digest"] = generate_session_digest(session, overflow)
+                # Never cut mid tool-exchange: advance to the next user message so
+                # an assistant tool_calls message is never separated from its
+                # tool results (providers reject orphaned tool messages).
+                while overflow_count < len(history) and history[overflow_count].get("role") != "user":
+                    overflow_count += 1
+                if overflow_count < len(history):
+                    overflow = history[:overflow_count]
+                    del history[:overflow_count]
+                    session["digest"] = generate_session_digest(session, overflow)
 
             save_session_record(session)
 
