@@ -1,0 +1,24 @@
+# Secrets - never commit API keys
+.env
+.env.*
+!.env.example
+
+# Runtime state (can contain personal data from your chats)
+memory.json
+vector_store.json
+task_state.json
+schedule.json
+usage_log.jsonl
+prometheus.log
+sessions/
+sandbox_runs/
+pending_patches/
+dynamic_tools/
+*.bak.*
+*.tmp
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
