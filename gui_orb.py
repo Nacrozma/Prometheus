@@ -10,6 +10,7 @@ import threading
 import asyncio
 import io
 import traceback
+import html as _html
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
@@ -19,7 +20,7 @@ import whisper
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.window=false"
 
 from PyQt6.QtCore import (
-    Qt, QTimer, QThread, pyqtSignal, QPropertyAnimation, QEasingCurve, QByteArray
+    Qt, QTimer, QThread, QObject, pyqtSignal, QPropertyAnimation, QEasingCurve, QByteArray
 )
 from PyQt6.QtGui import (
     QFont, QSurfaceFormat, QShortcut, QKeySequence, QColor, QPainter, QPen, QDesktopServices
@@ -54,16 +55,29 @@ try:
     )
 except ImportError as err:
     raise ImportError(f"Ensure 'prometheus.py' is in the same execution path. Details: {err}")
+except RuntimeError as err:
+    # prometheus.py builds the LLM router at import time and raises this when no
+    # provider key is configured - say so plainly instead of a raw traceback.
+    raise SystemExit(f"Prometheus could not start: {err}")
 
-from gui_config import AppConfig
+import prometheus as _prometheus_core  # PROVIDER_PRIORITY / default models are adjusted from the saved settings
+from gui_config import AppConfig, parse_csv, parse_model_overrides
+from gui_session import (
+    load_session, save_session, sanitize_messages, trim_messages, cap_text, TOOL_RESULT_CHAR_CAP,
+)
 import gui_markdown as md
 from gui_birth import BirthTimeline, BIRTH_VERTEX_SHADER, BIRTH_FRAGMENT_SHADER
 
 # Constants
-THOUGHT_FILE = "prom_thought.txt"
+_HERE = os.path.dirname(os.path.abspath(__file__))
+THOUGHT_FILE = os.path.join(_HERE, "prom_thought.txt")  # absolute: a relative name depended on the launch directory
 DEFAULT_VOICE = "en-US-ChristopherNeural"
 MAX_TOOL_ITERATIONS = 8  # hard cap so a tool-calling loop can't run forever
-SESSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "session.json")
+SESSION_FILE = os.path.join(_HERE, "session.json")
+MAX_SESSION_MESSAGES = 80       # history kept on disk and re-sent each turn (never cuts a tool exchange)
+MAX_CONSOLE_TOOL_CHARS = 4000   # one huge tool result must not freeze the console (it re-renders as a whole)
+MAX_RESPONSE_TOKENS = 2000      # 1200 truncated long tool-call arguments mid-JSON
+STREAM_EMIT_INTERVAL = 0.06     # seconds between live-markdown re-renders while streaming
 
 # Cross-model fallback chain tried (in order) if the router's default model
 # errors or is rate-limited. Only applies when router.provider == "openrouter".
@@ -97,14 +111,42 @@ MD_THEME = dict(md.DEFAULT_THEME, **{
 })
 
 
-def install_crash_handler(app: QApplication):
-    """A crash anywhere in the Qt event loop otherwise kills the window with
-    no message at all. This catches it, logs the full traceback to
-    prometheus.log-adjacent gui_crash.log, and offers a copyable dialog
-    instead of a silent disappearance."""
-    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui_crash.log")
+class _CrashRelay(QObject):
+    """Qt widgets may only be touched from the GUI thread, but unhandled
+    exceptions can arrive from worker / TTS / voice threads. The hook only emits
+    this signal (queued across threads); the dialog is built in the GUI thread."""
+    crashed = pyqtSignal(str)
 
-    def handle(exc_type, exc_value, exc_tb):
+
+def install_crash_handler(app: QApplication):
+    """A crash anywhere otherwise kills the window with no message at all. This
+    logs the full traceback to gui_crash.log and shows a copyable dialog instead
+    of a silent disappearance - for the Qt thread AND for background threads."""
+    log_path = os.path.join(_HERE, "gui_crash.log")
+    relay = _CrashRelay(app)
+    showing = []  # one dialog at a time: a repeating error must not stack dialogs
+
+    def show_dialog(text: str):
+        if showing:
+            return
+        showing.append(True)
+        try:
+            box = QMessageBox()
+            box.setWindowTitle("Prometheus — Unhandled Error")
+            box.setIcon(QMessageBox.Icon.Critical)
+            box.setTextFormat(Qt.TextFormat.PlainText)
+            box.setText("Something went wrong that wasn't caught cleanly. Prometheus is still running.")
+            box.setDetailedText(text)
+            box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            box.exec()
+        except Exception:
+            pass
+        finally:
+            showing.clear()
+
+    relay.crashed.connect(show_dialog)
+
+    def report(exc_type, exc_value, exc_tb):
         text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
         try:
             with open(log_path, "a", encoding="utf-8") as f:
@@ -112,36 +154,45 @@ def install_crash_handler(app: QApplication):
         except Exception:
             pass
         print(text, file=sys.stderr)
-        try:
-            box = QMessageBox()
-            box.setWindowTitle("Prometheus — Unhandled Error")
-            box.setIcon(QMessageBox.Icon.Critical)
-            box.setText("Something went wrong that wasn't caught cleanly. Prometheus is still running.")
-            box.setDetailedText(text)
-            box.setStandardButtons(QMessageBox.StandardButton.Ok)
-            box.exec()
-        except Exception:
-            pass
+        relay.crashed.emit(text)
 
-    sys.excepthook = handle
+    sys.excepthook = report
+    threading.excepthook = lambda args: report(args.exc_type, args.exc_value, args.exc_traceback)
+    app._crash_relay = relay  # keep the relay alive for the life of the app
 
 
 def _load_session() -> list:
-    if os.path.exists(SESSION_FILE):
-        try:
-            with open(SESSION_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
+    """Atomic-write / quarantine / repair logic lives in gui_session.py (testable without Qt)."""
+    return load_session(SESSION_FILE)
 
 
 def _save_session(messages: list):
-    try:
-        with open(SESSION_FILE, "w", encoding="utf-8") as f:
-            json.dump(messages, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"[Session Save Error]: {e}")
+    if not save_session(SESSION_FILE, messages):
+        print("[Session Save Error]: could not write session.json")
+
+
+# Provider priority and per-provider model overrides were stored by gui_config
+# but nothing ever read them. These make them real: the defaults are captured
+# once, so clearing a setting restores the original behaviour in the same run.
+_DEFAULT_PROVIDER_PRIORITY = list(_prometheus_core.PROVIDER_PRIORITY)
+_DEFAULT_MODELS = {name: client.default_model for name, client in llm_router._clients.items()}
+
+
+def apply_router_settings(config: AppConfig) -> list:
+    """Apply the saved provider priority and model overrides to the shared
+    router. Returns plain-text notes about anything that had to be ignored."""
+    notes = []
+    wanted = config.get("provider_priority") or []
+    known = [p for p in wanted if p in _prometheus_core.PROVIDER_ENDPOINTS]
+    notes += [f"Ignored unknown provider '{p}' in provider priority." for p in wanted if p not in known]
+    _prometheus_core.PROVIDER_PRIORITY[:] = known if known else _DEFAULT_PROVIDER_PRIORITY
+
+    overrides = config.get("model_overrides") or {}
+    for name, client in llm_router._clients.items():
+        client.default_model = overrides.get(name) or _DEFAULT_MODELS[name]
+    notes += [f"Model override for '{n}' ignored: no key is configured for that provider."
+              for n in overrides if n not in llm_router._clients]
+    return notes
 
 
 # ==============================================================================
@@ -421,6 +472,7 @@ class SolarSunWidget(QOpenGLWidget):
         self.birth = BirthTimeline()
         self._birth_scale = 1.0
         self._birth_finished_cb = None
+        self._last_tick = time.perf_counter()
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.advance_frame)
@@ -442,7 +494,11 @@ class SolarSunWidget(QOpenGLWidget):
         super().mousePressEvent(event)
 
     def advance_frame(self):
-        dt = 0.016
+        # Real elapsed time (clamped), not a fixed 16 ms: the 7.5 s intro and the
+        # shader clock stay true to wall time when frames are slow or the timer jitters.
+        now = time.perf_counter()
+        dt = max(0.0, min(0.1, now - self._last_tick))
+        self._last_tick = now
         self.time += dt
 
         if self.birth.active:
@@ -524,11 +580,23 @@ class SolarSunWidget(QOpenGLWidget):
         self.bu_time = GL.glGetUniformLocation(self.birth_program, "u_time")
         self.bu_birth = GL.glGetUniformLocation(self.birth_program, "u_birth")
 
+    def _framebuffer_size(self):
+        """gl_FragCoord is in DEVICE pixels but width()/height() are logical, so on
+        a scaled display (125%/150%/200%) the shader's centre and aspect were wrong."""
+        dpr = self.devicePixelRatioF()
+        return float(self.width() * dpr), float(self.height() * dpr)
+
+    def _release_gl_state(self):
+        """Leave no program/VAO bound before QPainter draws: Qt's painter assumes a
+        clean GL state and misrenders on some drivers otherwise."""
+        GL.glUseProgram(0)
+        GL.glBindVertexArray(0)
+
     def paintGL(self):
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
 
         GL.glUseProgram(self.program)
-        GL.glUniform2f(self.u_res, float(self.width()), float(self.height()))
+        GL.glUniform2f(self.u_res, *self._framebuffer_size())
         GL.glUniform1f(self.u_time, self.time)
         GL.glUniform1f(self.u_audio, float(self.audio_level))
         GL.glUniform1i(self.u_state, self.state)
@@ -545,14 +613,32 @@ class SolarSunWidget(QOpenGLWidget):
             GL.glEnable(GL.GL_BLEND)
             GL.glBlendFunc(GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA)
             GL.glUseProgram(self.birth_program)
-            GL.glUniform2f(self.bu_res, float(self.width()), float(self.height()))
+            GL.glUniform2f(self.bu_res, *self._framebuffer_size())
             GL.glUniform1f(self.bu_time, self.time)
             GL.glUniform1f(self.bu_birth, float(self.birth.t))
             GL.glBindVertexArray(self.vao)
             GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
             GL.glDisable(GL.GL_BLEND)
+            self._release_gl_state()
+            self._draw_birth_caption()
         else:
+            self._release_gl_state()
             self._draw_hud_overlay()
+
+    def _draw_birth_caption(self):
+        """The intro can hold for up to 20 s waiting on the speech model; say what
+        it is doing and how to skip, instead of an unexplained wait."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        w, h = self.width(), self.height()
+        align = int(Qt.AlignmentFlag.AlignHCenter)
+        painter.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
+        painter.setPen(QPen(QColor(255, 179, 0, 190)))
+        painter.drawText(0, h - 48, w, 18, align, self.birth.phase_label)
+        painter.setFont(QFont("Consolas", 8))
+        painter.setPen(QPen(QColor(255, 255, 255, 110)))
+        painter.drawText(0, h - 30, w, 16, align, "ESC or click to skip")
+        painter.end()
 
     def _draw_hud_overlay(self):
         painter = QPainter(self)
@@ -636,16 +722,29 @@ class WhisperVoiceThread(QThread):
         mid-preload just waits for that same load instead of double-loading."""
         self._get_model()
 
-    def start_recording(self):
+    MIN_SECONDS = 0.35  # shorter is a stray click, and Whisper invents text for near-silence
+
+    def start_recording(self) -> bool:
+        """False if the previous recording is still being transcribed: start() on a
+        running QThread does nothing, so the UI would show REC while recording nothing."""
+        if self.isRunning():
+            self.status_signal.emit("STILL TRANSCRIBING - TRY AGAIN IN A MOMENT")
+            return False
         self.audio_data = []
         self.is_recording = True
         self.start()
+        return True
 
     def stop_recording(self):
         self.is_recording = False
 
     def run(self):
-        model = self._get_model()
+        try:
+            model = self._get_model()
+        except Exception as e:
+            self.is_recording = False
+            self.status_signal.emit(f"SPEECH MODEL ERROR: {e}")
+            return
         self.status_signal.emit("LISTENING...")
 
         def callback(indata, frames, time_info, status):
@@ -655,17 +754,26 @@ class WhisperVoiceThread(QThread):
                 norm_amp = float(np.clip(rms * 5.5, 0.0, 1.0))
                 self.audio_level_signal.emit(norm_amp)
 
-        with sd.InputStream(samplerate=self.sample_rate, channels=1, callback=callback):
-            while self.is_recording:
-                self.msleep(40)
+        try:
+            with sd.InputStream(samplerate=self.sample_rate, channels=1, callback=callback):
+                while self.is_recording:
+                    self.msleep(40)
+        except Exception as e:  # no microphone, device busy, permission denied...
+            self.is_recording = False
+            self.audio_level_signal.emit(0.0)
+            self.status_signal.emit(f"MICROPHONE ERROR: {e}")
+            return
 
         self.audio_level_signal.emit(0.0)
         if not self.audio_data:
             return
 
-        self.status_signal.emit("TRANSCRIBING AUDIO...")
         audio_np = np.concatenate(self.audio_data, axis=0).flatten().astype(np.float32)
+        if len(audio_np) < self.sample_rate * self.MIN_SECONDS:
+            self.status_signal.emit("RECORDING TOO SHORT - IGNORED")
+            return
 
+        self.status_signal.emit("TRANSCRIBING AUDIO...")
         try:
             result = model.transcribe(audio_np)
             text = result.get("text", "").strip()
@@ -871,23 +979,29 @@ class BackgroundSpeakerThread(QThread):
         self.audio_amplitude.emit(level)
 
     def run(self):
+        claim_path = THOUGHT_FILE + ".processing"
         while self.keep_running:
-            if os.path.exists(THOUGHT_FILE) and os.path.getsize(THOUGHT_FILE) > 0:
-                try:
-                    with open(THOUGHT_FILE, "r", encoding="utf-8") as f:
+            try:
+                # Claim the file by RENAMING it: anything written while we speak lands
+                # in a fresh prom_thought.txt. The old read-speak-truncate silently
+                # destroyed whatever was appended in between.
+                source = claim_path if os.path.exists(claim_path) else None  # leftover from a crash
+                if source is None and os.path.exists(THOUGHT_FILE) and os.path.getsize(THOUGHT_FILE) > 0:
+                    os.replace(THOUGHT_FILE, claim_path)
+                    source = claim_path
+                if source:
+                    with open(source, "r", encoding="utf-8") as f:
                         text = f.read().strip()
-
+                    os.remove(source)
                     if text:
                         self.text_captured.emit(text)
                         self.speaking_state.emit(True)
                         self.tts.speak(text)
                         self.tts.wait_until_idle()
                         self.speaking_state.emit(False)
-                        open(THOUGHT_FILE, "w").close()
-
-                except Exception as e:
-                    print(f"[BackgroundSpeaker Error]: {e}")
-                    self.msleep(1000)
+            except Exception as e:
+                print(f"[BackgroundSpeaker Error]: {e}")
+                self.msleep(1000)  # e.g. the writer still has the file open (Windows): retry shortly
 
             self.msleep(200)
 
@@ -943,21 +1057,38 @@ class PrometheusWorker(QThread):
         m = self._SENTENCE_END_RE.search(text)
         return m.end() if m else None
 
+    def _tool_message(self, tc, result, tool_name=None):
+        """The tool-result message for one call. default=str so a non-JSON-able
+        result can't raise AFTER the assistant's tool_calls were already recorded;
+        capped so one huge result can't evict the rest of the context."""
+        return {
+            "role": "tool",
+            "tool_call_id": tc["id"],
+            "name": tool_name or tc["function"]["name"] or "unknown_tool",
+            "content": cap_text(json.dumps(result, default=str), TOOL_RESULT_CHAR_CAP),
+        }
+
+    def _finish_stopped(self):
+        self.status_updated.emit("STOPPED BY OPERATOR.", THEME["amber"])
+        self.state_changed.emit("IDLE")
+
     def _stream_completion(self, messages, fallback_models):
         """
         Streams the completion instead of waiting for the full response.
         Two parallel outputs per chunk of new text: text_delta carries the
-        raw accumulated markdown (the console re-renders it live), and
-        partial_text carries that same text run through SpeechFilter — code
+        raw accumulated markdown (the console re-renders it live, throttled to
+        STREAM_EMIT_INTERVAL - re-rendering per token is O(n^2)), and
+        partial_text carries that same text run through SpeechFilter - code
         fences and markup stripped, so TTS speaks prose and announces code
         once instead of reading out backticks and syntax. Tool calls (which
         stream as fragmented deltas) are reassembled into the same shape a
         non-streaming response would have.
+        Returns (content, tool_calls, finish_reason).
         """
         stream = self.router.completion(
             messages=messages,
             tools=TOOLS,
-            max_tokens=1200,
+            max_tokens=MAX_RESPONSE_TOKENS,
             fallback_models=fallback_models,
             stream=True,
         )
@@ -966,39 +1097,55 @@ class PrometheusWorker(QThread):
         pending = ""
         tool_frags = {}
         speech_filter = md.SpeechFilter()
+        finish_reason = None
+        last_emit = 0.0
 
-        for chunk in stream:
-            if self._stop_requested:
-                break
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
+        try:
+            for chunk in stream:
+                if self._stop_requested:
+                    break
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                if getattr(choice, "finish_reason", None):
+                    finish_reason = choice.finish_reason
+                delta = choice.delta
 
-            if delta and delta.content:
-                content_buf.append(delta.content)
-                pending += delta.content
-                self.text_delta.emit("".join(content_buf))
+                if delta and delta.content:
+                    content_buf.append(delta.content)
+                    pending += delta.content
+                    now = time.monotonic()
+                    if now - last_emit >= STREAM_EMIT_INTERVAL:
+                        last_emit = now
+                        self.text_delta.emit("".join(content_buf))
 
-                while True:
-                    cut = self._find_sentence_break(pending)
-                    if cut is None:
-                        break
-                    sentence, pending = pending[:cut], pending[cut:]
-                    spoken = speech_filter.feed(sentence)
-                    if spoken.strip():
-                        self.partial_text.emit(spoken)
+                    while True:
+                        cut = self._find_sentence_break(pending)
+                        if cut is None:
+                            break
+                        sentence, pending = pending[:cut], pending[cut:]
+                        spoken = speech_filter.feed(sentence)
+                        if spoken.strip():
+                            self.partial_text.emit(spoken)
 
-            if delta and delta.tool_calls:
-                for tc_delta in delta.tool_calls:
-                    idx = tc_delta.index
-                    slot = tool_frags.setdefault(idx, {"id": None, "name": None, "arguments": ""})
-                    if tc_delta.id:
-                        slot["id"] = tc_delta.id
-                    if tc_delta.function:
-                        if tc_delta.function.name:
-                            slot["name"] = tc_delta.function.name
-                        if tc_delta.function.arguments:
-                            slot["arguments"] += tc_delta.function.arguments
+                if delta and delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        slot = tool_frags.setdefault(idx, {"id": None, "name": None, "arguments": ""})
+                        if tc_delta.id:
+                            slot["id"] = tc_delta.id
+                        if tc_delta.function:
+                            if tc_delta.function.name:
+                                slot["name"] = tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                slot["arguments"] += tc_delta.function.arguments
+        finally:
+            close = getattr(stream, "close", None)  # release the connection even when we stop early
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
 
         if pending.strip():
             spoken = speech_filter.feed(pending)
@@ -1006,46 +1153,78 @@ class PrometheusWorker(QThread):
                 self.partial_text.emit(spoken)
 
         full_content = "".join(content_buf)
+        if full_content:
+            self.text_delta.emit(full_content)  # final flush: the throttle may have skipped the tail
         tool_calls = None
         if tool_frags:
             tool_calls = [
                 {
                     "id": v["id"] or f"call_{i}",
                     "type": "function",
-                    "function": {"name": v["name"], "arguments": v["arguments"]},
+                    "function": {"name": v["name"] or "unknown_tool", "arguments": v["arguments"]},
                 }
                 for i, v in sorted(tool_frags.items())
             ]
-        return full_content, tool_calls
+        return full_content, tool_calls, finish_reason
 
     def run(self):
+        try:
+            self._run_turn()
+        except Exception as e:
+            traceback.print_exc()
+            adaptation_engine.register_failure()
+            self.status_updated.emit(f"CORE ERROR: {e}", THEME["red"])
+            self.state_changed.emit("IDLE")
+        finally:
+            # Safety net: whatever happened above, never leave an assistant tool
+            # call without its result in the history that is saved and re-sent -
+            # providers reject such a history and every later turn would fail.
+            self.messages[:] = sanitize_messages(self.messages)
+
+    def _run_turn(self):
         self.state_changed.emit("THINKING")
         self.status_updated.emit("PROMETHEUS SYNTHESIZING RESPONSE...", THEME["amber_glow"])
 
-        last_user_text = self.messages[-1]["content"] if self.messages else ""
+        last_user_text = ""
+        for m in reversed(self.messages):
+            if m.get("role") == "user":
+                last_user_text = str(m.get("content", ""))
+                break
         mutated_prompt = adaptation_engine.mutate_prompt(SYSTEM_PROMPT, last_user_text)
         # build_context_block() auto-retrieves relevant RAG hits for this
         # specific message, on top of persistent memory — previously RAG
         # was manual-query-only via /rag.
         active_sys_prompt = f"{mutated_prompt}\n\n{build_context_block(last_user_text)}"
 
-        fallbacks = self.fallback_models if getattr(self.router, "provider", None) == "openrouter" else None
+        # Always pass the chain: non-OpenRouter clients ignore it, and the router can
+        # rotate to OpenRouter mid-request even when it wasn't first in line.
+        fallbacks = self.fallback_models or None
 
         for _ in range(MAX_TOOL_ITERATIONS):
             if self._stop_requested:
-                self.status_updated.emit("STOPPED BY OPERATOR.", THEME["amber"])
-                self.state_changed.emit("IDLE")
+                self._finish_stopped()
                 return
 
             full_messages = [{"role": "system", "content": active_sys_prompt}] + self.messages
 
             try:
-                content, tool_calls = self._stream_completion(full_messages, fallbacks)
+                content, tool_calls, finish_reason = self._stream_completion(full_messages, fallbacks)
             except Exception as e:
                 adaptation_engine.register_failure()
                 self.status_updated.emit(f"CORE ERROR: {e}", THEME["red"])
                 self.state_changed.emit("IDLE")
                 return
+
+            if self._stop_requested:
+                # Keep what was actually said; drop half-streamed tool calls, which
+                # would be left without results.
+                if content:
+                    self.messages.append({"role": "assistant", "content": content})
+                self._finish_stopped()
+                return
+
+            if finish_reason == "length":
+                self.status_updated.emit("RESPONSE HIT THE TOKEN LIMIT AND WAS CUT OFF.", THEME["amber"])
 
             clean_msg = {"role": "assistant", "content": content or ""}
             if tool_calls:
@@ -1061,37 +1240,46 @@ class PrometheusWorker(QThread):
 
             self.state_changed.emit("ADAPTING")
 
-            for tc in tool_calls:
-                if self._stop_requested:
-                    break
-                try:
-                    args = json.loads(tc["function"]["arguments"]) if tc["function"]["arguments"] else {}
-                except json.JSONDecodeError:
-                    args = {}
-
-                args_str = json.dumps(args, indent=2) if isinstance(args, dict) else str(args)
+            for pos, tc in enumerate(tool_calls):
                 tool_name = tc["function"]["name"] or "unknown_tool"
+                if self._stop_requested:
+                    # Answer every remaining call so the saved history stays valid.
+                    for rest in tool_calls[pos:]:
+                        self.messages.append(self._tool_message(
+                            rest, {"status": "cancelled", "reason": "Stopped by operator."}))
+                    break
 
-                if not self._confirm_tool(tool_name, args_str):
-                    result = {"status": "refused", "reason": "Operator denied execution."}
-                else:
-                    self.status_updated.emit(f"ADAPTING SYSTEM LOGIC: {tool_name}", THEME["cobalt"])
-                    try:
-                        result = dispatch_tool(tool_name, args or {})
-                    except Exception as tool_err:
-                        result = {"error": str(tool_err), "traceback": traceback.format_exc()}
+                raw_args = tc["function"]["arguments"]
+                result = None
+                args = {}
+                try:
+                    args = json.loads(raw_args) if raw_args else {}
+                    if not isinstance(args, dict):
+                        raise ValueError("arguments must be a JSON object")
+                    args_str = json.dumps(args, indent=2)
+                except ValueError as bad_args:  # JSONDecodeError is a ValueError
+                    # Don't run the tool with {} - a truncated or garbled call must not execute.
+                    args_str = (raw_args or "")[:2000]
+                    result = {"status": "error",
+                              "message": f"Tool arguments were not valid JSON ({bad_args}); nothing was executed."}
 
-                res_str = json.dumps(result, indent=2) if isinstance(result, (dict, list)) else str(result)
+                if result is None:
+                    if not self._confirm_tool(tool_name, args_str):
+                        result = {"status": "refused", "reason": "Operator denied execution."}
+                    else:
+                        self.status_updated.emit(f"ADAPTING SYSTEM LOGIC: {tool_name}", THEME["cobalt"])
+                        try:
+                            result = dispatch_tool(tool_name, args)
+                        except Exception as tool_err:
+                            traceback.print_exc()
+                            result = {"status": "execution_error", "exception": str(tool_err)}
+
+                res_str = json.dumps(result, indent=2, default=str) if isinstance(result, (dict, list)) else str(result)
                 self.tool_executed.emit(tool_name, args_str, res_str)
+                self.messages.append(self._tool_message(tc, result, tool_name))
 
-                self.messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "name": tool_name,
-                    "content": json.dumps(result),
-                })
-
-            self.state_changed.emit("THINKING")
+            if not self._stop_requested:
+                self.state_changed.emit("THINKING")
 
         adaptation_engine.register_failure()
         self.status_updated.emit(f"TOOL LOOP LIMIT ({MAX_TOOL_ITERATIONS}) REACHED — STOPPING.", THEME["red"])
@@ -1138,6 +1326,16 @@ class SettingsDialog(QDialog):
         self.fallback_edit.setPlaceholderText("openai/gpt-4o, google/gemini-2.0-flash-001")
         form.addRow("Fallback models:", self.fallback_edit)
 
+        self.priority_edit = QLineEdit(", ".join(config.get("provider_priority", [])))
+        self.priority_edit.setPlaceholderText("groq, openrouter, cerebras   (blank = default order)")
+        self.priority_edit.setToolTip("Providers to try first, in order. Unknown names are ignored.")
+        form.addRow("Provider priority:", self.priority_edit)
+
+        self.overrides_edit = QLineEdit(", ".join(f"{k}={v}" for k, v in config.get("model_overrides", {}).items()))
+        self.overrides_edit.setPlaceholderText("groq=llama-3.3-70b-versatile, openrouter=<model id>")
+        self.overrides_edit.setToolTip("Use a different model for a provider: name=model, comma-separated.")
+        form.addRow("Model overrides:", self.overrides_edit)
+
         self.intro_chk = QCheckBox()
         self.intro_chk.setChecked(bool(config.get("play_intro", True)))
         form.addRow("Star-birth intro on launch:", self.intro_chk)
@@ -1159,7 +1357,9 @@ class SettingsDialog(QDialog):
         self.config.set("voice", self.voice_edit.text().strip() or DEFAULT_VOICE)
         self.config.set("speech_enabled", self.speech_enabled_chk.isChecked())
         self.config.set("speech_rate", self.rate_spin.value())
-        self.config.set("fallback_models", [s.strip() for s in self.fallback_edit.text().split(",") if s.strip()])
+        self.config.set("fallback_models", parse_csv(self.fallback_edit.text()))
+        self.config.set("provider_priority", parse_csv(self.priority_edit.text()))
+        self.config.set("model_overrides", parse_model_overrides(self.overrides_edit.text()))
         self.config.set("play_intro", self.intro_chk.isChecked())
         self.config.set("max_console_entries", self.console_cap_spin.value())
         self.config.save()
@@ -1169,6 +1369,7 @@ class PrometheusMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.config = AppConfig()
+        router_notes = apply_router_settings(self.config)
         self.setWindowTitle("PROMETHEUS — SOVEREIGN STELLAR HUD v5.0")
         self.resize(1420, 880)
         self.setMinimumSize(1120, 700)
@@ -1176,6 +1377,7 @@ class PrometheusMainWindow(QMainWindow):
 
         self.router = llm_router  # shared with prometheus.py's CLI/tools — one rotation state, one usage log
         self.messages = _load_session()
+        trim_messages(self.messages, MAX_SESSION_MESSAGES)
         self.tts = TTSManager(
             audio_callback=self.update_audio_level,
             voice=self.config.get("voice", DEFAULT_VOICE),
@@ -1184,6 +1386,7 @@ class PrometheusMainWindow(QMainWindow):
         self._smoothed_audio = 0.0
         self._turn_had_speech = False
         self.auto_approve_tools = False
+        self._adapt_test_active = False
 
         # Console is a list of HTML entries re-rendered as a whole rather
         # than incrementally appended — that's what makes a *live* streaming
@@ -1198,6 +1401,7 @@ class PrometheusMainWindow(QMainWindow):
         self.voice_thread.transcription_done.connect(self.handle_transcription)
         self.voice_thread.status_signal.connect(self.handle_voice_status)
         self.voice_thread.audio_level_signal.connect(self.update_audio_level)
+        self.voice_thread.finished.connect(self._on_voice_finished)
 
         # Pre-load the speech model in the background instead of on first
         # mic press — also what the star-birth intro's hold point waits on.
@@ -1406,8 +1610,13 @@ class PrometheusMainWindow(QMainWindow):
         self.bg_speaker.text_captured.connect(self.handle_bg_thought)
         self.bg_speaker.speaking_state.connect(self.handle_bg_speaking_state)
         self.bg_speaker.start()
+        self.bg_speaker.tts.set_muted(self.btn_mute.isChecked())  # the mute button only existed for the main voice
 
         self.append_console("SYSTEM", "PROMETHEUS STELLAR CORE INITIALIZED. READY.", THEME["mint"])
+        if self.config.load_error:
+            self.append_console("SYSTEM", f"Settings problem: {self.config.load_error}", THEME["amber"])
+        for note in router_notes:
+            self.append_console("SYSTEM", note, THEME["amber"])
         if self.messages:
             self.append_console("SYSTEM", f"Restored {len(self.messages)} messages from the previous session.", THEME["cyan"])
 
@@ -1524,8 +1733,12 @@ class PrometheusMainWindow(QMainWindow):
         dlg = SettingsDialog(self.config, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             dlg.apply_to_config()
-            self.tts.set_voice(self.config.get("voice", DEFAULT_VOICE))
-            self.tts.set_rate(self.config.get("speech_rate", 0))
+            for speaker in (self.tts, self.bg_speaker.tts):
+                speaker.set_voice(self.config.get("voice", DEFAULT_VOICE))
+                speaker.set_rate(self.config.get("speech_rate", 0))
+            for note in apply_router_settings(self.config):
+                self.append_console("SYSTEM", note, THEME["amber"])
+            self.lbl_route.setText(f"ROUTE: {self.router.provider.upper()} / {self.router.default_model}")
             self.append_console("SYSTEM", "Settings saved.", THEME["mint"])
 
     def _on_auto_approve_toggled(self, checked: bool):
@@ -1538,6 +1751,11 @@ class PrometheusMainWindow(QMainWindow):
 
     def _on_mute_toggled(self, checked: bool):
         self.tts.set_muted(checked)
+        # setChecked() during __init__ fires this before bg_speaker exists, and MUTE
+        # must silence the background "thought" voice too, not just the main one.
+        bg = getattr(self, "bg_speaker", None)
+        if bg is not None:
+            bg.tts.set_muted(checked)
         self.btn_mute.setText("MUTED" if checked else "MUTE")
 
     # -- star-birth / model preload -----------------------------------------------
@@ -1551,10 +1769,14 @@ class PrometheusMainWindow(QMainWindow):
     # -- misc state handlers ------------------------------------------------------
 
     def toggle_adapt_test(self):
-        if self.sun_widget.state == 3:
+        if self.input_field.hasFocus():
+            return  # the operator is typing a "t", not asking for the test state
+        if self._adapt_test_active:
+            self._adapt_test_active = False
             self.handle_state_change("IDLE")
             self.append_console("TEST", "Switched back to GOLDEN SOLAR state.", THEME["amber"])
         else:
+            self._adapt_test_active = True
             self.handle_state_change("ADAPTING")
             self.append_console("TEST", "Switched to COBALT BLUE MAHORAGA ADAPTATION state.", THEME["cobalt"])
 
@@ -1583,8 +1805,14 @@ class PrometheusMainWindow(QMainWindow):
                 self._streaming_idx -= overflow
                 if self._streaming_idx < 0:
                     self._streaming_idx = None
+        bar = self.console.verticalScrollBar()
+        was_at_bottom = bar.value() >= bar.maximum() - 4
+        previous = bar.value()
         self.console.setHtml("".join(self._console_entries))
-        self._scroll_console_to_bottom()
+        if was_at_bottom:
+            self._scroll_console_to_bottom()
+        else:  # the operator scrolled up to read: don't yank the view back down on every update
+            bar.setValue(min(previous, bar.maximum()))
 
     def _scroll_console_to_bottom(self):
         bar = self.console.verticalScrollBar()
@@ -1592,16 +1820,26 @@ class PrometheusMainWindow(QMainWindow):
 
     def clear_console(self):
         self._console_entries = []
+        self._code_registry.clear()
         self._streaming_idx = None
         self.console.clear()
 
-    def append_console(self, sender: str, text: str, color: str = "#FFB300"):
+    @staticmethod
+    def _console_text(text) -> str:
+        """Model-, tool- or user-controlled text -> safe, bounded HTML for the console."""
+        return _html.escape(cap_text(str(text), MAX_CONSOLE_TOOL_CHARS)).replace("\n", "<br/>")
+
+    def append_console(self, sender: str, text: str, color: str = "#FFB300", html_ok: bool = False):
+        """`text` is escaped unless html_ok=True (only for markup built in this file,
+        with any dynamic part already escaped). Everything else - operator input,
+        exception text, tool output, RAG hits, the thought file - can contain '<'."""
         stamp = time.strftime("%H:%M:%S")
+        body = text if html_ok else self._console_text(text)
         html = (
             f'<div style="margin-bottom: 7px;">'
             f'<span style="color: #555568; font-size: 9px;">{stamp}</span> '
-            f'<span style="color: {color}; font-weight: bold;">[{sender}]</span> '
-            f'<span style="color: {THEME["text"]};">{text}</span>'
+            f'<span style="color: {color}; font-weight: bold;">[{_html.escape(str(sender))}]</span> '
+            f'<span style="color: {THEME["text"]};">{body}</span>'
             f'</div>'
         )
         self._console_entries.append(html)
@@ -1614,9 +1852,9 @@ class PrometheusMainWindow(QMainWindow):
             f'<div style="background: rgba(0, 191, 255, 0.08); border-left: 3px solid {THEME["cobalt"]}; '
             f'padding: 8px 10px; margin: 6px 0; border-radius: 4px;">'
             f'<span style="color: #555568; font-size: 9px;">{stamp}</span> '
-            f'<b style="color: {THEME["cobalt"]};">[TOOL DISPATCH] {tool_name}</b><br/>'
-            f'<span style="color: #88CCFF; font-size: 10px;">INPUT: {args_json}</span><br/>'
-            f'<span style="color: #AAFFAA; font-size: 10px;">OUTPUT: {result_json}</span>'
+            f'<b style="color: {THEME["cobalt"]};">[TOOL DISPATCH] {_html.escape(str(tool_name))}</b><br/>'
+            f'<span style="color: #88CCFF; font-size: 10px;">INPUT: {self._console_text(args_json)}</span><br/>'
+            f'<span style="color: #AAFFAA; font-size: 10px;">OUTPUT: {self._console_text(result_json)}</span>'
             f'</div>'
         )
         self._console_entries.append(tool_html)
@@ -1682,9 +1920,13 @@ class PrometheusMainWindow(QMainWindow):
         box = QMessageBox(self)
         box.setWindowTitle("Confirm Tool Execution")
         box.setIcon(QMessageBox.Icon.Warning)
+        # Plain text only: the arguments are model-controlled and Qt would otherwise
+        # render HTML-looking text, letting a tool call dress up - or hide - what it does.
+        box.setTextFormat(Qt.TextFormat.PlainText)
         box.setText(f"Prometheus wants to run a tool with real-world effects:\n\n{tool_name}")
-        preview = args_json if len(args_json) < 600 else args_json[:600] + "\n... (truncated)"
+        preview = args_json if len(args_json) < 600 else args_json[:600] + "\n... (truncated - the full text is under Show Details)"
         box.setInformativeText(preview)
+        box.setDetailedText(args_json)  # always the WHOLE payload, never just the first 600 characters
         box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         box.setDefaultButton(QMessageBox.StandardButton.No)
         approved = box.exec() == QMessageBox.StandardButton.Yes
@@ -1705,17 +1947,27 @@ class PrometheusMainWindow(QMainWindow):
             self.start_voice_input()
 
     def start_voice_input(self):
+        if not self.voice_thread.start_recording():
+            return  # still transcribing the last clip: nothing started, so don't show REC
         self.btn_mic.setText("● REC")
         self.btn_mic.setStyleSheet(self._mic_rec_style)
         self.mic_pulse_anim.start()
-        self.voice_thread.start_recording()
 
-    def stop_voice_input(self):
+    def _reset_mic_ui(self):
         self.btn_mic.setText("● MIC")
         self.btn_mic.setStyleSheet(self._mic_idle_style)
         self.mic_pulse_anim.stop()
         self.mic_glow.setBlurRadius(18)
+
+    def stop_voice_input(self):
+        self._reset_mic_ui()
         self.voice_thread.stop_recording()
+
+    def _on_voice_finished(self):
+        # The recording thread also ends on a microphone/model error, not only on a
+        # normal stop - make sure the button can never stay stuck on REC.
+        if not self.voice_thread.is_recording:
+            self._reset_mic_ui()
 
     def handle_voice_status(self, text: str):
         self.append_console("VOICE", text, THEME["cyan"])
@@ -1726,7 +1978,12 @@ class PrometheusMainWindow(QMainWindow):
             self.submit_prompt()
 
     def check_idle_state(self):
-        if not self.tts.is_busy and not self.bg_speaker.tts.is_busy and self.sun_widget.state in (2, 3):
+        # Only fall back to IDLE when nothing is happening: the old check also reset
+        # the ADAPTING (tool running) and test states within 200 ms.
+        worker_busy = self.worker is not None and self.worker.isRunning()
+        if (not worker_busy and not self._adapt_test_active
+                and not self.tts.is_busy and not self.bg_speaker.tts.is_busy
+                and self.sun_widget.state in (2, 3)):
             self.handle_state_change("IDLE")
 
     def handle_state_change(self, state: str):
@@ -1764,23 +2021,23 @@ class PrometheusMainWindow(QMainWindow):
         arg = parts[1] if len(parts) > 1 else ""
 
         if slash == "/memory":
-            self.append_console("MEMORY", get_memory_context().replace("\n", "<br/>"), THEME["cyan"])
+            self.append_console("MEMORY", get_memory_context(), THEME["cyan"])
             return True
         if slash == "/telemetry":
-            pretty = json.dumps(tool_get_system_telemetry(), indent=2).replace("\n", "<br/>").replace(" ", "&nbsp;")
-            self.append_console("TELEMETRY", pretty, THEME["cyan"])
+            pretty = self._console_text(json.dumps(tool_get_system_telemetry(), indent=2, default=str)).replace(" ", "&nbsp;")
+            self.append_console("TELEMETRY", pretty, THEME["cyan"], html_ok=True)
             return True
         if slash in ("/providers", "/usage"):
-            pretty = json.dumps(tool_get_router_status(), indent=2).replace("\n", "<br/>").replace(" ", "&nbsp;")
-            self.append_console("PROVIDERS", pretty, THEME["cyan"])
+            pretty = self._console_text(json.dumps(tool_get_router_status(), indent=2, default=str)).replace(" ", "&nbsp;")
+            self.append_console("PROVIDERS", pretty, THEME["cyan"], html_ok=True)
             return True
         if slash == "/rag":
             if not arg:
-                self.append_console("SYSTEM", "Usage: /rag &lt;query&gt;", THEME["amber"])
+                self.append_console("SYSTEM", "Usage: /rag <query>", THEME["amber"])
                 return True
             hits = rag_store.search(arg, top_k=3)
-            text = "<br/>".join(f"[{score:.2f}] {doc['content']}" for score, doc in hits) or "No matches."
-            self.append_console("RAG", text, THEME["cyan"])
+            text = "<br/>".join(f"[{score:.2f}] {self._console_text(doc['content'])}" for score, doc in hits) or "No matches."
+            self.append_console("RAG", text, THEME["cyan"], html_ok=True)
             return True
         if slash == "/clear":
             self.clear_console()
@@ -1797,6 +2054,7 @@ class PrometheusMainWindow(QMainWindow):
                 "/memory &middot; /telemetry &middot; /providers &middot; /rag &lt;query&gt; &middot; /settings &middot; "
                 "/clear &middot; /newsession &middot; /help &mdash; /council and /forge remain CLI-only for now.",
                 THEME["amber"],
+                html_ok=True,  # static markup written above - nothing dynamic in it
             )
             return True
         return False
@@ -1838,7 +2096,7 @@ class PrometheusMainWindow(QMainWindow):
 
         self.worker = PrometheusWorker(
             self.router, self.messages, auto_approve=self.auto_approve_tools,
-            fallback_models=self.config.get("fallback_models") or None,
+            fallback_models=self.config.get("fallback_models"),  # [] means "no fallbacks", not "use the built-in list"
         )
         self.worker.state_changed.connect(self.handle_state_change)
         self.worker.status_updated.connect(self.handle_status)
@@ -1853,6 +2111,7 @@ class PrometheusMainWindow(QMainWindow):
 
     def _on_worker_finished(self):
         self.btn_stop.setEnabled(False)
+        trim_messages(self.messages, MAX_SESSION_MESSAGES)  # bound disk size and per-turn token cost
         _save_session(self.messages)
         used = self.router.last_used_provider or self.router.provider
         self.lbl_route.setText(f"ROUTE: {used.upper()} / {self.router.last_used_model or self.router.default_model}")
@@ -1867,8 +2126,11 @@ class PrometheusMainWindow(QMainWindow):
             self.config.save()
         except Exception:
             pass
+        self.voice_thread.stop_recording()
+        self.voice_thread.wait(1500)
+        self.model_preload_thread.wait(1500)
         self.bg_speaker.stop()
-        self.bg_speaker.wait()
+        self.bg_speaker.wait(3000)  # bounded: an unbounded wait hung the close if speech was stuck
         event.accept()
 
 

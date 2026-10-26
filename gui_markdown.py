@@ -174,15 +174,30 @@ def render_inline(text: str, theme: Dict[str, str]) -> str:
     return "".join(pieces)
 
 
-def _render_inline_plain(text: str, theme: Dict[str, str]) -> str:
-    s = esc(text)
-    s = _LINK_RE.sub(
-        lambda m: f'<a href="{m.group(2).replace(chr(34), "%22")}" style="color:{theme["cyan"]};">{m.group(1)}</a>', s)
+def _emphasis(s: str) -> str:
     s = _BOLD_RE.sub(lambda m: f"<b>{m.group(1) or m.group(2)}</b>", s)
     s = _ITAL_STAR_RE.sub(lambda m: f"<i>{m.group(1)}</i>", s)
     s = _ITAL_UND_RE.sub(lambda m: f"<i>{m.group(1)}</i>", s)
     s = _STRIKE_RE.sub(lambda m: f"<s>{m.group(1)}</s>", s)
     return s
+
+
+def _render_inline_plain(text: str, theme: Dict[str, str]) -> str:
+    # NUL delimits the link placeholders below, so strip any the model emitted.
+    s = esc(text).replace("\x00", "")
+    links: List[str] = []
+
+    def stash_link(m):
+        href = m.group(2).replace(chr(34), "%22")
+        links.append(f'<a href="{href}" style="color:{theme["cyan"]};">{_emphasis(m.group(1))}</a>')
+        return f"\x00{len(links) - 1}\x00"
+
+    # Links are lifted out BEFORE emphasis runs: otherwise an underscore or
+    # asterisk inside a URL (https://x.com/_a_/) becomes <i>/<b> tags in the
+    # middle of the href attribute and breaks the link.
+    s = _LINK_RE.sub(stash_link, s)
+    s = _emphasis(s)
+    return re.sub(r"\x00(\d+)\x00", lambda m: links[int(m.group(1))], s)
 
 
 # ------------------------------------------------------------------------------

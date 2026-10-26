@@ -19,8 +19,9 @@ import copy
 import json
 import os
 import re
-import tempfile
-from typing import Any, Dict
+from typing import Any, Dict, List
+
+from gui_session import atomic_write_json, quarantine_file
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prometheus_config.json")
 
@@ -42,7 +43,9 @@ _VOICE_RE = re.compile(r"^[A-Za-z0-9\-]{5,80}$")
 
 def _coerce(key: str, value: Any) -> Any:
     """Return a valid value for `key`, or the default if `value` is unusable."""
-    default = DEFAULTS.get(key)
+    # deepcopy: returning DEFAULTS' own list/dict would let a later in-place edit
+    # of the live setting silently change the defaults themselves.
+    default = copy.deepcopy(DEFAULTS.get(key))
     try:
         if key == "voice":
             v = str(value).strip()
@@ -80,6 +83,24 @@ def _coerce(key: str, value: Any) -> Any:
     return value  # unknown key: preserved untouched for forward compatibility
 
 
+def parse_csv(text: str) -> List[str]:
+    """'a, b,, c' -> ['a', 'b', 'c']"""
+    return [s.strip() for s in str(text).split(",") if s.strip()]
+
+
+def parse_model_overrides(text: str) -> Dict[str, str]:
+    """'groq=llama-3.3-70b-versatile, openrouter=meta-llama/x' -> {'groq': ..., 'openrouter': ...}
+    Entries without a usable 'name=model' shape are ignored."""
+    out: Dict[str, str] = {}
+    for part in parse_csv(text):
+        if "=" in part:
+            name, model = part.split("=", 1)
+            name, model = name.strip(), model.strip()
+            if name and model:
+                out[name] = model
+    return out
+
+
 class AppConfig:
     def __init__(self, path: str = CONFIG_FILE):
         self.path = path
@@ -99,21 +120,23 @@ class AppConfig:
                 raise ValueError("top-level JSON value is not an object")
             for key, value in raw.items():
                 self.data[key] = _coerce(key, value)
-        except Exception as e:  # corrupt file: keep defaults, remember why
+        except ValueError as e:
+            # Not valid JSON (or not an object): run on defaults, but move the file
+            # aside first so the next save can't destroy the operator's hand edits.
+            self.data = copy.deepcopy(DEFAULTS)
+            moved = quarantine_file(self.path)
+            self.load_error = f"{type(e).__name__}: {e}" + (
+                f" - original kept as {os.path.basename(moved)}" if moved else "")
+        except Exception as e:  # unreadable for another reason (permissions...): keep defaults, remember why
             self.data = copy.deepcopy(DEFAULTS)
             self.load_error = f"{type(e).__name__}: {e}"
 
     def save(self) -> bool:
-        try:
-            dir_name = os.path.dirname(self.path) or "."
-            fd, tmp = tempfile.mkstemp(dir=dir_name, prefix="cfg_", suffix=".tmp")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(self.data, f, indent=2, ensure_ascii=False)
-            os.replace(tmp, self.path)
+        # temp file + fsync + os.replace; a failed write cleans up its temp file
+        if atomic_write_json(self.path, self.data):
             return True
-        except Exception as e:
-            self.load_error = f"save failed: {e}"
-            return False
+        self.load_error = "save failed (see the log for details)"
+        return False
 
     def __getitem__(self, key: str) -> Any:
         return self.data[key]

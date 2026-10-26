@@ -18,9 +18,12 @@ Everything described here is in `prometheus.py`. Anything not listed is not buil
 ## Setup
 
 ```
-pip install openai python-dotenv
+pip install openai python-dotenv        # terminal version only
+# or, for the desktop GUI as well (large: openai-whisper pulls in PyTorch):
+pip install -r requirements.txt
 cp .env.example .env      # then fill in at least one key, or run Ollama locally
-python prometheus.py
+python prometheus.py      # terminal
+python gui_orb.py         # desktop HUD
 ```
 
 `.env` is git-ignored. Never commit API keys; if one is ever pasted or committed, rotate it.
@@ -40,8 +43,34 @@ python tests/stress_state.py --legacy   # simulates the old behaviour (no lock, 
 
 `--legacy` is a simulation of the earlier behaviour, not the earlier code itself.
 
+## Desktop GUI
+
+`gui_orb.py` is a PyQt6 + OpenGL HUD around the same core: a streaming chat console with markdown and
+code blocks (copy buttons), voice in (Whisper) and out (edge-tts), a confirmation dialog before any
+dangerous tool runs, and a settings dialog. Supporting modules:
+
+- `gui_markdown.py` - markdown to Qt HTML (everything the model writes is escaped first) and speech clean-up
+- `gui_birth.py` - the start-up animation timeline and shader
+- `gui_config.py` - validated, atomically-saved settings (`prometheus_config.json`, git-ignored)
+- `gui_session.py` - session save/load, history repair and trimming (no Qt, fully testable)
+
+Needs an OpenGL 3.3 capable display. Settings, session and crash logs are local files and git-ignored.
+
+## Tests
+
+```
+python -m unittest discover -s tests          # everything
+python tests/stress_state.py                  # concurrency stress test (see above)
+```
+
+The GUI tests run Qt on its offscreen platform with audio, Whisper, edge-tts and OpenGL stubbed out, so
+they need no display, microphone or GPU. They cover the worker/tool loop, console escaping, settings,
+session handling and shutdown. They do **not** exercise the OpenGL shaders or real audio/speech paths -
+those need a real display and devices.
+
 ## Known limits
 
 - The destructive-command filter ("Conscience") is a tripwire for a few shell patterns, not a sandbox.
 - Synthesized tools run inside the main process; they need operator confirmation, but they are not sandboxed.
 - Streaming responses are not counted in the usage log.
+- The GUI's shader, microphone, speaker and Whisper paths are not covered by automated tests.

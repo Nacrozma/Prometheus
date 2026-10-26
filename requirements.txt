@@ -1,0 +1,18 @@
+# Core (prometheus.py, CLI)
+openai>=1.0
+python-dotenv
+
+# Optional extras used by some tools in prometheus.py
+psutil
+pyautogui
+Pillow
+
+# GUI (gui_orb.py). openai-whisper pulls in PyTorch, which is a large download.
+PyQt6
+PyOpenGL
+PyOpenGL_accelerate
+numpy
+sounddevice
+soundfile
+edge-tts
+openai-whisper
