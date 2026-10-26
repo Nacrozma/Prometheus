@@ -25,3 +25,10 @@ venv/
 
 # Quarantined corrupt state files
 *.corrupt.*
+
+# GUI runtime state
+session.json
+prometheus_config.json
+gui_crash.log
+prom_thought.txt
+prom_thought.txt.*
