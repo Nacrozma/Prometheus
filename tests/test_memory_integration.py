@@ -16,7 +16,8 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import memory_graph as mg  # noqa: E402
+import memory_graph as mg
+from reflection import ToolStats  # noqa: E402
 import prometheus as p  # noqa: E402
 
 
@@ -32,13 +33,14 @@ class Redirected(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="memint_")
         self.mem = os.path.join(self.tmp, "memory.json")
         self._saved = {
-            "globals": (p.memory_graph, p.rag_store, p.MEMORY_FILE, p._obsidian_vault_override),
+            "globals": (p.memory_graph, p.rag_store, p.MEMORY_FILE, p._obsidian_vault_override, p.tool_stats),
             "defaults": {fn: fn.__defaults__ for fn in (p.update_memory_fact, p.get_memory_context,
                                                         p.load_memory, p.save_memory_data)},
             "env": {k: os.environ.pop(k, None) for k in ("PROMETHEUS_OBSIDIAN_VAULT", "PROMETHEUS_OBSIDIAN_AUTOSYNC",
                                                           "PROMETHEUS_OBSIDIAN_FOLDER")},
         }
         p.MEMORY_FILE = self.mem
+        p.tool_stats = ToolStats(os.path.join(self.tmp, "tool_stats.json"))
         p.memory_graph = mg.MemoryGraph(os.path.join(self.tmp, "graph.json"))
         p.rag_store = p.VectorRAGStore(filepath=os.path.join(self.tmp, "vec.json"))
         p.set_obsidian_vault(None)
@@ -48,7 +50,7 @@ class Redirected(unittest.TestCase):
         p.save_memory_data.__defaults__ = (self.mem,)
 
     def tearDown(self):
-        p.memory_graph, p.rag_store, p.MEMORY_FILE, vault = self._saved["globals"]
+        p.memory_graph, p.rag_store, p.MEMORY_FILE, vault, p.tool_stats = self._saved["globals"]
         p._obsidian_vault_override = vault
         for fn, d in self._saved["defaults"].items():
             fn.__defaults__ = d

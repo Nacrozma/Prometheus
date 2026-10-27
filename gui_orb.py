@@ -2194,6 +2194,10 @@ class PrometheusMainWindow(QMainWindow):
             self.config.save()
         except Exception:
             pass
+        try:
+            _prometheus_core.tool_stats.flush()   # the reliability stats are written lazily; don't lose the tail
+        except Exception:
+            pass
         self.voice_thread.stop_recording()
         self.voice_thread.wait(1500)
         self.model_preload_thread.wait(1500)

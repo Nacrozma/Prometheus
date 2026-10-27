@@ -114,8 +114,14 @@ def _tokens(text: str) -> List[str]:
     for tok in re.findall(r"[a-z0-9]+", text.lower()):
         if len(tok) <= 2 or tok in _STOPWORDS:
             continue
-        if len(tok) > 3 and tok.endswith("s") and not tok.endswith("ss"):
-            tok = tok[:-1]  # crude plural folding: "servos" ~ "servo"
+        if len(tok) > 4 and tok.endswith("ies"):
+            tok = tok[:-3] + "y"        # "memories" ~ "memory"
+        elif len(tok) > 3 and tok.endswith("s") and not tok.endswith("ss"):
+            tok = tok[:-1]              # crude plural folding: "servos" ~ "servo"
+        if len(tok) > 6 and tok.endswith("ing"):
+            tok = tok[:-3]              # "mentioning" ~ "mention"
+        elif len(tok) > 5 and tok.endswith("ed"):
+            tok = tok[:-2]              # "mentioned" ~ "mention"
         out.append(tok)
     return out
 
@@ -618,6 +624,16 @@ class MemoryGraph:
                              and (include_untrusted or not is_untrusted_source(f["source"]))),
                             key=lambda f: (-self.effective_importance(f, now), f["created"]))
             return [f["text"] for f in ranked[:max(0, limit)]]
+
+    def list_facts(self, kinds: Optional[Iterable[str]] = None, limit: int = 50) -> List[Dict[str, Any]]:
+        """Active facts of the given kinds, most recent first (for listings like /lessons)."""
+        with self._lock:
+            wanted = set(kinds) if kinds else None
+            rows = sorted((f for f in self.facts.values() if f["status"] == "active" and (not wanted or f["kind"] in wanted)),
+                          key=lambda f: f["created"], reverse=True)
+            return [{"id": f["id"], "text": f["text"], "kind": f["kind"], "source": f["source"], "created": f["created"],
+                     "entities": [self.entities[e]["name"] for e in f["entities"] if e in self.entities]}
+                    for f in rows[:max(0, limit)]]
 
     def active_count(self) -> int:
         with self._lock:

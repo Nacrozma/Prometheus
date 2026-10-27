@@ -1,0 +1,48 @@
+{
+  "synthetic_benchmarks": true,
+  "quick": false,
+  "memory_recall": {
+    "memory_graph": {
+      "p_at_1": 0.76,
+      "p_at_3": 0.8,
+      "mrr": 0.773
+    },
+    "legacy_vector_rag": {
+      "p_at_1": 0.72,
+      "p_at_3": 0.84,
+      "mrr": 0.767
+    },
+    "queries": 25
+  },
+  "dedupe": {
+    "must_not_merge_pairs": 8,
+    "false_merges": 0,
+    "false_merge_examples": [],
+    "should_merge_pairs": 3,
+    "missed_merges": 0
+  },
+  "entity_extraction": {
+    "sentences": 8,
+    "precision": 0.857,
+    "recall": 0.75,
+    "f1": 0.8
+  },
+  "skill_gate": {
+    "good_skills": 3,
+    "good_accepted": 3,
+    "bad_skills": 14,
+    "bad_rejected": 14
+  },
+  "patch_gate": {
+    "good_patches": 3,
+    "good_accepted": 3,
+    "bad_patches": 7,
+    "bad_rejected": 7
+  },
+  "state_stress": {
+    "rounds": 100,
+    "failed_rounds": 0,
+    "exit_code": 0,
+    "seconds": 4.5
+  }
+}

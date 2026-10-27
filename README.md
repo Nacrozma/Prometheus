@@ -86,6 +86,26 @@ This is a net for accidents, not proof a patch is good: the suite only catches w
 Honest limits: the policy gate is a filter, not a security boundary; without Docker the sandbox is resource
 limits only. Docker must be an *engine that answers*, not just the `docker` command being installed.
 
+## Reflection and evaluation
+
+Prometheus measures its own tools (`reflection.py`). Every tool call is timed and classified (success,
+failure, or refused by the operator - refusals are never counted against the tool). Stats persist to
+`tool_stats.json`. When a tool keeps failing the same way, a short **lesson** is written into the memory
+graph (`kind="lesson"`); gate rejections of proposed skills and self-patches become lessons too. Lessons
+are recalled into later prompts when relevant (labelled as notes, not instructions), and a tool that is
+failing right now gets a "Tool Reliability" caution in the system prompt. Error text is reduced to a short
+single-line excerpt before it is quoted anywhere, and invented tool names share one stats bucket.
+`/stats` and `/lessons` show it; `get_tool_stats` lets the model look too.
+
+`python evals/run_evals.py` (`--quick` for seconds) writes `evals/results.json`: recall quality of the
+memory graph vs. the original vector store, dedupe false-merge rate, entity-extraction precision/recall,
+skill-gate and patch-gate detection rates, and a state-stress run. These are **synthetic benchmarks written
+by the author** (small hand-made corpora, no LLM, no network). Read them as regression guards, not as claims
+of general accuracy. Current results, for example: on the 25-query recall set the graph and the old vector
+store are roughly on par (both lexical; neither can match a query with no shared words, like "glowing sphere"
+for "orb") - the graph's advantages are structure, decay, dedupe and provenance, which this metric does not
+measure.
+
 ## Desktop GUI
 
 `gui_orb.py` is a PyQt6 + OpenGL HUD around the same core: a streaming chat console with markdown and
@@ -104,6 +124,7 @@ Needs an OpenGL 3.3 capable display. Settings, session and crash logs are local 
 ```
 python -m unittest discover -s tests          # everything
 python tests/stress_state.py                  # concurrency stress test (see above)
+python evals/run_evals.py --quick             # synthetic benchmarks (see Reflection and evaluation)
 ```
 
 The GUI tests run Qt on its offscreen platform with audio, Whisper, edge-tts and OpenGL stubbed out, so
