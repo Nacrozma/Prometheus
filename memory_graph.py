@@ -75,7 +75,7 @@ _CAP_WORD = r"[A-Z][A-Za-z0-9]*"
 _CAP_PHRASE_RE = re.compile(rf"\b{_CAP_WORD}(?:[ \t]+{_CAP_WORD})*\b")
 _WIKILINK_RE = re.compile(r"\[\[([^\[\]|#^\n]{1,80})(?:[|#][^\[\]\n]*)?\]\]")
 _TAG_RE = re.compile(r"(?<![\w&])#([A-Za-z][\w/-]{1,40})")
-_SENTENCE_START_RE = re.compile(r"(?:^|[.!?]\s+|\n\s*[-*]?\s*)$")
+_SENTENCE_START_RE = re.compile(r"(?:^|[.!?:;]\s+|\n\s*[-*]?\s*)$")  # a capital after ': ' starts a clause too
 
 
 # ------------------------------------------------------------------------------

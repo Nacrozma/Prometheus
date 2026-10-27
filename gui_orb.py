@@ -2048,6 +2048,19 @@ class PrometheusMainWindow(QMainWindow):
             text = "<br/>".join(f"[{score:.2f}] {self._console_text(doc['content'])}" for score, doc in hits) or "No matches."
             self.append_console("RAG", text, THEME["cyan"], html_ok=True)
             return True
+        if slash == "/skills":
+            words = arg.split()
+            if words and words[0].lower() == "rollback" and len(words) > 1:
+                res = _prometheus_core.tool_rollback_skill(words[1])
+                self.append_console("SKILLS", json.dumps(res, default=str), THEME["mint"] if res.get("status") == "success" else THEME["amber"])
+                return True
+            res = _prometheus_core.tool_list_skills()
+            lines = [f"sandbox: {res['sandbox']}" + ("" if _prometheus_core.skill_registry.strongly_sandboxed
+                                                     else " (no Docker: each run asks for confirmation)")]
+            lines += [f"{s['name']}  v{s['version']}  {s['status']}  {s['tests']} — {s['description']}" for s in res["skills"]] \
+                or ["No skills yet. Ask Prometheus to teach itself one."]
+            self.append_console("SKILLS", "\n".join(lines), THEME["cyan"])
+            return True
         if slash == "/graph":
             view = _prometheus_core.tool_memory_graph_view(arg)
             if view.get("status") != "success":
@@ -2104,7 +2117,8 @@ class PrometheusMainWindow(QMainWindow):
         if slash == "/help":
             self.append_console(
                 "SYSTEM",
-                "/memory &middot; /graph [entity] &middot; /recall &lt;query&gt; &middot; /obsidian [export|status|ingest] &middot; "
+                "/memory &middot; /graph [entity] &middot; /recall &lt;query&gt; &middot; /skills [rollback &lt;name&gt;] &middot; "
+                "/obsidian [export|status|ingest] &middot; "
                 "/telemetry &middot; /providers &middot; /rag &lt;query&gt; &middot; /settings &middot; "
                 "/clear &middot; /newsession &middot; /help &mdash; /council and /forge remain CLI-only for now.",
                 THEME["amber"],

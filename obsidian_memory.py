@@ -170,6 +170,7 @@ class Names:
 
     def __init__(self, root_name: str, known: Optional[Dict[str, str]] = None):
         self.root_name = root_name
+        self.alias: Dict[str, str] = {}   # e.g. "skill:adder" -> "ent:adder" when a skill IS an entity note
         self.map: Dict[str, str] = dict(known or {})
         self.used = {v.casefold() for v in self.map.values()} | {s.casefold() for s in RESERVED_STEMS}
 
@@ -189,9 +190,11 @@ class Names:
         return name
 
     def rel(self, key: str) -> str:
+        key = self.alias.get(key, key)
         return f"{self.FOLDERS[key.split(':', 1)[0]]}/{self.map[key]}.md"
 
     def link(self, key: str, display: Optional[str] = None) -> str:
+        key = self.alias.get(key, key)
         name = self.map[key]
         target = f"{self.root_name}/{self.FOLDERS[key.split(':', 1)[0]]}/{name}"
         shown = (display or name).replace("|", "/").replace("]", ")").replace("[", "(")
@@ -350,8 +353,16 @@ class ObsidianMirror:
 
         for eid in sorted(entities):
             names.assign(f"ent:{eid}", entities[eid]["name"])
+        skill_entities: Dict[str, Dict[str, Any]] = {}   # entity id -> skill record, for skills that ARE entity notes
+        by_name = {e["name"].casefold(): eid for eid, e in entities.items() if e.get("type") == "skill"}
         for sk in skills:
-            names.assign(f"skill:{sk.get('name', 'skill')}", sk.get("name", "skill"))
+            sname = sk.get("name", "skill")
+            eid = by_name.get(sname.casefold())
+            if eid:
+                names.alias[f"skill:{sname}"] = f"ent:{eid}"   # one node in the graph, not an entity plus a twin
+                skill_entities[eid] = sk
+            else:
+                names.assign(f"skill:{sname}", sname)
         active = {fid: f for fid, f in facts.items() if f.get("status") == "active"}
         days = sorted({_day(f["created"]) for f in active.values() if _DAY_RE.match(_day(f["created"]))})
         for d in days:
@@ -359,10 +370,10 @@ class ObsidianMirror:
 
         desired: Dict[str, Tuple[Dict[str, Any], List[str], List[str], str]] = {}
         self._build_index(desired, names, entities, active, relations, skills, days, now)
-        self._build_entities(desired, names, entities, facts, relations)
+        self._build_entities(desired, names, entities, facts, relations, skill_entities)
         self._build_timeline(desired, names, entities, active, days)
         self._build_lessons(desired, names, entities, active)
-        self._build_skills(desired, names, skills)
+        self._build_skills(desired, names, [s for s in skills if f"skill:{s.get('name', 'skill')}" not in names.alias])
         self._build_task(desired, task_state or {})
         self._build_readme(desired)
 
@@ -464,7 +475,8 @@ class ObsidianMirror:
                 report.errors.append(f"{rel}: {ex}")
 
     # -- note builders -------------------------------------------------------------
-    def _build_entities(self, desired, names, entities, facts, relations) -> None:
+    def _build_entities(self, desired, names, entities, facts, relations, skill_entities=None) -> None:
+        skill_entities = skill_entities or {}
         by_entity: Dict[str, List[Dict[str, Any]]] = {}
         for f in facts.values():
             for eid in f.get("entities", []):
@@ -513,9 +525,19 @@ class ObsidianMirror:
             if old:
                 lines += ["", "## History (superseded / archived)", ""]
                 lines += [f"- ~~{neutralise(f['text'])}~~ _{f['status']}_" for f in old]
+            sk = skill_entities.get(eid)
+            if sk:
+                lines += ["", "## Skill", "", neutralise(sk.get("description", "")), "",
+                          f"**Version** v{sk.get('version', 1)} · **Status** {neutralise(sk.get('status', 'unknown'))} · "
+                          f"**Tests** {neutralise(sk.get('tests', 'n/a'))} · **Updated** {_day(sk.get('updated', ''))}"]
+                if sk.get("history"):
+                    lines += [""] + [f"- v{h.get('version')} · {neutralise(h.get('status', ''))} · {_day(h.get('created', ''))}"
+                                     for h in sk["history"]]
             gen = {"prometheus_id": eid, "type": "entity", "entity_type": ent["type"],
                    "importance": round(float(ent.get("importance", 0)), 3), "facts": len(active),
                    "first_seen": first if _DAY_RE.match(first) else _day(ent.get("created", "")), "source": "prometheus"}
+            if sk:
+                gen["skill_version"], gen["skill_status"] = sk.get("version", 1), str(sk.get("status", "unknown"))
             tags = ["prometheus", "prometheus/entity", f"prometheus/{ent['type']}"]
             desired[names.rel(key)] = (gen, tags, [neutralise(a) for a in ent.get("aliases", [])], "\n".join(lines))
 

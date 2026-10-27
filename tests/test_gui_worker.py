@@ -160,19 +160,32 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(asked, [])
         self.assertEqual(len(self.dispatched), 1)
 
-    def test_a_synthesized_tool_file_requires_confirmation(self):
-        probe = os.path.join(g._prometheus_core.DYNAMIC_TOOLS_DIR, "zz_worker_probe.py")
-        with open(probe, "w") as f:
-            f.write("def execute(**k):\n    return 1\n")
+    def test_running_a_skill_needs_confirmation_unless_docker_is_the_sandbox(self):
+        import shutil
+        import skill_forge
+        prom = g._prometheus_core
+        tmp = tempfile.mkdtemp(prefix="gui_skill_")
+        saved = prom.skill_registry
+        reg = skill_forge.SkillRegistry(os.path.join(tmp, "s"), os.path.join(tmp, "r.json"), sandbox="subprocess")
+        self.assertEqual(reg.propose("zz_probe", "probe", "def execute(**k):\n    return 1\n",
+                                     "def test_a():\n    assert skill.execute() == 1\n")["status"], "installed")
+        prom.skill_registry = reg
         try:
-            w, _, _, _ = self.make([[chunk(tool_calls=[tc(0, "c1", "zz_worker_probe", "{}")])], [chunk("ok")]])
+            self.assertIn("zz_probe", prom.DANGEROUS_TOOLS)       # a registered skill, no Docker: ask first
+            self.assertIn("run_skill", prom.DANGEROUS_TOOLS)
+            self.assertNotIn("not_a_skill", prom.DANGEROUS_TOOLS)
+            w, _, _, _ = self.make([[chunk(tool_calls=[tc(0, "c1", "zz_probe", "{}")])], [chunk("ok")]])
             asked = []
             w.confirmation_requested.connect(lambda n, a: (asked.append(n), w.provide_confirmation(False)))
             w.run()
-            self.assertEqual(asked, ["zz_worker_probe"])
+            self.assertEqual(asked, ["zz_probe"])
             self.assertEqual(self.dispatched, [])
+            reg.sandbox = "docker"                                 # a real boundary: no prompt needed
+            self.assertNotIn("zz_probe", prom.DANGEROUS_TOOLS)
+            self.assertNotIn("run_skill", prom.DANGEROUS_TOOLS)
         finally:
-            os.remove(probe)
+            prom.skill_registry = saved
+            shutil.rmtree(tmp, ignore_errors=True)
 
     # ---------------------------------------------------------------- stopping
     def test_stop_mid_tool_loop_leaves_a_valid_history(self):

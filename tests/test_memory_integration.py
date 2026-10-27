@@ -58,8 +58,8 @@ class Redirected(unittest.TestCase):
             else:
                 os.environ[k] = v
 
-    def dispatch(self, name, **args):
-        result, _ = capture(p.dispatch_tool, name, args)
+    def dispatch(self, _tool, **args):
+        result, _ = capture(p.dispatch_tool, _tool, args)
         return result
 
     def make_vault(self, name="vault"):

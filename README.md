@@ -63,6 +63,29 @@ folder; your own text below each note's generated block, and any frontmatter pro
 every export; an edit *inside* the generated block is left alone and reported. Notes dropped into
 `Prometheus/Inbox/` are ingested as unverified facts. Exporting from the model needs your confirmation.
 
+## Skills and self-modification (Skill Forge, patch gate)
+
+**Teaching itself new skills.** Prometheus can write a new skill (a small Python module) for itself, but
+nothing is installed until it has earned it (`skill_forge.py`): the code and its tests pass a static policy
+gate (an allowlist of pure-computation imports; no `eval`/`open`/`getattr`/dunder tricks; no work at import
+time), then the model's own tests must pass **in an isolated process** (Docker with no network and a read-only
+filesystem when a Docker engine is running, otherwise a resource-limited subprocess). Accepted skills are
+versioned, can be rolled back (the old version's tests are re-run first), and run through the same sandbox -
+never imported into Prometheus itself. A skill whose file is edited behind the registry's back refuses to
+run. Installing needs your confirmation; so does running a skill unless Docker is the sandbox. Commands:
+`/skills`, `/skills rollback <name>`, `/skills off|on <name>`.
+
+**Patching its own source.** Every `propose_code_change` is checked automatically before it is even saved,
+and again before it is applied (`patch_gate.py`): it must parse, keep the functions and safety lists the rest
+of the system depends on (`DANGEROUS_TOOLS`...), not be a wholesale rewrite, and the project's own test suite
+must show **no new failures and no vanished tests** when run on a patched *copy* with a stripped environment
+(no API keys). A rejected proposal comes back with the reasons. Applying a patch still needs your approval.
+This is a net for accidents, not proof a patch is good: the suite only catches what it tests.
+`PROMETHEUS_PATCH_GATE=off` disables it (an explicit operator decision).
+
+Honest limits: the policy gate is a filter, not a security boundary; without Docker the sandbox is resource
+limits only. Docker must be an *engine that answers*, not just the `docker` command being installed.
+
 ## Desktop GUI
 
 `gui_orb.py` is a PyQt6 + OpenGL HUD around the same core: a streaming chat console with markdown and
@@ -91,7 +114,8 @@ those need a real display and devices.
 ## Known limits
 
 - The destructive-command filter ("Conscience") is a tripwire for a few shell patterns, not a sandbox.
-- Synthesized tools run inside the main process; they need operator confirmation, but they are not sandboxed.
+- Skills run in an isolated process, but without a Docker engine that isolation is resource limits only (no network or filesystem boundary) - hence the per-run confirmation.
+- The patch gate needs the project's tests to be present and runnable; without them a self-patch is refused.
 - Streaming responses are not counted in the usage log.
 - The GUI's shader, microphone, speaker and Whisper paths are not covered by automated tests.
 - Entity extraction without a model is rule-based (capitalised phrases, wikilinks, #tags, known names): it favours precision over recall, so pass entities explicitly when you know them.

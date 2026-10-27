@@ -214,6 +214,28 @@ class WindowTests(unittest.TestCase):
         w.handle_gui_slash_command("/recall")
         self.assertIn("Usage: /recall", self.last_entry(w))
 
+    def test_skills_command_lists_and_rolls_back(self):
+        import skill_forge
+        prom = g._prometheus_core
+        saved = prom.skill_registry
+        reg = skill_forge.SkillRegistry(os.path.join(self.tmp, "skills"), os.path.join(self.tmp, "skills.json"),
+                                        sandbox="subprocess")
+        prom.skill_registry = reg
+        try:
+            w = self.make()
+            w.handle_gui_slash_command("/skills")
+            self.assertIn("No skills yet", self.last_entry(w))
+            for v in (1, 2):
+                reg.propose("valuer", f"Returns {v}", f"def execute(**k):\n    return {v}\n",
+                            f"def test_v():\n    assert skill.execute() == {v}\n")
+            w.handle_gui_slash_command("/skills")
+            self.assertIn("valuer  v2  active", self.last_entry(w))
+            w.handle_gui_slash_command("/skills rollback valuer")
+            self.assertIn("success", self.last_entry(w))
+            self.assertEqual(reg.get("valuer")["version"], 1)
+        finally:
+            prom.skill_registry = saved
+
     def test_obsidian_vault_setting_is_applied_at_startup_and_saved_from_settings(self):
         vault = os.path.join(self.tmp, "myvault")
         os.makedirs(vault)

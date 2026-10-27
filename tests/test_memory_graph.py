@@ -55,6 +55,10 @@ class ExtractionTests(unittest.TestCase):
         self.assertIn("Prometheus", self.names("Prometheus will send angles.", known=["Prometheus"]))
         self.assertIn("Prometheus", self.names("we run Prometheus daily"))   # mid-sentence: accepted
 
+    def test_a_capital_after_a_colon_starts_a_clause_not_a_name(self):
+        self.assertEqual(self.names("Skill 'adder' installed: Adds two numbers"), set())
+        self.assertEqual(self.names("Note to self; Remember the deadline"), set())
+
     def test_wikilinks_and_tags(self):
         got = mg.extract_entities("see [[Memory Bug|the bug]] and #robotics-arm now")
         self.assertIn(("Memory Bug", "other"), got)

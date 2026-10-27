@@ -206,6 +206,32 @@ class ExportTests(VaultCase):
         self.assertIn("- [ ] CAD", task)
         self.assertIn("buy servos", task)
 
+    def test_a_skill_that_is_also_an_entity_is_one_note_not_two(self):
+        self.g.add_fact("Skill 'adder' installed", entities=[{"name": "adder", "type": "skill"}], auto_extract=False)
+        skill = {"name": "adder", "description": "Adds two numbers", "version": 2, "status": "active",
+                 "tests": "2/2 passing", "updated": "2026-10-27T10:00:00",
+                 "history": [{"version": 1, "status": "superseded", "created": "2026-10-26T10:00:00"}]}
+        rep = self.m.export(self.g.export_snapshot(), now=NOW, skills=[skill])
+        self.assertTrue(rep.ok, rep.errors)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "Skills", "adder.md")))
+        note = self.note("Entities/adder.md")
+        self.assertIn("## Skill", note)
+        self.assertIn("Adds two numbers", note)
+        self.assertIn("**Version** v2", note)
+        self.assertIn("skill_version: 2", note)
+        self.assertIn("prometheus/skill", note)
+        self.assertIn("[[Prometheus/Entities/adder|adder]]", self.note("Index.md"))   # the Index links the merged note
+        for path in all_files(self.root):                                              # and no link anywhere dangles
+            if path.endswith(".md"):
+                for target in re.findall(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]", read(path)):
+                    self.assertTrue(os.path.exists(os.path.join(self.vault, *target.split("/")) + ".md"), target)
+
+    def test_a_skill_without_an_entity_still_gets_its_own_note(self):
+        skill = {"name": "orphan_skill", "description": "No entity", "version": 1, "status": "active",
+                 "tests": "1/1 passing", "updated": "2026-10-27T10:00:00", "history": []}
+        self.m.export(self.g.export_snapshot(), now=NOW, skills=[skill])
+        self.assertIn("No entity", self.note("Skills/orphan_skill.md"))
+
     def test_a_large_graph_exports_quickly(self):
         with self.g.batch():
             for i in range(300):
