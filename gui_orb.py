@@ -1336,6 +1336,12 @@ class SettingsDialog(QDialog):
         self.overrides_edit.setToolTip("Use a different model for a provider: name=model, comma-separated.")
         form.addRow("Model overrides:", self.overrides_edit)
 
+        self.obsidian_edit = QLineEdit(config.get("obsidian_vault", ""))
+        self.obsidian_edit.setPlaceholderText("C:\\Users\\you\\Documents\\MyVault   (blank = off)")
+        self.obsidian_edit.setToolTip("Your Obsidian vault folder (the one containing .obsidian). Prometheus only ever "
+                                      "writes inside a 'Prometheus' folder in it. Use /obsidian to export.")
+        form.addRow("Obsidian vault:", self.obsidian_edit)
+
         self.intro_chk = QCheckBox()
         self.intro_chk.setChecked(bool(config.get("play_intro", True)))
         form.addRow("Star-birth intro on launch:", self.intro_chk)
@@ -1360,6 +1366,7 @@ class SettingsDialog(QDialog):
         self.config.set("fallback_models", parse_csv(self.fallback_edit.text()))
         self.config.set("provider_priority", parse_csv(self.priority_edit.text()))
         self.config.set("model_overrides", parse_model_overrides(self.overrides_edit.text()))
+        self.config.set("obsidian_vault", self.obsidian_edit.text().strip())
         self.config.set("play_intro", self.intro_chk.isChecked())
         self.config.set("max_console_entries", self.console_cap_spin.value())
         self.config.save()
@@ -1370,6 +1377,7 @@ class PrometheusMainWindow(QMainWindow):
         super().__init__()
         self.config = AppConfig()
         router_notes = apply_router_settings(self.config)
+        _prometheus_core.set_obsidian_vault(self.config.get("obsidian_vault", ""))
         self.setWindowTitle("PROMETHEUS — SOVEREIGN STELLAR HUD v5.0")
         self.resize(1420, 880)
         self.setMinimumSize(1120, 700)
@@ -1738,6 +1746,7 @@ class PrometheusMainWindow(QMainWindow):
                 speaker.set_rate(self.config.get("speech_rate", 0))
             for note in apply_router_settings(self.config):
                 self.append_console("SYSTEM", note, THEME["amber"])
+            _prometheus_core.set_obsidian_vault(self.config.get("obsidian_vault", ""))
             self.lbl_route.setText(f"ROUTE: {self.router.provider.upper()} / {self.router.default_model}")
             self.append_console("SYSTEM", "Settings saved.", THEME["mint"])
 
@@ -2039,6 +2048,50 @@ class PrometheusMainWindow(QMainWindow):
             text = "<br/>".join(f"[{score:.2f}] {self._console_text(doc['content'])}" for score, doc in hits) or "No matches."
             self.append_console("RAG", text, THEME["cyan"], html_ok=True)
             return True
+        if slash == "/graph":
+            view = _prometheus_core.tool_memory_graph_view(arg)
+            if view.get("status") != "success":
+                self.append_console("GRAPH", view.get("message", "?"), THEME["amber"])
+            elif arg:
+                lines = [f"{view['entity']} ({view['type']}, importance {view['importance']:.2f})"]
+                lines += [f"• {f}" for f in view["facts"]] or ["(no active facts)"]
+                lines += [f"{r['source']} —{r['relation']}→ {r['target']}" for r in view["relations"]]
+                self.append_console("GRAPH", "\n".join(lines), THEME["cyan"])
+            else:
+                lines = [json.dumps(view["stats"], default=str), "Most important:"]
+                lines += [f"{e['importance']:.2f}  {e['name']} ({e['type']})" for e in view["top_entities"]]
+                self.append_console("GRAPH", "\n".join(lines), THEME["cyan"])
+            return True
+        if slash == "/recall":
+            if not arg:
+                self.append_console("SYSTEM", "Usage: /recall <query>", THEME["amber"])
+                return True
+            hits = _prometheus_core.memory_graph.recall(arg, top_k=6, touch=False)
+            body = "\n".join(f"[{h['score']:.2f}] {h['text']}" + ("  [unverified]" if h["untrusted"] else "") for h in hits)
+            self.append_console("RECALL", body or "Nothing relevant in memory.", THEME["cyan"])
+            return True
+        if slash == "/obsidian":
+            sub_cmd = (arg.split() or ["export"])[0].lower()
+            if sub_cmd == "ingest":
+                res = _prometheus_core.tool_obsidian_ingest()
+            elif sub_cmd == "status":
+                try:
+                    mirror = _prometheus_core.get_obsidian_mirror()
+                except Exception as e:
+                    res = {"status": "error", "message": str(e)}
+                else:
+                    res = ({"status": "error", "message": _prometheus_core._NO_VAULT_HELP} if mirror is None else
+                           {"status": "ok", "vault": mirror.vault, "folder": mirror.root,
+                            "has_.obsidian": mirror.has_vault_marker, "graph": _prometheus_core.memory_graph.stats()})
+            elif sub_cmd in ("export", "sync", "force"):
+                res = _prometheus_core.tool_export_obsidian(force=(sub_cmd == "force"))
+            else:
+                self.append_console("SYSTEM", "Usage: /obsidian [export|force|ingest|status]", THEME["amber"])
+                return True
+            ok = res.get("status") in ("success", "ok")
+            self.append_console("OBSIDIAN", json.dumps(res, indent=2, default=str),
+                                THEME["mint"] if ok else THEME["amber"])
+            return True
         if slash == "/clear":
             self.clear_console()
             return True
@@ -2051,7 +2104,8 @@ class PrometheusMainWindow(QMainWindow):
         if slash == "/help":
             self.append_console(
                 "SYSTEM",
-                "/memory &middot; /telemetry &middot; /providers &middot; /rag &lt;query&gt; &middot; /settings &middot; "
+                "/memory &middot; /graph [entity] &middot; /recall &lt;query&gt; &middot; /obsidian [export|status|ingest] &middot; "
+                "/telemetry &middot; /providers &middot; /rag &lt;query&gt; &middot; /settings &middot; "
                 "/clear &middot; /newsession &middot; /help &mdash; /council and /forge remain CLI-only for now.",
                 THEME["amber"],
                 html_ok=True,  # static markup written above - nothing dynamic in it

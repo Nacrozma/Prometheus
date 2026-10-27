@@ -36,6 +36,7 @@ DEFAULTS: Dict[str, Any] = {
     "play_intro": True,               # the star-birth startup animation
     "max_console_entries": 400,
     "window_geometry": "",            # base64 QByteArray from saveGeometry()
+    "obsidian_vault": "",             # path to an Obsidian vault folder; "" = use PROMETHEUS_OBSIDIAN_VAULT or off
 }
 
 _VOICE_RE = re.compile(r"^[A-Za-z0-9\-]{5,80}$")
@@ -76,6 +77,9 @@ def _coerce(key: str, value: Any) -> Any:
             return out
         if key == "window_geometry":
             return value if isinstance(value, str) else default
+        if key == "obsidian_vault":
+            v = str(value).strip() if isinstance(value, str) else ""
+            return v if len(v) <= 500 and not re.search(r"[\x00-\x1f]", v) else default
         if key == "version":
             return DEFAULTS["version"]
     except (TypeError, ValueError):

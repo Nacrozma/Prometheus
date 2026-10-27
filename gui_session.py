@@ -20,59 +20,15 @@ provider. These helpers fix those three things:
 import json
 import logging
 import os
-import tempfile
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
+
+from state_io import atomic_write_json, quarantine_file  # shared crash-safe helpers (re-exported here)
 
 logger = logging.getLogger("PrometheusGUI")
 
 VALID_ROLES = {"user", "assistant", "tool", "system"}
 TOOL_RESULT_CHAR_CAP = 6000     # one giant tool result must not evict the rest of the context
 DEFAULT_MAX_MESSAGES = 80       # roughly 40 turns
-
-
-def quarantine_file(path: str) -> Optional[str]:
-    """Move an unreadable state file to <path>.corrupt.<timestamp>. Returns the
-    new path, or None if it could not be moved."""
-    dest = f"{path}.corrupt.{int(time.time())}"
-    try:
-        os.replace(path, dest)
-        logger.error(f"Corrupt file moved aside: {dest}")
-        return dest
-    except OSError as e:
-        logger.error(f"Could not move corrupt file {path} aside: {e}")
-        return None
-
-
-def atomic_write_json(path: str, data: Any, indent: int = 2) -> bool:
-    """Write JSON to a temp file in the same directory, fsync it, then
-    os.replace() it over the live file - the live file is never partial."""
-    temp_path: Optional[str] = None
-    try:
-        dir_name = os.path.dirname(os.path.abspath(path))
-        fd, temp_path = tempfile.mkstemp(dir=dir_name, prefix="gui_", suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=indent)
-            f.flush()
-            os.fsync(f.fileno())
-        for attempt in range(5):
-            try:
-                os.replace(temp_path, path)
-                break
-            except PermissionError:  # Windows: target briefly held open elsewhere
-                if attempt == 4:
-                    raise
-                time.sleep(0.05 * (attempt + 1))
-        temp_path = None
-        return True
-    except Exception as e:
-        logger.error(f"Atomic write failed for {path}: {e}")
-        if temp_path:
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
-        return False
 
 
 def cap_text(text: str, cap: int = TOOL_RESULT_CHAR_CAP) -> str:

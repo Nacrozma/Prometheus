@@ -43,6 +43,26 @@ python tests/stress_state.py --legacy   # simulates the old behaviour (no lock, 
 
 `--legacy` is a simulation of the earlier behaviour, not the earlier code itself.
 
+## Memory graph and Obsidian
+
+Long-term memory is a typed knowledge graph (`memory_graph.py`, stored in `memory_graph.json`): **entities**
+(people, projects, tools, topics), **facts** linked to the entities they mention, and typed **relations**
+between entities. Every fact records where it was learned and how confident/important it is. Importance
+fades with time unless a fact is recalled, near-duplicates are merged (facts that differ in a number or a
+negation are kept apart), and weak facts are archived, never deleted. Facts from the web or imported notes
+are flagged *unverified* and never appear in the prompt's standing memory section.
+
+The model records facts with `update_memory` (passing entities and relations when it knows them) and reads
+them with `recall_memory` / `memory_graph_view`; the best matches are also added to every prompt
+automatically. Commands: `/graph [entity]`, `/recall <query>`.
+
+**Obsidian.** Set `PROMETHEUS_OBSIDIAN_VAULT` (or the vault path in the GUI settings) to your vault folder,
+then run `/obsidian`. Prometheus writes linked notes into `<vault>/Prometheus/` (entities, a note per day,
+lessons, skills, the current task) so Obsidian's Graph View shows the map. It never writes outside that
+folder; your own text below each note's generated block, and any frontmatter properties you add, survive
+every export; an edit *inside* the generated block is left alone and reported. Notes dropped into
+`Prometheus/Inbox/` are ingested as unverified facts. Exporting from the model needs your confirmation.
+
 ## Desktop GUI
 
 `gui_orb.py` is a PyQt6 + OpenGL HUD around the same core: a streaming chat console with markdown and
@@ -74,3 +94,5 @@ those need a real display and devices.
 - Synthesized tools run inside the main process; they need operator confirmation, but they are not sandboxed.
 - Streaming responses are not counted in the usage log.
 - The GUI's shader, microphone, speaker and Whisper paths are not covered by automated tests.
+- Entity extraction without a model is rule-based (capitalised phrases, wikilinks, #tags, known names): it favours precision over recall, so pass entities explicitly when you know them.
+- The Obsidian export has been tested against the file layout, not against a running Obsidian: open Graph View once and check it looks right.

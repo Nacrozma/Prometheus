@@ -70,6 +70,15 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(again["future_setting"], {"a": 1})
         self.assertEqual([n for n in os.listdir(self.dir) if n.endswith(".tmp")], [])
 
+    def test_obsidian_vault_setting_is_validated(self):
+        with open(self.path, "w") as f:
+            json.dump({"obsidian_vault": "C:\\Users\\me\\Vault"}, f)
+        self.assertEqual(cfg.AppConfig(self.path)["obsidian_vault"], "C:\\Users\\me\\Vault")
+        for bad in ("evil\x00path", "x" * 501, 7, None, ["a"]):
+            c = cfg.AppConfig(self.path)
+            c.set("obsidian_vault", bad)
+            self.assertEqual(c["obsidian_vault"], "")
+
     def test_parse_helpers(self):
         self.assertEqual(cfg.parse_csv("a, b,, c ,"), ["a", "b", "c"])
         self.assertEqual(cfg.parse_model_overrides("groq=llama-x, bad, =nope, or=meta/llama=2, empty="),

@@ -32,3 +32,10 @@ prometheus_config.json
 gui_crash.log
 prom_thought.txt
 prom_thought.txt.*
+
+# Memory graph, skills and audit state (personal data / machine-specific)
+memory_graph.json
+skills.json
+tool_stats.json
+audit.jsonl
+.prometheus_undo/

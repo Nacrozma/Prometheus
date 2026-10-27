@@ -61,6 +61,11 @@ class WindowTests(unittest.TestCase):
         self.windows = []
 
     def tearDown(self):
+        prom = g._prometheus_core
+        if getattr(self, "_graph_saved", None) is not None:
+            prom.memory_graph = self._graph_saved
+        prom.set_obsidian_vault(None)
+        os.environ.pop("PROMETHEUS_OBSIDIAN_VAULT", None)
         for w in self.windows:
             try:
                 w.close()
@@ -77,6 +82,14 @@ class WindowTests(unittest.TestCase):
         w = g.PrometheusMainWindow()
         self.windows.append(w)
         return w
+
+    def use_temp_graph(self):
+        """Keep these tests off the real memory_graph.json in the repo folder."""
+        import memory_graph as mg
+        prom = g._prometheus_core
+        self._graph_saved = prom.memory_graph
+        prom.memory_graph = mg.MemoryGraph(os.path.join(self.tmp, "graph.json"))
+        return prom.memory_graph
 
     def last_entry(self, w):
         return w._console_entries[-1]
@@ -164,6 +177,53 @@ class WindowTests(unittest.TestCase):
         w._adapt_test_active = False
         w.check_idle_state()
         self.assertEqual(w.sun_widget.state, 0)
+
+    # ---------------------------------------------------------------- memory graph / Obsidian
+    def test_obsidian_commands_without_and_with_a_vault(self):
+        graph = self.use_temp_graph()
+        w = self.make()
+        self.assertTrue(w.handle_gui_slash_command("/obsidian status"))
+        self.assertIn("No Obsidian vault", self.last_entry(w))
+
+        vault = os.path.join(self.tmp, "vault")
+        os.makedirs(os.path.join(vault, ".obsidian"))
+        w.config.set("obsidian_vault", vault)
+        g._prometheus_core.set_obsidian_vault(w.config.get("obsidian_vault"))
+        graph.add_fact("Prometheus drives the Robotic Arm", entities=[{"name": "Prometheus", "type": "project"}, "Robotic Arm"])
+        self.assertTrue(w.handle_gui_slash_command("/obsidian"))
+        self.assertIn("created", self.last_entry(w))
+        self.assertTrue(os.path.exists(os.path.join(vault, "Prometheus", "Entities", "Prometheus.md")))
+        self.assertTrue(w.handle_gui_slash_command("/obsidian status"))
+        self.assertIn(os.path.realpath(vault).replace("/", "/"), self.last_entry(w).replace("&#x27;", "'"))
+        self.assertTrue(w.handle_gui_slash_command("/obsidian bogus"))
+        self.assertIn("Usage: /obsidian", self.last_entry(w))
+
+    def test_graph_and_recall_commands(self):
+        graph = self.use_temp_graph()
+        w = self.make()
+        graph.add_fact("Servo torque must exceed <b>the</b> load", entities=[{"name": "Servo", "type": "tool"}])
+        w.handle_gui_slash_command("/graph")
+        self.assertIn("Most important", self.last_entry(w))
+        w.handle_gui_slash_command("/graph servo")
+        self.assertIn("Servo", self.last_entry(w))
+        self.assertNotIn("<b>", self.last_entry(w))               # fact text is escaped in the console
+        w.handle_gui_slash_command("/graph ghost")
+        self.assertIn("No entity", self.last_entry(w))
+        w.handle_gui_slash_command("/recall servo torque")
+        self.assertIn("torque", self.last_entry(w))
+        w.handle_gui_slash_command("/recall")
+        self.assertIn("Usage: /recall", self.last_entry(w))
+
+    def test_obsidian_vault_setting_is_applied_at_startup_and_saved_from_settings(self):
+        vault = os.path.join(self.tmp, "myvault")
+        os.makedirs(vault)
+        w = self.make({"obsidian_vault": vault})
+        self.assertEqual(g._prometheus_core.get_obsidian_mirror().vault, os.path.realpath(vault))
+        dlg = g.SettingsDialog(w.config)
+        self.assertEqual(dlg.obsidian_edit.text(), vault)
+        dlg.obsidian_edit.setText("   ")
+        dlg.apply_to_config()
+        self.assertEqual(read_json(self.cfg_path)["obsidian_vault"], "")
 
     # ---------------------------------------------------------------- confirmation dialog
     def test_confirmation_dialog_is_plain_text_and_shows_the_whole_payload(self):
