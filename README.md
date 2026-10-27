@@ -106,6 +106,27 @@ store are roughly on par (both lexical; neither can match a query with no shared
 for "orb") - the graph's advantages are structure, decay, dedupe and provenance, which this metric does not
 measure.
 
+## Autonomy guard rails (permissions, audit log, undo)
+
+`safety.py` wraps what Prometheus is allowed to do on its own:
+
+- **permissions.json** (optional, operator-owned; see `permissions.example.json`) can *deny* tools outright,
+  require confirmation for extra tools (`ask`), and confine `write_file`/`edit_file` to listed folders
+  (`write_scopes`). It can only make things stricter - an empty or missing file never loosens a built-in
+  confirmation. A malformed file is reported (`/audit`) and the built-in rules stand. The GUI's explicit
+  "auto-approve" setting is the operator's own switch and still overrides confirmations.
+- **audit.jsonl** records every tool call (and every declined confirmation): tool, redacted arguments, outcome,
+  latency. Entries are hash-chained, so editing, deleting or reordering a line is detected by `/audit`.
+  Secrets (key-named fields, common key formats) are masked and long values truncated.
+- **/undo** restores the previous content of the last file changed by `write_file`/`edit_file` (or removes a
+  file Prometheus created). It refuses if the file was changed again afterwards, so it never discards your edits.
+- The workspace write tools cannot touch Prometheus's own modules, `permissions.json`, `audit.jsonl`,
+  `skills.json`, `tool_stats.json` or the undo journal: changing those is the operator's job.
+
+Honest limits: the audit chain *detects* tampering but a process that can rewrite the whole file can still
+replace it; undo covers the two workspace file tools, not shell commands; a shell command is only a tripwire
+(see Known limits).
+
 ## Desktop GUI
 
 `gui_orb.py` is a PyQt6 + OpenGL HUD around the same core: a streaming chat console with markdown and

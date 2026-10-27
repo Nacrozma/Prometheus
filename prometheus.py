@@ -57,6 +57,7 @@ from memory_graph import MemoryGraph
 from obsidian_memory import ObsidianMirror, VaultError
 from skill_forge import SkillRegistry
 import patch_gate
+from safety import Policy, AuditLog, UndoJournal
 from reflection import ToolStats, lesson_from_rejection, excerpt as _excerpt
 
 try:
@@ -113,6 +114,9 @@ SANDBOX_DIR = os.path.join(BASE_DIR, "sandbox_runs")
 MEMORY_GRAPH_FILE = os.path.join(BASE_DIR, "memory_graph.json")
 SKILLS_FILE = os.path.join(BASE_DIR, "skills.json")
 TOOL_STATS_FILE = os.path.join(BASE_DIR, "tool_stats.json")
+PERMISSIONS_FILE = os.path.join(BASE_DIR, "permissions.json")
+AUDIT_FILE = os.path.join(BASE_DIR, "audit.jsonl")
+UNDO_DIR = os.path.join(BASE_DIR, ".prometheus_undo")
 
 SESSIONS_DIR = os.path.join(BASE_DIR, "sessions")
 SCHEDULE_FILE = os.path.join(BASE_DIR, "schedule.json")
@@ -1858,6 +1862,9 @@ except Exception as _graph_err:
     logger.warning(f"Legacy memory import into the graph failed: {_graph_err}")
 
 tool_stats = ToolStats(TOOL_STATS_FILE)  # per-tool reliability (reflection.py)
+policy = Policy(PERMISSIONS_FILE)         # operator-owned, stricter-only rules (safety.py)
+audit_log = AuditLog(AUDIT_FILE)          # hash-chained record of every tool call
+undo_journal = UndoJournal(UNDO_DIR)      # previous content of files the workspace tools change
 
 OBSIDIAN_VAULT_ENV = "PROMETHEUS_OBSIDIAN_VAULT"
 _obsidian_vault_override: Optional[str] = None
@@ -3283,7 +3290,11 @@ def tool_sculpt_workspace(applications: List[str]) -> dict:
 # couldn't touch files. These close that gap. Both writing tools refuse to
 # touch prometheus.py / gui_orb.py: self-modification has its own explicit
 # two-step propose/apply pipeline and must not be bypassed through here.
-WORKSPACE_PROTECTED_FILES = {"prometheus.py", "gui_orb.py"}
+WORKSPACE_PROTECTED_FILES = {"prometheus.py", "gui_orb.py", "gui_config.py", "gui_markdown.py", "gui_birth.py",
+                             "gui_session.py", "state_io.py", "memory_graph.py", "obsidian_memory.py", "skill_forge.py",
+                             "patch_gate.py", "reflection.py", "safety.py"}
+# operator-owned safety state: the model must not be able to loosen its own rules or rewrite its own audit trail
+WORKSPACE_PROTECTED_STATE = {"permissions.json", "audit.jsonl", "skills.json", "tool_stats.json"}
 MAX_SHELL_OUTPUT_CHARS = 8000
 
 
@@ -3315,6 +3326,14 @@ def _is_secret_file(path: str) -> bool:
 
 
 def _guard_protected(path: str) -> None:
+    base_name = os.path.basename(path).lower()
+    if base_name in WORKSPACE_PROTECTED_STATE or base_name.startswith("audit.jsonl") \
+            or os.path.realpath(path).startswith(os.path.realpath(UNDO_DIR) + os.sep):
+        raise PermissionError(f"'{os.path.basename(path)}' is Prometheus's own safety/state data and is off-limits to the workspace tools.")
+    if policy.write_scopes:
+        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(BASE_DIR))
+        if not policy.path_allowed(rel):
+            raise PermissionError(f"permissions.json only allows writing under: {', '.join(policy.write_scopes)}")
     if os.path.basename(path).lower() in WORKSPACE_PROTECTED_FILES:
         raise PermissionError(
             f"'{os.path.basename(path)}' is Prometheus's own source — use the "
@@ -3332,8 +3351,14 @@ def tool_write_file(path: str, content: str, append: bool = False) -> dict:
         _guard_protected(resolved)
         os.makedirs(os.path.dirname(resolved) or ".", exist_ok=True)
         mode = "a" if append else "w"
-        with open(resolved, mode, encoding="utf-8") as f:
-            f.write(content)
+        undo_id = undo_journal.snapshot(resolved)
+        try:
+            with open(resolved, mode, encoding="utf-8") as f:
+                f.write(content)
+        except BaseException:
+            undo_journal.abort(undo_id)
+            raise
+        undo_journal.commit(undo_id)
         bytes_written = len(content.encode("utf-8"))
         action = "appended to" if append else "wrote"
         print(f"{tag('WORKSPACE', Color.NEON_GREEN)} {action} {resolved} ({bytes_written} bytes)")
@@ -3363,8 +3388,14 @@ def tool_edit_file(path: str, old_string: str, new_string: str, replace_all: boo
             return {"status": "error", "message": f"old_string matches {count} times — pass replace_all=true "
                                                  "or include more surrounding context to make it unique."}
         updated = current.replace(old_string, new_string) if replace_all else current.replace(old_string, new_string, 1)
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(updated)
+        undo_id = undo_journal.snapshot(resolved)
+        try:
+            with open(resolved, "w", encoding="utf-8") as f:
+                f.write(updated)
+        except BaseException:
+            undo_journal.abort(undo_id)
+            raise
+        undo_journal.commit(undo_id)
         print(f"{tag('WORKSPACE', Color.NEON_GREEN)} edited {resolved} ({count} replacement{'s' if count > 1 else ''})")
         return {"status": "success", "path": resolved, "replacements": count if replace_all else 1}
     except Exception as e:
@@ -3514,7 +3545,7 @@ def _self_patch_targets() -> Dict[str, str]:
 PATCH_GATE_SYMBOLS = {
     "prometheus.py": {"dispatch_tool", "main", "TOOLS", "DANGEROUS_TOOLS", "load_memory", "save_memory_data",
                       "update_memory_fact", "build_context_block", "llm_router", "conscience_engine",
-                      "memory_graph", "skill_registry", "tool_stats", "tool_propose_code_change", "tool_apply_pending_patch",
+                      "memory_graph", "skill_registry", "tool_stats", "policy", "audit_log", "undo_journal", "tool_propose_code_change", "tool_apply_pending_patch",
                       "handle_slash_command", "SYSTEM_PROMPT", "adaptation_engine"},
     "gui_orb.py": {"PrometheusMainWindow", "PrometheusWorker", "SolarSunWidget", "SettingsDialog", "install_crash_handler"},
 }
@@ -3966,6 +3997,8 @@ class _DangerousToolRegistry(set):
         if set.__contains__(self, name):
             return True
         try:
+            if policy.requires_confirmation(str(name)):
+                return True
             if name == "run_skill" or skill_registry.has(str(name)):
                 return not skill_registry.strongly_sandboxed
         except Exception:
@@ -4137,9 +4170,22 @@ def dispatch_tool(name: str, arguments: Union[Dict[str, Any], str]) -> Dict[str,
     that keeps failing the same way produces a lesson. Names the model invented are all counted under
     one key, so a model can't grow the stats file by inventing tool names."""
     started = time.monotonic()
-    result = _dispatch_tool_inner(name, arguments)
+    label = str(name)
+    denied = policy.check(label)
+    result = ({"status": "refused", "reason": denied} if denied else _dispatch_tool_inner(name, arguments))
     try:
-        label = str(name)
+        audit_args = arguments
+        if isinstance(arguments, str):
+            try:
+                audit_args = json.loads(arguments)
+            except Exception:
+                audit_args = {"raw_input": arguments}
+        audit_log.record(label, audit_args, str(result.get("status", "ok")) if isinstance(result, dict) else "ok",
+                         (result.get("reason") or result.get("message") or "") if isinstance(result, dict) else "",
+                         time.monotonic() - started)
+    except Exception as e:
+        logger.warning(f"Audit failed (the tool result is unaffected): {e}")
+    try:
         key = label if (label in _RESERVED_SKILL_NAMES or skill_registry.has(label)) else "__unknown_tool__"
         if tool_stats.record(key, result, time.monotonic() - started) == "failure":
             lesson = tool_stats.lesson_for(key)
@@ -4219,6 +4265,28 @@ def handle_slash_command(cmd: str) -> bool:
                     rec = json.load(f)
                 lines.append(f"  * {rec['id']}  ->  {rec['target_file']}   ({rec.get('reason', 'no reason given')})")
             print_box("PENDING PATCHES", "\n".join(lines), Color.AMBER)
+        return True
+    elif slash == "/undo":
+        words = arg.split()
+        if words and words[0] == "list":
+            rows = undo_journal.list(10)
+            print_box("UNDO JOURNAL", "\n".join(f"  {e['ts']}  {e['path']}" + ("" if e["existed"] else "  (created)") for e in rows)
+                      or "Nothing to undo.", Color.AMBER)
+        else:
+            res = undo_journal.undo()
+            print_box("UNDO", (f"{res['action']}: {res['path']}" if res["status"] == "success" else res["message"]),
+                      Color.NEON_GREEN if res["status"] == "success" else Color.ROSE)
+        return True
+    elif slash == "/audit":
+        ok, note = audit_log.verify()
+        rows = audit_log.tail(15)
+        lines = [f"integrity: {'OK' if ok else 'PROBLEM'} - {note}"] + [
+            f"  {r['ts']}  {r['tool']:<22} {r['outcome']:<10} {str(r['args'])[:60]}" for r in rows]
+        if policy.problems:
+            lines += ["", "permissions.json: " + "; ".join(policy.problems)]
+        if policy.deny or policy.ask or policy.write_scopes:
+            lines += ["", f"policy: deny={sorted(policy.deny)} ask={sorted(policy.ask)} write_scopes={policy.write_scopes}"]
+        print_box("AUDIT LOG", "\n".join(lines), Color.PURPLE if ok else Color.ROSE)
         return True
     elif slash == "/stats":
         stats = tool_get_tool_stats()
@@ -4353,6 +4421,8 @@ def handle_slash_command(cmd: str) -> bool:
             "  /graph [entity]   - Memory graph overview, or one entity's facts and links\n"
             "  /skills [rollback|off|on <name>] - Skills Prometheus has taught itself (tested, sandboxed)\n"
             "  /stats            - How reliable each tool has been, and which are failing\n"
+            "  /audit            - Verify and show the tool-call audit log and active permission rules\n"
+            "  /undo [list]      - Revert the last file change made by write_file/edit_file\n"
             "  /lessons          - What Prometheus has learned from failures and rejected proposals\n"
             "  /recall <query>   - Search long-term memory\n"
             "  /obsidian [export|force|ingest|status] - Mirror memory into your Obsidian vault\n"
@@ -4520,6 +4590,7 @@ def main():
                     if tc["name"] in DANGEROUS_TOOLS:
                         if not _confirm_tool(tc["name"], args if isinstance(args, dict) else {}):
                             print(f"{tag('REFUSED', Color.ROSE)} {tc['name']} — operator declined.")
+                            audit_log.record(tc["name"], args, "declined", "operator declined the confirmation")
                             result = {"status": "refused", "reason": "Operator declined execution."}
                         else:
                             result = dispatch_tool(tc["name"], args)

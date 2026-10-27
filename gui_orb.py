@@ -1266,6 +1266,7 @@ class PrometheusWorker(QThread):
                 if result is None:
                     if not self._confirm_tool(tool_name, args_str):
                         result = {"status": "refused", "reason": "Operator denied execution."}
+                        _prometheus_core.audit_log.record(tool_name, args, "declined", "operator declined the confirmation")
                     else:
                         self.status_updated.emit(f"ADAPTING SYSTEM LOGIC: {tool_name}", THEME["cobalt"])
                         try:
@@ -2060,6 +2061,28 @@ class PrometheusMainWindow(QMainWindow):
             lines += [f"{s['name']}  v{s['version']}  {s['status']}  {s['tests']} — {s['description']}" for s in res["skills"]] \
                 or ["No skills yet. Ask Prometheus to teach itself one."]
             self.append_console("SKILLS", "\n".join(lines), THEME["cyan"])
+            return True
+        if slash == "/stats":
+            stats = _prometheus_core.tool_get_tool_stats()
+            rows = [f"{name}: {s['calls']} calls, " + (f"{s['success_rate']:.0%} ok" if s["success_rate"] is not None else "n/a")
+                    + f", {s['avg_ms']:.0f} ms" for name, s in stats["tools"].items()] or ["No calls recorded yet."]
+            rows += [f"struggling: {s['tool']} ({s['recent_failure_rate']:.0%} recent failures) - {s['last_error']}" for s in stats["struggling"]]
+            self.append_console("TOOL RELIABILITY", "\n".join(rows), THEME["cyan"])
+            return True
+        if slash == "/lessons":
+            rows = _prometheus_core.memory_graph.list_facts(kinds=["lesson"], limit=15)
+            self.append_console("LESSONS", "\n".join(f"[{r['created'][:10]}] {r['text']}" for r in rows) or "No lessons recorded yet.", THEME["amber"])
+            return True
+        if slash == "/audit":
+            ok, note = _prometheus_core.audit_log.verify()
+            rows = [f"integrity: {'OK' if ok else 'PROBLEM'} - {note}"] + [
+                f"{r['ts']}  {r['tool']}  {r['outcome']}" for r in _prometheus_core.audit_log.tail(15)]
+            self.append_console("AUDIT", "\n".join(rows), THEME["cyan"] if ok else THEME["amber"])
+            return True
+        if slash == "/undo":
+            res = _prometheus_core.undo_journal.undo()
+            self.append_console("UNDO", f"{res['action']}: {res['path']}" if res["status"] == "success" else res["message"],
+                                THEME["mint"] if res["status"] == "success" else THEME["amber"])
             return True
         if slash == "/graph":
             view = _prometheus_core.tool_memory_graph_view(arg)

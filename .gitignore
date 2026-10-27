@@ -39,3 +39,4 @@ skills.json
 tool_stats.json
 audit.jsonl
 .prometheus_undo/
+permissions.json

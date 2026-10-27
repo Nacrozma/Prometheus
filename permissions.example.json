@@ -1,0 +1,6 @@
+{
+  "_comment": "Copy to permissions.json. Rules can only make Prometheus stricter; they never remove a built-in confirmation.",
+  "deny": {"ghost_control": "no desktop automation on this machine"},
+  "ask": ["web_search"],
+  "write_scopes": ["projects", "notes"]
+}
