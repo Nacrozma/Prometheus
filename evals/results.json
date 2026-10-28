@@ -1,6 +1,6 @@
 {
   "synthetic_benchmarks": true,
-  "quick": false,
+  "quick": true,
   "memory_recall": {
     "memory_graph": {
       "p_at_1": 0.76,
@@ -33,16 +33,16 @@
     "bad_skills": 14,
     "bad_rejected": 14
   },
-  "patch_gate": {
-    "good_patches": 3,
-    "good_accepted": 3,
-    "bad_patches": 7,
-    "bad_rejected": 7
+  "engineering": {
+    "known_answer_cases": 15,
+    "passed": 15,
+    "failures": []
   },
-  "state_stress": {
-    "rounds": 100,
-    "failed_rounds": 0,
-    "exit_code": 0,
-    "seconds": 4.5
+  "arm_ik": {
+    "poses_tried": 1674,
+    "solved": 1674,
+    "max_position_error_mm": 5e-06,
+    "workspace_max_reach_cm": 33.0,
+    "workspace_fraction_reachable": 0.758
   }
 }

@@ -58,6 +58,8 @@ from obsidian_memory import ObsidianMirror, VaultError
 from skill_forge import SkillRegistry
 import patch_gate
 from safety import Policy, AuditLog, UndoJournal
+import engineering
+import arm_sim
 from reflection import ToolStats, lesson_from_rejection, excerpt as _excerpt
 
 try:
@@ -1956,6 +1958,47 @@ def _record_lesson(text: str, entity_name: str, entity_type: str = "tool") -> No
         logger.warning(f"Could not record a lesson: {e}")
 
 
+def tool_engineering_calc(calc: str = "", params: Optional[dict] = None) -> dict:
+    """Deterministic engineering/aerospace calculators (engineering.py). Pure functions: no files, no network."""
+    if not calc:
+        return {"status": "success", "available": engineering.catalog(),
+                "note": "SI units unless a parameter name says otherwise. First-pass design numbers, not a certified analysis."}
+    if params is not None and not isinstance(params, dict):
+        return {"status": "error", "message": "params must be an object of named parameters"}
+    clean = {str(k): v for k, v in (params or {}).items()}
+    if "calc" in clean:
+        return {"status": "error", "message": "'calc' is the calculation name; it cannot also be a parameter"}
+    return engineering.calculate(calc, **clean)
+
+
+def tool_arm_plan(x: float, y: float, z: float, pitch_deg: Optional[float] = None, payload_kg: float = 0.0,
+                  servo_model: str = "MG996R") -> dict:
+    """Inverse kinematics + servo angles + holding-torque check for the simulated 4-joint arm (arm_sim.py).
+    SIMULATION ONLY: this never talks to hardware."""
+    res = arm_sim.inverse(x, y, z, pitch_deg)
+    if not res.reachable:
+        return {"status": "error", "simulation_only": True, "message": f"cannot reach ({x}, {y}, {z}) m: {res.reason}"}
+    try:
+        torques = arm_sim.static_torques(res.joints_deg, float(payload_kg or 0.0))
+        servos = {"shoulder": servo_model, "elbow": servo_model, "wrist": servo_model}
+        check = arm_sim.servo_check(torques, servos)
+        servo_angles = arm_sim.to_servo_angles(res.joints_deg)
+    except (ValueError, TypeError) as e:
+        return {"status": "error", "simulation_only": True, "message": str(e)}
+    warnings = []
+    if res.singularity_margin < 0.15:
+        warnings.append("the arm is nearly fully stretched or folded here: small target changes need large joint moves")
+    weak = [j for j, v in check.items() if v["margin"] < 1.0]
+    if weak:
+        warnings.append(f"the {servo_model} cannot hold this pose at 50% of datasheet stall torque: {', '.join(weak)}")
+    return {"status": "success", "simulation_only": True, "joints_deg": dict(zip(("yaw", "shoulder", "elbow", "wrist"), res.joints_deg)),
+            "tool_pitch_deg": res.pitch_deg, "elbow": res.elbow, "servo_angles_deg": dict(zip(("yaw", "shoulder", "elbow", "wrist"), servo_angles)),
+            "holding_torque_Nm": {k: round(v, 4) for k, v in torques.items()},
+            "servo_margin": {k: round(v["margin"], 2) for k, v in check.items()}, "singularity_margin": round(res.singularity_margin, 3),
+            "max_payload_kg_here": round(arm_sim.max_payload(res.joints_deg, servos), 3), "warnings": warnings,
+            "assumptions": "placeholder link lengths/masses (arm_sim.DEFAULT_ARM), static holding torque only, servo stall torque derated 50%"}
+
+
 def tool_get_tool_stats() -> dict:
     return {"status": "success", "tools": tool_stats.summary(),
             "struggling": [{"tool": t, "recent_failure_rate": round(r, 2), "last_error": e}
@@ -2519,6 +2562,9 @@ You run locally with full OS-level authority and feature an integrated cognitive
     has been failing: verify arguments and change approach after one failure. LESSONS FROM PAST TASKS
     are things that went wrong before (including skills or patches the gates rejected and why);
     apply them. get_tool_stats shows the numbers.
+17. Engineering — for beam, stress, truss, atmosphere, orbit or rocket arithmetic call engineering_calc
+    instead of computing in your head, and pass on the formula and assumptions it returns. arm_plan
+    is a SIMULATION of the planned robot arm; never describe it as hardware that exists or moves.
 
 OPERATIONAL RULES:
 - Lead directly with authoritative substance. Eliminate introductory fluff, greetings, or robotic setups.
@@ -3292,7 +3338,8 @@ def tool_sculpt_workspace(applications: List[str]) -> dict:
 # two-step propose/apply pipeline and must not be bypassed through here.
 WORKSPACE_PROTECTED_FILES = {"prometheus.py", "gui_orb.py", "gui_config.py", "gui_markdown.py", "gui_birth.py",
                              "gui_session.py", "state_io.py", "memory_graph.py", "obsidian_memory.py", "skill_forge.py",
-                             "patch_gate.py", "reflection.py", "safety.py"}
+                             "patch_gate.py", "reflection.py", "safety.py", "engineering.py", "arm_sim.py", "arm_gesture.py",
+                             "arm_bridge.py", "arm_demo.py"}
 # operator-owned safety state: the model must not be able to loosen its own rules or rewrite its own audit trail
 WORKSPACE_PROTECTED_STATE = {"permissions.json", "audit.jsonl", "skills.json", "tool_stats.json"}
 MAX_SHELL_OUTPUT_CHARS = 8000
@@ -3703,6 +3750,27 @@ _RAW_TOOL_SPECS: List[Dict[str, Any]] = [
         }
     },
     {
+        "name": "engineering_calc",
+        "description": "Deterministic mechanical/aerospace calculators with textbook-verified formulas: unit conversion, "
+                        "section properties, beam reactions/moment/deflection, bending/torsion/plane stress, Euler buckling, "
+                        "pin-jointed truss member forces, ISA atmosphere, lift/stall/Reynolds, circular orbits, vis-viva, "
+                        "Hohmann transfers, rocket equation. Call with no arguments to list them with their parameters. "
+                        "PREFER THIS over doing such arithmetic yourself; report the formula and assumptions it returns.",
+        "parameters": {"type": "object", "properties": {
+            "calc": {"type": "string", "description": "calculation name, e.g. 'beam', 'hohmann', 'truss'"},
+            "params": {"type": "object", "description": "named parameters for that calculation (SI units)"}}}
+    },
+    {
+        "name": "arm_plan",
+        "description": "Plan the simulated 4-joint robot arm: inverse kinematics for a target (metres, x forward, y left, z up), "
+                        "servo angles, holding torque and servo margin, max payload. SIMULATION ONLY, no hardware is touched.",
+        "parameters": {"type": "object", "properties": {
+            "x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"},
+            "pitch_deg": {"type": "number", "description": "tool angle above horizontal; omit to let the planner choose"},
+            "payload_kg": {"type": "number"}, "servo_model": {"type": "string", "description": "SG90, MG90S, MG996R or DS3218"}},
+            "required": ["x", "y", "z"]}
+    },
+    {
         "name": "get_tool_stats",
         "description": "How reliable each of your tools has been (calls, success rate, latency, last error), "
                         "and which are currently failing. Use it when a tool keeps misbehaving.",
@@ -4047,6 +4115,13 @@ def _dispatch_tool_inner(name: str, arguments: Union[Dict[str, Any], str]) -> Di
 
         elif name == "get_tool_stats":
             return tool_get_tool_stats()
+
+        elif name == "engineering_calc":
+            return tool_engineering_calc(arguments.get("calc", ""), arguments.get("params"))
+
+        elif name == "arm_plan":
+            return tool_arm_plan(arguments.get("x"), arguments.get("y"), arguments.get("z"), arguments.get("pitch_deg"),
+                                 arguments.get("payload_kg", 0.0), arguments.get("servo_model", "MG996R"))
 
         elif name == "export_obsidian":
             return tool_export_obsidian(force=bool(arguments.get("force", False)))

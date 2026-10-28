@@ -45,6 +45,16 @@ class QuickEvals(unittest.TestCase):
         self.assertEqual(s["bad_rejected"], s["bad_skills"])
         self.assertEqual(s["good_accepted"], s["good_skills"])
 
+    def test_engineering_known_answers_all_pass(self):
+        e = self.r["engineering"]
+        self.assertEqual(e["passed"], e["known_answer_cases"], e["failures"])
+
+    def test_arm_ik_solves_every_reachable_pose_accurately(self):
+        a = self.r["arm_ik"]
+        self.assertEqual(a["solved"], a["poses_tried"])
+        self.assertGreater(a["poses_tried"], 800)
+        self.assertLess(a["max_position_error_mm"], 0.001)
+
 
 if __name__ == "__main__":
     unittest.main()

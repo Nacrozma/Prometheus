@@ -27,6 +27,8 @@ os.environ.setdefault("PROMETHEUS_FAST_BOOT", "1")
 import memory_graph as mg  # noqa: E402
 import skill_forge  # noqa: E402
 import patch_gate  # noqa: E402
+import engineering  # noqa: E402
+import arm_sim  # noqa: E402
 
 # --------------------------------------------------------------------------- memory recall
 # (fact, query that paraphrases it with partly different words)
@@ -155,6 +157,61 @@ BAD_PATCHES = [
 ]
 
 
+# (calculation, parameters, result key, published/hand-worked value, relative tolerance)
+ENGINEERING_CASES = [
+    ("isa_atmosphere", {"altitude_m": 0}, "density_kg_m3", 1.225, 1e-3),
+    ("isa_atmosphere", {"altitude_m": 11000}, "pressure_Pa", 22632, 1e-3),
+    ("isa_atmosphere", {"altitude_m": 5000}, "density_kg_m3", 0.7364, 1e-3),
+    ("circular_orbit", {"altitude_m": 400e3}, "speed_m_s", 7668.6, 1e-3),
+    ("circular_orbit", {"altitude_m": 35786e3}, "period_s", 86164, 2e-3),
+    ("hohmann", {"altitude_1_m": 300e3, "altitude_2_m": 35786e3}, "total_delta_v_m_s", 3893, 8e-3),
+    ("rocket_equation", {"isp_s": 300, "mass_initial_kg": 5000, "mass_final_kg": 1000}, "delta_v_m_s", 4735, 1e-3),
+    ("beam", {"support": "simply_supported", "load": "point", "length": 2.0, "magnitude": 10000, "E": 200e9, "I": 4.1667e-6}, "max_deflection_m", 0.0020, 1e-3),
+    ("beam", {"support": "cantilever", "load": "udl", "length": 1.5, "magnitude": 100, "E": 70e9, "I": 2e-8}, "max_moment_Nm", 112.5, 1e-9),
+    ("plane_stress", {"sigma_x": 80e6, "sigma_y": -40e6, "tau_xy": 30e6}, "sigma_1_Pa", 87.08e6, 1e-3),
+    ("torsion_shear", {"torque": 100, "d": 0.02}, "tau_max_Pa", 63.66e6, 1e-3),
+    ("section_properties", {"shape": "circle", "d": 0.02}, "I_m4", 7.854e-9, 1e-3),
+    ("euler_buckling", {"E": 200e9, "I": 8.333e-9, "length": 1.0}, "critical_load_N", 16449, 2e-3),
+    ("convert_units", {"value": 1, "from_unit": "psi", "to_unit": "kPa"}, "value", 6.894757, 1e-6),
+]
+
+
+def eval_engineering():
+    passed, failures = 0, []
+    for calc, params, key, expected, tol in ENGINEERING_CASES:
+        r = engineering.calculate(calc, **params)
+        got = r["results"][key] if r["status"] == "success" else None
+        if got is not None and abs(got - expected) <= tol * abs(expected):
+            passed += 1
+        else:
+            failures.append({"calc": calc, "key": key, "expected": expected, "got": got})
+    truss = engineering.calculate("truss", nodes={"A": [0, 0], "B": [4, 0], "C": [2, 3]}, members=[["A", "B"], ["A", "C"], ["B", "C"]],
+                                  supports={"A": "pin", "B": "roller"}, loads={"C": [0, -10000]})
+    truss_ok = truss["status"] == "success" and abs(truss["results"]["member_forces_N"]["A-B"] - 3333.333) < 0.01
+    return {"known_answer_cases": len(ENGINEERING_CASES) + 1, "passed": passed + truss_ok, "failures": failures}
+
+
+def eval_arm_ik(n=2000):
+    import math
+    import random
+    rng = random.Random(2024)
+    solved = tried = 0
+    worst = 0.0
+    for _ in range(n):
+        q = [rng.uniform(j.min_deg, j.max_deg) for j in arm_sim.DEFAULT_ARM.joints]
+        if arm_sim.collisions(q):
+            continue
+        tried += 1
+        tip = arm_sim.forward(q)["tip"]
+        res = arm_sim.inverse(*tip, pitch_deg=q[1] + q[2] + q[3])
+        if res.reachable and not arm_sim.within_limits(res.joints_deg):
+            solved += 1
+            worst = max(worst, math.dist(arm_sim.forward(res.joints_deg)["tip"], tip))
+    ws = arm_sim.workspace(step=0.01)
+    return {"poses_tried": tried, "solved": solved, "max_position_error_mm": round(worst * 1000, 6),
+            "workspace_max_reach_cm": round(ws["max_radius_m"] * 100, 1), "workspace_fraction_reachable": round(ws["reachable_fraction"], 3)}
+
+
 def prf(tp, fp, fn):
     p = tp / (tp + fp) if tp + fp else 1.0
     r = tp / (tp + fn) if tp + fn else 1.0
@@ -259,7 +316,7 @@ def main(argv=None):
 
     results = {"synthetic_benchmarks": True, "quick": args.quick,
                "memory_recall": eval_recall(), "dedupe": eval_dedupe(), "entity_extraction": eval_entities(),
-               "skill_gate": eval_skill_gate()}
+               "skill_gate": eval_skill_gate(), "engineering": eval_engineering(), "arm_ik": eval_arm_ik()}
     if not args.quick:
         results["patch_gate"] = eval_patch_gate()
         results["state_stress"] = eval_state_stress(100)

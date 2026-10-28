@@ -86,6 +86,43 @@ This is a net for accidents, not proof a patch is good: the suite only catches w
 Honest limits: the policy gate is a filter, not a security boundary; without Docker the sandbox is resource
 limits only. Docker must be an *engine that answers*, not just the `docker` command being installed.
 
+## Engineering library and the robot arm (simulation)
+
+**`engineering.py`** - deterministic calculators exposed to Prometheus as the `engineering_calc` tool, so it
+stops doing arithmetic "in its head": unit conversion, section properties, beam reactions / moment /
+deflection (simply supported and cantilever, point and distributed loads), bending, torsion and plane
+stress (principal stresses, von Mises), Euler buckling, 2-D pin-jointed truss member forces (method of
+joints, refuses indeterminate or unstable structures), ISA atmosphere to 20 km, lift / stall speed /
+Reynolds number, circular orbits, vis-viva, Hohmann transfers and the rocket equation. Every result
+carries its formula and assumptions. `tests/test_engineering.py` checks them against textbook values
+(ISA tables, the LEO-to-GEO Hohmann transfer, hand-worked trusses and beams). These are first-pass design
+numbers (linear elastic, small deflection, ideal pins), not FEA or a code check.
+
+**The arm** is a 4-joint hobby arm (yaw, shoulder, elbow, wrist) plus a gripper, built bottom-up:
+
+| module | what it does | verified how |
+| --- | --- | --- |
+| `arm_sim.py` | forward kinematics, closed-form inverse kinematics (elbow up/down, leaning back over the base), joint limits that fit a 180-degree servo, floor/base keep-out, static holding torque and servo selection, smooth joint-space moves, workspace map, SVG drawing | hand-worked poses, 1,600+ random FK-to-IK round trips, torque vs. hand calculation |
+| `arm_gesture.py` | hand landmarks to arm targets: validation, arming (hand must be still first), glitch rejection, smoothing + dead-band, workspace clamping, hold-then-stop when the hand is lost | synthetic hands, 2,000-frame random session |
+| `arm_bridge.py` | binary serial protocol (CRC-8, resync), host-side limits, and `FirmwareSim`, a model of the firmware's slew limit, watchdog and e-stop | framing fuzz tests, safety-rule tests, end-to-end gesture-to-firmware run |
+| `arduino/arm_controller/arm_controller.ino` | the firmware itself | **not compiled or run on a board**; a test only checks its protocol constants match the Python model |
+| `arm_demo.py` | `--synthetic` runs the whole chain in simulation; `--camera` / `--port` for webcam and real hardware | synthetic mode tested; camera and serial modes **not tested** |
+
+`docs/arm_pose.svg` shows an IK solution inside the reachable workspace (regenerate with
+`python arm_demo.py --synthetic --svg docs/`). Prometheus can plan with it through the `arm_plan` tool, which
+is labelled simulation-only in every result.
+
+Everything about the arm is **simulation until it has run on real hardware**. Link lengths, masses and servo
+torques are placeholders for a typical small arm: measure yours (`arm_sim.ArmSpec`, `Masses`). Whether
+MediaPipe's landmarks are steady enough to drive it is untested, and is the first thing to try.
+
+Hardware bring-up checklist (when the board arrives):
+1. Servos on their own 5-6 V supply with a common ground to the board, behind a physical switch. Never power them from the board's 5V pin.
+2. Set `REST_DEG` in the sketch to the pose the arm really rests in: servos jump to it at power-up.
+3. With the arm unloaded and nothing in reach, upload the sketch and drive it by hand from a Python shell (`ArmBridge(SerialTransport(port))`): heartbeat, one small `send_angles`, `request_status`, then pull the USB cable and confirm the arm stops within about half a second.
+4. Test ESTOP, then confirm it does not release on a heartbeat.
+5. Only then try `python arm_demo.py --camera --port <port>`, hand held still for the first seconds.
+
 ## Reflection and evaluation
 
 Prometheus measures its own tools (`reflection.py`). Every tool call is timed and classified (success,
@@ -146,6 +183,7 @@ Needs an OpenGL 3.3 capable display. Settings, session and crash logs are local 
 python -m unittest discover -s tests          # everything
 python tests/stress_state.py                  # concurrency stress test (see above)
 python evals/run_evals.py --quick             # synthetic benchmarks (see Reflection and evaluation)
+python arm_demo.py --synthetic                # the gesture-to-arm pipeline in simulation
 ```
 
 The GUI tests run Qt on its offscreen platform with audio, Whisper, edge-tts and OpenGL stubbed out, so
@@ -162,3 +200,5 @@ those need a real display and devices.
 - The GUI's shader, microphone, speaker and Whisper paths are not covered by automated tests.
 - Entity extraction without a model is rule-based (capitalised phrases, wikilinks, #tags, known names): it favours precision over recall, so pass entities explicitly when you know them.
 - The Obsidian export has been tested against the file layout, not against a running Obsidian: open Graph View once and check it looks right.
+- The arm is simulation only: no part of the Arduino firmware, the serial transport or the webcam path has been run on real hardware by the author. The arm IK round-trip eval checks self-consistency (FK then IK); forward kinematics itself is checked against hand-worked poses.
+- `engineering_calc` covers determinate, linear-elastic textbook cases. It is a first check, not a substitute for FEA, a design code, or an engineer.

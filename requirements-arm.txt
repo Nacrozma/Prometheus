@@ -1,0 +1,4 @@
+# Only needed for arm_demo.py --camera / --port. The simulation, tests and everything else are stdlib-only.
+opencv-python
+mediapipe
+pyserial
