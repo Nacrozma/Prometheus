@@ -1,0 +1,195 @@
+/**
+ * Typed bridge to the trusted core. The UI never handles secrets beyond passing a newly typed
+ * key once to `setProviderKey`; nothing here can read a stored key back.
+ */
+import { Channel, invoke } from "@tauri-apps/api/core";
+import { z } from "zod";
+import * as S from "./schemas";
+
+export class AtlasError extends Error {
+  constructor(
+    public code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AtlasError";
+  }
+}
+
+export function isTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function toAtlasError(e: unknown): AtlasError {
+  const parsed = S.AppErrorSchema.safeParse(e);
+  if (parsed.success) return new AtlasError(parsed.data.code, parsed.data.message);
+  if (e instanceof Error) return new AtlasError("internal", e.message);
+  return new AtlasError("internal", typeof e === "string" ? e : "Unexpected error");
+}
+
+async function call<T extends z.ZodType>(cmd: string, args: Record<string, unknown>, schema: T): Promise<z.infer<T>> {
+  let raw: unknown;
+  try {
+    raw = await invoke(cmd, args);
+  } catch (e) {
+    throw toAtlasError(e);
+  }
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    console.error(`[atlas] ${cmd} returned an unexpected shape`, parsed.error.issues);
+    throw new AtlasError("contract", `Atlas received an unexpected response from "${cmd}".`);
+  }
+  return parsed.data;
+}
+
+const Void = z.null();
+const Opt = <T extends z.ZodType>(t: T) => t.nullable();
+
+export const api = {
+  appInfo: () => call("app_info", {}, S.AppInfoSchema),
+  diagnostics: () => call("diagnostics", {}, z.record(z.string(), z.unknown())),
+  recentErrors: (limit = 30) => call("recent_errors", { limit }, z.array(S.AuditEventSchema)),
+  openExternal: (url: string) => call("open_external", { url }, Void),
+  saveTextViaDialog: (suggestedName: string, extension: "json" | "md" | "txt" | "csv", content: string) =>
+    call("save_text_via_dialog", { suggestedName, extension, content }, Opt(z.string())),
+
+  settings: () => call("settings_get", {}, S.SettingsSchema),
+  updateSettings: (settings: S.Settings) => call("settings_update", { settings }, S.SettingsSchema),
+  pickWorkspace: () => call("workspace_pick", {}, Opt(S.SettingsSchema)),
+  useDefaultWorkspace: () => call("workspace_use_default", {}, S.SettingsSchema),
+  addSampleFile: () => call("workspace_add_sample", {}, z.string()),
+  browseWorkspace: (path?: string) => call("workspace_browse", { path: path ?? null }, S.WorkspaceListingSchema),
+  previewWorkspaceFile: (path: string) =>
+    call(
+      "workspace_preview",
+      { path },
+      z.object({
+        path: z.string(),
+        content: z.string().optional(),
+        bytes: z.number().optional(),
+        truncated: z.boolean().optional(),
+        error: z.string().optional(),
+        code: z.string().optional(),
+      }),
+    ),
+  revealWorkspace: (path?: string) => call("workspace_reveal", { path: path ?? null }, Void),
+
+  providerTemplates: () => call("provider_templates", {}, z.array(S.ProviderTemplateSchema)),
+  providers: () => call("providers_list", {}, z.array(S.ProviderConfigSchema)),
+  addProvider: (p: { kind: S.ProviderKind; label: string; baseUrl: string; defaultModel: string | null }) =>
+    call("provider_add", { provider: p }, S.ProviderConfigSchema),
+  updateProvider: (id: string, label: string, baseUrl: string, defaultModel: string | null, enabled: boolean) =>
+    call("provider_update", { id, label, baseUrl, defaultModel, enabled }, S.ProviderConfigSchema),
+  deleteProvider: (id: string) => call("provider_delete", { id }, Void),
+  setProviderKey: (id: string, key: string) => call("provider_set_key", { id, key }, S.ProviderConfigSchema),
+  clearProviderKey: (id: string) => call("provider_clear_key", { id }, S.ProviderConfigSchema),
+  testProvider: (id: string) => call("provider_test", { id }, S.ProviderTestResultSchema),
+
+  integrations: () => call("integrations_list", {}, z.array(S.IntegrationSchema)),
+  setIntegrationKey: (id: string, key: string) => call("integration_set_key", { id, key }, S.IntegrationSchema),
+  clearIntegrationKey: (id: string) => call("integration_clear_key", { id }, S.IntegrationSchema),
+  setIntegrationEnabled: (id: string, enabled: boolean) =>
+    call("integration_set_enabled", { id, enabled }, S.IntegrationSchema),
+  testIntegration: (id: string) => call("integration_test", { id }, S.IntegrationSchema),
+  tools: () => call("tools_list", {}, z.array(S.ToolInfoSchema)),
+  setToolEnabled: (id: string, enabled: boolean) => call("tool_set_enabled", { id, enabled }, Void),
+
+  conversations: (opts: { projectId?: string | null; includeArchived?: boolean; limit?: number; offset?: number } = {}) =>
+    call(
+      "conversations_list",
+      {
+        projectId: opts.projectId ?? null,
+        includeArchived: opts.includeArchived ?? false,
+        limit: opts.limit ?? 200,
+        offset: opts.offset ?? 0,
+      },
+      z.array(S.ConversationSchema),
+    ),
+  createConversation: (projectId: string | null, title?: string) =>
+    call("conversation_create", { projectId, title: title ?? null }, S.ConversationSchema),
+  messages: (id: string) => call("conversation_messages", { id }, z.array(S.MessageSchema)),
+  renameConversation: (id: string, title: string) => call("conversation_rename", { id, title }, Void),
+  archiveConversation: (id: string, archived: boolean) => call("conversation_archive", { id, archived }, Void),
+  moveConversation: (id: string, projectId: string | null) => call("conversation_move", { id, projectId }, Void),
+  deleteConversation: (id: string) => call("conversation_delete", { id }, Void),
+  searchConversations: (query: string) => call("conversations_search", { query }, z.array(S.SearchHitSchema)),
+  exportConversation: (id: string) => call("conversation_export", { id }, Opt(z.string())),
+
+  /** Stream a turn. `onEvent` receives validated events; malformed events are dropped and logged. */
+  send: (
+    params: { conversationId: string; text: string; providerId?: string | null; model?: string | null },
+    onEvent: (e: S.TurnEvent) => void,
+  ) => {
+    const channel = new Channel<unknown>();
+    channel.onmessage = (raw) => {
+      const parsed = S.TurnEventSchema.safeParse(raw);
+      if (parsed.success) onEvent(parsed.data);
+      else console.error("[atlas] malformed turn event", parsed.error.issues);
+    };
+    return call(
+      "chat_send",
+      {
+        params: {
+          conversationId: params.conversationId,
+          text: params.text,
+          providerId: params.providerId ?? null,
+          model: params.model ?? null,
+        },
+        onEvent: channel,
+      },
+      S.TurnSummarySchema,
+    );
+  },
+  cancel: (conversationId: string) => call("chat_cancel", { conversationId }, z.boolean()),
+
+  pendingApprovals: () => call("approvals_pending", {}, z.array(S.ApprovalSchema)),
+  decideApproval: (id: string, approve: boolean) => call("approval_decide", { id, approve }, Void),
+  tasks: (status?: string | null, limit = 200) => call("tasks_list", { status: status ?? null, limit }, z.array(S.TaskSchema)),
+  taskDetail: (id: string) => call("task_detail", { id }, S.TaskDetailSchema),
+  cancelTask: (id: string) => call("task_cancel", { id }, z.boolean()),
+  dismissTask: (id: string) => call("task_dismiss", { id }, Void),
+  retryStep: (stepId: string) => call("task_retry_step", { stepId }, z.unknown()),
+  emergencyStop: () => call("emergency_stop", {}, z.number()),
+  activeTurns: () =>
+    call(
+      "active_turns",
+      {},
+      z.array(z.object({ turn_id: z.string(), conversation_id: z.string(), started_at: z.string(), task_id: z.string().nullable() })),
+    ),
+
+  memories: (scope: "all" | "global" | string = "all") => call("memories_list", { scope }, z.array(S.MemorySchema)),
+  createMemory: (m: { projectId: string | null; kind: S.MemoryKind; content: string; pinned?: boolean }) =>
+    call("memory_create", { projectId: m.projectId, kind: m.kind, content: m.content, pinned: m.pinned ?? false }, S.MemorySchema),
+  updateMemory: (
+    id: string,
+    patch: { content?: string; kind?: S.MemoryKind; pinned?: boolean; projectId?: string | null },
+  ) => call("memory_update", { id, patch }, S.MemorySchema),
+  deleteMemory: (id: string) => call("memory_delete", { id }, Void),
+  deleteAllMemories: (confirm: string) => call("memory_delete_all", { confirm }, z.number()),
+  searchMemories: (query: string, projectId?: string | null) =>
+    call("memory_search", { query, projectId: projectId ?? null }, z.array(S.RetrievedSchema)),
+  exportMemories: () => call("memory_export", {}, Opt(z.string())),
+
+  projects: (includeArchived = true) => call("projects_list", { includeArchived }, z.array(S.ProjectSchema)),
+  createProject: (name: string, description: string, instructions: string) =>
+    call("project_create", { name, description, instructions }, S.ProjectSchema),
+  updateProject: (id: string, name: string, description: string, instructions: string, archived: boolean) =>
+    call("project_update", { id, name, description, instructions, archived }, S.ProjectSchema),
+  deleteProject: (id: string) => call("project_delete", { id }, Void),
+  exportProject: (id: string) => call("project_export", { id }, Opt(z.string())),
+
+  shareFile: () => call("file_share_pick", {}, Opt(S.GrantSchema)),
+  grants: () => call("grants_list", {}, z.array(S.GrantSchema)),
+  revokeGrant: (id: string) => call("grant_revoke", { id }, Void),
+
+  usage: () => call("usage_summary", {}, S.UsageSummarySchema),
+  graph: () => call("map_graph", {}, S.GraphSchema),
+
+  exportAll: () => call("export_all", {}, Opt(z.string())),
+  backupCreate: () => call("backup_create", {}, Opt(z.string())),
+  backupInspect: () => call("backup_inspect", {}, Opt(z.record(z.string(), z.unknown()))),
+  backupRestoreConfirm: () => call("backup_restore_confirm", {}, Void),
+  removeAllCredentials: (confirm: string) => call("credentials_remove_all", { confirm }, Void),
+};
+
+export type Api = typeof api;

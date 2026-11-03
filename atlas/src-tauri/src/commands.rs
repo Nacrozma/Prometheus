@@ -1,0 +1,670 @@
+//! The IPC surface. Every command here is narrow, takes typed arguments, and delegates to the
+//! trusted core. There is no general filesystem, shell or network command. Paths that leave the
+//! workspace only ever come from native dialogs the user operated.
+
+use crate::AppState;
+use atlas_core::ai::ProviderKind;
+use atlas_core::engine::{TurnEvent, TurnParams, TurnSummary};
+use atlas_core::error::AtlasError;
+use atlas_core::memory::MemoryKind;
+use atlas_core::settings::Settings;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::path::PathBuf;
+use tauri::ipc::Channel;
+use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_opener::OpenerExt;
+
+type R<T> = Result<T, AtlasError>;
+
+pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        app_info, diagnostics, recent_errors, open_external, save_text_via_dialog,
+        settings_get, settings_update, workspace_pick, workspace_use_default, workspace_add_sample, workspace_browse, workspace_preview, workspace_reveal,
+        provider_templates, providers_list, provider_add, provider_update, provider_delete, provider_set_key, provider_clear_key, provider_test,
+        integrations_list, integration_set_key, integration_clear_key, integration_set_enabled, integration_test,
+        tools_list, tool_set_enabled,
+        conversations_list, conversation_create, conversation_messages, conversation_rename, conversation_archive,
+        conversation_move, conversation_delete, conversations_search, conversation_export,
+        chat_send, chat_cancel,
+        approvals_pending, approval_decide,
+        tasks_list, task_detail, task_cancel, task_dismiss, task_retry_step, emergency_stop, active_turns,
+        memories_list, memory_create, memory_update, memory_delete, memory_delete_all, memory_search, memory_export,
+        projects_list, project_create, project_update, project_delete, project_export,
+        file_share_pick, grants_list, grant_revoke,
+        usage_summary, map_graph,
+        export_all, backup_create, backup_inspect, backup_restore_confirm, credentials_remove_all,
+    ]
+}
+
+fn io(e: impl std::fmt::Display) -> AtlasError {
+    AtlasError::Io(e.to_string())
+}
+
+// ---------------- native dialogs (run off the main thread) ----------------
+
+async fn pick_folder(app: &AppHandle, title: &str) -> R<Option<PathBuf>> {
+    let app = app.clone();
+    let title = title.to_string();
+    let picked = tauri::async_runtime::spawn_blocking(move || app.dialog().file().set_title(title).blocking_pick_folder())
+        .await
+        .map_err(io)?;
+    picked.map(|p| p.into_path().map_err(io)).transpose()
+}
+
+async fn pick_file(app: &AppHandle, title: &str, filter: Option<(&str, Vec<String>)>) -> R<Option<PathBuf>> {
+    let app = app.clone();
+    let title = title.to_string();
+    let filter = filter.map(|(n, e)| (n.to_string(), e));
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let mut d = app.dialog().file().set_title(title);
+        if let Some((name, exts)) = &filter {
+            let refs: Vec<&str> = exts.iter().map(String::as_str).collect();
+            d = d.add_filter(name, &refs);
+        }
+        d.blocking_pick_file()
+    })
+    .await
+    .map_err(io)?;
+    picked.map(|p| p.into_path().map_err(io)).transpose()
+}
+
+async fn save_file(app: &AppHandle, title: &str, suggested: &str, ext: &str) -> R<Option<PathBuf>> {
+    let app = app.clone();
+    let (title, suggested, ext) = (title.to_string(), suggested.to_string(), ext.to_string());
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog().file().set_title(title).set_file_name(suggested).add_filter(ext.to_uppercase(), &[ext.as_str()]).blocking_save_file()
+    })
+    .await
+    .map_err(io)?;
+    picked.map(|p| p.into_path().map_err(io)).transpose()
+}
+
+fn sanitize_file_name(name: &str) -> String {
+    let s: String = name.chars().map(|c| if c.is_alphanumeric() || " -_.".contains(c) { c } else { '-' }).take(80).collect();
+    if s.trim().is_empty() { "atlas-export".into() } else { s }
+}
+
+// ---------------- app ----------------
+
+#[derive(Serialize)]
+pub struct AppInfo {
+    name: &'static str,
+    version: String,
+    os: &'static str,
+    arch: &'static str,
+    data_dir: Option<String>,
+    credential_backend: &'static str,
+    e2e_build: bool,
+}
+
+#[tauri::command]
+fn app_info(state: State<'_, AppState>) -> AppInfo {
+    let a = &state.atlas;
+    AppInfo {
+        name: "ATLAS Co-Pilot",
+        version: a.version.clone(),
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        data_dir: a.data_dir.as_ref().map(|p| p.to_string_lossy().to_string()),
+        credential_backend: a.secrets.backend(),
+        e2e_build: cfg!(feature = "e2e"),
+    }
+}
+
+#[tauri::command]
+async fn diagnostics(state: State<'_, AppState>) -> R<Value> {
+    Ok(state.atlas.diagnostics_report().await)
+}
+
+#[tauri::command]
+fn recent_errors(state: State<'_, AppState>, limit: Option<u32>) -> R<Vec<atlas_core::audit::AuditEvent>> {
+    state.atlas.recent_errors(limit.unwrap_or(30).min(200))
+}
+
+/// Open an http(s) link in the system browser. Only called from an explicit user click.
+#[tauri::command]
+fn open_external(app: AppHandle, url: String) -> R<()> {
+    let parsed = tauri::Url::parse(&url).map_err(|_| AtlasError::Validation("invalid URL".into()))?;
+    if !matches!(parsed.scheme(), "https" | "http") {
+        return Err(AtlasError::PermissionDenied("only web links can be opened".into()));
+    }
+    app.opener().open_url(parsed.as_str(), None::<&str>).map_err(io)
+}
+
+/// Write text the user is looking at (e.g. a diagnostics preview) to a file they choose.
+#[tauri::command]
+async fn save_text_via_dialog(app: AppHandle, suggested_name: String, extension: String, content: String) -> R<Option<String>> {
+    if !matches!(extension.as_str(), "json" | "md" | "txt" | "csv") {
+        return Err(AtlasError::Validation("unsupported extension".into()));
+    }
+    if content.len() > 50 * 1024 * 1024 {
+        return Err(AtlasError::Validation("content too large".into()));
+    }
+    let content = atlas_core::redact::redact(&content);
+    match save_file(&app, "Save", &sanitize_file_name(&suggested_name), &extension).await? {
+        Some(p) => {
+            std::fs::write(&p, content)?;
+            Ok(Some(p.to_string_lossy().to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+// ---------------- settings & workspace ----------------
+
+#[tauri::command]
+fn settings_get(state: State<'_, AppState>) -> R<Settings> {
+    state.atlas.settings()
+}
+
+#[tauri::command]
+fn settings_update(state: State<'_, AppState>, settings: Settings) -> R<Settings> {
+    // The workspace may only change through the folder picker or the default-folder command.
+    let current = state.atlas.settings()?;
+    if settings.workspace_dir != current.workspace_dir {
+        return Err(AtlasError::PermissionDenied("change the workspace folder with the folder picker".into()));
+    }
+    state.atlas.update_settings(settings)
+}
+
+#[tauri::command]
+async fn workspace_pick(app: AppHandle, state: State<'_, AppState>) -> R<Option<Settings>> {
+    match pick_folder(&app, "Choose the Atlas workspace folder").await? {
+        Some(dir) => Ok(Some(state.atlas.ensure_workspace(&dir)?)),
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+fn workspace_use_default(app: AppHandle, state: State<'_, AppState>) -> R<Settings> {
+    use tauri::Manager;
+    let base = app.path().document_dir().or_else(|_| app.path().home_dir()).map_err(io)?;
+    state.atlas.ensure_workspace(&base.join("Atlas Workspace"))
+}
+
+const SAMPLE_NAME: &str = "Atlas Sample (demo data)/household-budget-DEMO.csv";
+const SAMPLE_CSV: &str = "category,month,planned,actual,note\nGroceries,October,450,472.18,DEMO DATA - not real\nUtilities,October,180,166.40,DEMO DATA - not real\nTransport,October,120,138.75,DEMO DATA - not real\nDining out,October,90,61.20,DEMO DATA - not real\nGifts,October,60,84.99,DEMO DATA - not real\nSavings,October,300,300.00,DEMO DATA - not real\n";
+
+/// Add a clearly labelled demonstration file to the workspace (never overwrites).
+#[tauri::command]
+fn workspace_add_sample(state: State<'_, AppState>) -> R<String> {
+    let root = workspace_root(&state)?;
+    let target = atlas_core::workspace::resolve_new(&root, SAMPLE_NAME)?;
+    atlas_core::workspace::write_new_file(&target, SAMPLE_CSV)?;
+    Ok(SAMPLE_NAME.to_string())
+}
+
+fn workspace_root(state: &State<'_, AppState>) -> R<PathBuf> {
+    state
+        .atlas
+        .settings()?
+        .workspace_dir
+        .map(PathBuf::from)
+        .ok_or_else(|| AtlasError::Validation("no workspace folder is configured".into()))
+}
+
+#[derive(Serialize)]
+struct Entry {
+    name: String,
+    path: String,
+    kind: &'static str,
+    bytes: Option<u64>,
+    modified: Option<String>,
+}
+
+#[tauri::command]
+fn workspace_browse(state: State<'_, AppState>, path: Option<String>) -> R<Value> {
+    let root = workspace_root(&state)?;
+    let dir = atlas_core::workspace::resolve_existing(&root, path.as_deref().unwrap_or("."))?;
+    let mut entries = Vec::new();
+    for e in std::fs::read_dir(&dir)?.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || e.file_type().map(|t| t.is_symlink()).unwrap_or(true) {
+            continue;
+        }
+        let Ok(meta) = e.metadata() else { continue };
+        let rel = atlas_core::workspace::relative_display(&root, &e.path());
+        entries.push(Entry {
+            name,
+            path: rel,
+            kind: if meta.is_dir() { "dir" } else { "file" },
+            bytes: meta.is_file().then(|| meta.len()),
+            modified: meta.modified().ok().map(|t| chrono_like(t)),
+        });
+        if entries.len() >= 2000 {
+            break;
+        }
+    }
+    entries.sort_by(|a, b| (a.kind != "dir", a.name.to_lowercase()).cmp(&(b.kind != "dir", b.name.to_lowercase())));
+    Ok(json!({"root": root.to_string_lossy(), "path": atlas_core::workspace::relative_display(&root, &dir), "entries": entries}))
+}
+
+fn chrono_like(t: std::time::SystemTime) -> String {
+    let secs = t.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    secs.to_string()
+}
+
+#[tauri::command]
+fn workspace_preview(state: State<'_, AppState>, path: String) -> R<Value> {
+    let root = workspace_root(&state)?;
+    let p = atlas_core::workspace::resolve_existing(&root, &path)?;
+    match atlas_core::tools::builtin::files::read_text(&p) {
+        Ok((content, bytes, truncated)) => Ok(json!({"path": path, "content": content, "bytes": bytes, "truncated": truncated})),
+        Err(e) => Ok(json!({"path": path, "error": e.message, "code": e.code})),
+    }
+}
+
+#[tauri::command]
+fn workspace_reveal(app: AppHandle, state: State<'_, AppState>, path: Option<String>) -> R<()> {
+    let root = workspace_root(&state)?;
+    let p = atlas_core::workspace::resolve_existing(&root, path.as_deref().unwrap_or("."))?;
+    app.opener().reveal_item_in_dir(p).map_err(io)
+}
+
+// ---------------- providers ----------------
+
+#[tauri::command]
+fn provider_templates(state: State<'_, AppState>) -> Vec<atlas_core::ai::catalog::ProviderTemplate> {
+    state.atlas.provider_templates()
+}
+
+#[tauri::command]
+fn providers_list(state: State<'_, AppState>) -> R<Vec<atlas_core::providers::ProviderConfig>> {
+    state.atlas.providers()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewProvider {
+    kind: ProviderKind,
+    label: String,
+    base_url: String,
+    default_model: Option<String>,
+}
+
+#[tauri::command]
+fn provider_add(state: State<'_, AppState>, provider: NewProvider) -> R<atlas_core::providers::ProviderConfig> {
+    if provider.kind == ProviderKind::Mock {
+        return Err(AtlasError::Validation("unknown provider kind".into()));
+    }
+    state.atlas.add_provider(provider.kind, &provider.label, &provider.base_url, provider.default_model.as_deref())
+}
+
+#[tauri::command]
+fn provider_update(state: State<'_, AppState>, id: String, label: String, base_url: String, default_model: Option<String>, enabled: bool) -> R<atlas_core::providers::ProviderConfig> {
+    state.atlas.update_provider(&id, &label, &base_url, default_model.as_deref(), enabled)
+}
+
+#[tauri::command]
+fn provider_delete(state: State<'_, AppState>, id: String) -> R<()> {
+    state.atlas.delete_provider(&id)
+}
+
+/// The key travels UI → core once, is stored in the OS credential store, and is never returned.
+#[tauri::command]
+fn provider_set_key(state: State<'_, AppState>, id: String, key: String) -> R<atlas_core::providers::ProviderConfig> {
+    state.atlas.set_provider_key(&id, &key)
+}
+
+#[tauri::command]
+fn provider_clear_key(state: State<'_, AppState>, id: String) -> R<atlas_core::providers::ProviderConfig> {
+    state.atlas.clear_provider_key(&id)
+}
+
+#[tauri::command]
+async fn provider_test(state: State<'_, AppState>, id: String) -> R<atlas_core::app::ProviderTestResult> {
+    state.atlas.test_provider(&id).await
+}
+
+// ---------------- integrations & tools ----------------
+
+#[tauri::command]
+fn integrations_list(state: State<'_, AppState>) -> R<Vec<atlas_core::integrations::Integration>> {
+    state.atlas.integrations()
+}
+#[tauri::command]
+fn integration_set_key(state: State<'_, AppState>, id: String, key: String) -> R<atlas_core::integrations::Integration> {
+    state.atlas.set_integration_key(&id, &key)
+}
+#[tauri::command]
+fn integration_clear_key(state: State<'_, AppState>, id: String) -> R<atlas_core::integrations::Integration> {
+    state.atlas.clear_integration_key(&id)
+}
+#[tauri::command]
+fn integration_set_enabled(state: State<'_, AppState>, id: String, enabled: bool) -> R<atlas_core::integrations::Integration> {
+    state.atlas.set_integration_enabled(&id, enabled)
+}
+#[tauri::command]
+async fn integration_test(state: State<'_, AppState>, id: String) -> R<atlas_core::integrations::Integration> {
+    state.atlas.test_integration(&id).await
+}
+#[tauri::command]
+fn tools_list(state: State<'_, AppState>) -> R<Vec<atlas_core::tools::registry::ToolInfo>> {
+    state.atlas.tools()
+}
+#[tauri::command]
+fn tool_set_enabled(state: State<'_, AppState>, id: String, enabled: bool) -> R<()> {
+    state.atlas.set_tool_enabled(&id, enabled)
+}
+
+// ---------------- conversations & chat ----------------
+
+#[tauri::command]
+fn conversations_list(state: State<'_, AppState>, project_id: Option<String>, include_archived: Option<bool>, limit: Option<u32>, offset: Option<u32>) -> R<Vec<atlas_core::conversations::Conversation>> {
+    state.atlas.conversations(project_id.as_deref(), include_archived.unwrap_or(false), limit.unwrap_or(100), offset.unwrap_or(0))
+}
+#[tauri::command]
+fn conversation_create(state: State<'_, AppState>, project_id: Option<String>, title: Option<String>) -> R<atlas_core::conversations::Conversation> {
+    state.atlas.create_conversation(project_id.as_deref(), title.as_deref().unwrap_or(""))
+}
+#[tauri::command]
+fn conversation_messages(state: State<'_, AppState>, id: String) -> R<Vec<atlas_core::conversations::StoredMessage>> {
+    state.atlas.messages(&id)
+}
+#[tauri::command]
+fn conversation_rename(state: State<'_, AppState>, id: String, title: String) -> R<()> {
+    state.atlas.rename_conversation(&id, &title)
+}
+#[tauri::command]
+fn conversation_archive(state: State<'_, AppState>, id: String, archived: bool) -> R<()> {
+    state.atlas.archive_conversation(&id, archived)
+}
+#[tauri::command]
+fn conversation_move(state: State<'_, AppState>, id: String, project_id: Option<String>) -> R<()> {
+    state.atlas.move_conversation(&id, project_id.as_deref())
+}
+#[tauri::command]
+fn conversation_delete(state: State<'_, AppState>, id: String) -> R<()> {
+    state.atlas.delete_conversation(&id)
+}
+#[tauri::command]
+fn conversations_search(state: State<'_, AppState>, query: String) -> R<Vec<atlas_core::conversations::SearchHit>> {
+    state.atlas.search_conversations(&query)
+}
+#[tauri::command]
+async fn conversation_export(app: AppHandle, state: State<'_, AppState>, id: String) -> R<Option<String>> {
+    let md = state.atlas.conversation_markdown(&id)?;
+    let title = atlas_core::conversations::get(&state.atlas.db, &id)?.title;
+    match save_file(&app, "Export conversation", &format!("{}.md", sanitize_file_name(&title)), "md").await? {
+        Some(p) => {
+            std::fs::write(&p, md)?;
+            Ok(Some(p.to_string_lossy().to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Run one turn. Streaming events go to `on_event`; the promise resolves when the turn ends.
+#[tauri::command]
+async fn chat_send(state: State<'_, AppState>, params: TurnParamsIn, on_event: Channel<TurnEvent>) -> R<TurnSummary> {
+    let atlas = state.atlas.clone();
+    let p = TurnParams { conversation_id: params.conversation_id, text: params.text, provider_id: params.provider_id, model: params.model };
+    atlas
+        .send_message(p, Box::new(move |e| {
+            let _ = on_event.send(e);
+        }))
+        .await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnParamsIn {
+    conversation_id: String,
+    text: String,
+    provider_id: Option<String>,
+    model: Option<String>,
+}
+
+#[tauri::command]
+fn chat_cancel(state: State<'_, AppState>, conversation_id: String) -> bool {
+    state.atlas.cancel_conversation(&conversation_id)
+}
+
+// ---------------- approvals & tasks ----------------
+
+#[tauri::command]
+fn approvals_pending(state: State<'_, AppState>) -> R<Vec<atlas_core::approvals::Approval>> {
+    state.atlas.pending_approvals()
+}
+#[tauri::command]
+fn approval_decide(state: State<'_, AppState>, id: String, approve: bool) -> R<()> {
+    state.atlas.decide_approval(&id, approve)
+}
+#[tauri::command]
+fn tasks_list(state: State<'_, AppState>, status: Option<String>, limit: Option<u32>) -> R<Vec<atlas_core::tasks::Task>> {
+    state.atlas.tasks(status.as_deref(), limit.unwrap_or(100))
+}
+#[tauri::command]
+fn task_detail(state: State<'_, AppState>, id: String) -> R<atlas_core::tasks::TaskDetail> {
+    state.atlas.task_detail(&id)
+}
+#[tauri::command]
+fn task_cancel(state: State<'_, AppState>, id: String) -> R<bool> {
+    state.atlas.cancel_task(&id)
+}
+#[tauri::command]
+fn task_dismiss(state: State<'_, AppState>, id: String) -> R<()> {
+    state.atlas.dismiss_task(&id)
+}
+#[tauri::command]
+async fn task_retry_step(state: State<'_, AppState>, step_id: String) -> R<Value> {
+    state.atlas.retry_step(&step_id).await
+}
+#[tauri::command]
+fn emergency_stop(state: State<'_, AppState>) -> R<usize> {
+    state.atlas.emergency_stop()
+}
+#[tauri::command]
+fn active_turns(state: State<'_, AppState>) -> Vec<Value> {
+    state.atlas.active_turns()
+}
+
+// ---------------- memory & projects ----------------
+
+#[tauri::command]
+fn memories_list(state: State<'_, AppState>, scope: Option<String>) -> R<Vec<atlas_core::memory::Memory>> {
+    match scope.as_deref() {
+        None | Some("all") => state.atlas.memories(None),
+        Some("global") => state.atlas.memories(Some(None)),
+        Some(project) => state.atlas.memories(Some(Some(project))),
+    }
+}
+#[tauri::command]
+fn memory_create(state: State<'_, AppState>, project_id: Option<String>, kind: MemoryKind, content: String, pinned: Option<bool>) -> R<atlas_core::memory::Memory> {
+    state.atlas.create_memory(project_id.as_deref(), kind, &content, pinned.unwrap_or(false))
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryPatch {
+    content: Option<String>,
+    kind: Option<MemoryKind>,
+    pinned: Option<bool>,
+    /// Present → change scope; null → global.
+    #[serde(default, deserialize_with = "double_option")]
+    project_id: Option<Option<String>>,
+}
+/// Distinguishes a missing field (None) from an explicit null (Some(None)).
+fn double_option<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
+}
+
+#[tauri::command]
+fn memory_update(state: State<'_, AppState>, id: String, patch: MemoryPatch) -> R<atlas_core::memory::Memory> {
+    let project = patch.project_id.as_ref().map(|o| o.as_deref());
+    state.atlas.update_memory(&id, patch.content.as_deref(), patch.kind, patch.pinned, project)
+}
+#[tauri::command]
+fn memory_delete(state: State<'_, AppState>, id: String) -> R<()> {
+    state.atlas.delete_memory(&id)
+}
+#[tauri::command]
+fn memory_delete_all(state: State<'_, AppState>, confirm: String) -> R<usize> {
+    if confirm != "DELETE" {
+        return Err(AtlasError::Validation("confirmation text did not match".into()));
+    }
+    state.atlas.delete_all_memories()
+}
+#[tauri::command]
+fn memory_search(state: State<'_, AppState>, query: String, project_id: Option<String>) -> R<Vec<atlas_core::memory::Retrieved>> {
+    state.atlas.search_memories(&query, project_id.as_deref())
+}
+#[tauri::command]
+async fn memory_export(app: AppHandle, state: State<'_, AppState>) -> R<Option<String>> {
+    let data = json!({"format": "atlas-memories", "format_version": 1, "exported_at": atlas_core::storage::now(), "memories": state.atlas.memories(None)?});
+    match save_file(&app, "Export memories", "atlas-memories.json", "json").await? {
+        Some(p) => {
+            std::fs::write(&p, serde_json::to_string_pretty(&data)?)?;
+            Ok(Some(p.to_string_lossy().to_string()))
+        }
+        None => Ok(None),
+    }
+}
+#[tauri::command]
+fn projects_list(state: State<'_, AppState>, include_archived: Option<bool>) -> R<Vec<atlas_core::projects::Project>> {
+    state.atlas.projects(include_archived.unwrap_or(true))
+}
+#[tauri::command]
+fn project_create(state: State<'_, AppState>, name: String, description: String, instructions: String) -> R<atlas_core::projects::Project> {
+    state.atlas.create_project(&name, &description, &instructions)
+}
+#[tauri::command]
+fn project_update(state: State<'_, AppState>, id: String, name: String, description: String, instructions: String, archived: bool) -> R<atlas_core::projects::Project> {
+    state.atlas.update_project(&id, &name, &description, &instructions, archived)
+}
+#[tauri::command]
+fn project_delete(state: State<'_, AppState>, id: String) -> R<()> {
+    state.atlas.delete_project(&id)
+}
+#[tauri::command]
+async fn project_export(app: AppHandle, state: State<'_, AppState>, id: String) -> R<Option<String>> {
+    let a = &state.atlas;
+    let p = atlas_core::projects::get(&a.db, &id)?;
+    let convs = a.conversations(Some(&id), true, 10_000, 0)?;
+    let mut cv = Vec::new();
+    for c in convs {
+        let msgs: Vec<Value> = a
+            .messages(&c.id)?
+            .into_iter()
+            .filter(|m| m.role == "user" || m.role == "assistant")
+            .map(|m| json!({"role": m.role, "content": m.content, "created_at": m.created_at}))
+            .collect();
+        cv.push(json!({"conversation": c, "messages": msgs}));
+    }
+    let data = json!({"format": "atlas-project", "format_version": 1, "project": p, "memories": a.memories(Some(Some(&id)))?, "conversations": cv});
+    match save_file(&app, "Export project", &format!("{}.json", sanitize_file_name(&p.name)), "json").await? {
+        Some(path) => {
+            std::fs::write(&path, serde_json::to_string_pretty(&data)?)?;
+            Ok(Some(path.to_string_lossy().to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+// ---------------- files shared outside the workspace ----------------
+
+#[tauri::command]
+async fn file_share_pick(app: AppHandle, state: State<'_, AppState>) -> R<Option<atlas_core::grants::Grant>> {
+    let exts: Vec<String> = atlas_core::workspace::TEXT_EXTENSIONS.iter().map(|s| s.to_string()).collect();
+    match pick_file(&app, "Share a text file with Atlas", Some(("Text files", exts))).await? {
+        Some(p) => Ok(Some(state.atlas.add_grant(&p)?)),
+        None => Ok(None),
+    }
+}
+#[tauri::command]
+fn grants_list(state: State<'_, AppState>) -> R<Vec<atlas_core::grants::Grant>> {
+    state.atlas.grants()
+}
+#[tauri::command]
+fn grant_revoke(state: State<'_, AppState>, id: String) -> R<()> {
+    state.atlas.revoke_grant(&id)
+}
+
+// ---------------- usage, map ----------------
+
+#[tauri::command]
+fn usage_summary(state: State<'_, AppState>) -> R<atlas_core::usage::UsageSummary> {
+    state.atlas.usage()
+}
+#[tauri::command]
+fn map_graph(state: State<'_, AppState>) -> R<atlas_core::map::Graph> {
+    state.atlas.map_graph()
+}
+
+// ---------------- export, backup, restore ----------------
+
+#[tauri::command]
+async fn export_all(app: AppHandle, state: State<'_, AppState>) -> R<Option<String>> {
+    let data = state.atlas.export_json()?;
+    match save_file(&app, "Export all data", "atlas-export.json", "json").await? {
+        Some(p) => {
+            std::fs::write(&p, serde_json::to_string_pretty(&data)?)?;
+            Ok(Some(p.to_string_lossy().to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+async fn backup_create(app: AppHandle, state: State<'_, AppState>) -> R<Option<String>> {
+    let name = format!("atlas-backup-{}.atlasbak", chrono_date());
+    match save_file(&app, "Save backup", &name, "atlasbak").await? {
+        Some(p) => {
+            if p.exists() {
+                std::fs::remove_file(&p)?; // the user confirmed overwrite in the native dialog
+            }
+            state.atlas.backup_to(&p)?;
+            Ok(Some(p.to_string_lossy().to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+fn chrono_date() -> String {
+    atlas_core::storage::now().chars().take(10).collect()
+}
+
+/// Step 1 of restore: the user picks a file; Atlas validates it and reports what it contains.
+#[tauri::command]
+async fn backup_inspect(app: AppHandle, state: State<'_, AppState>) -> R<Option<Value>> {
+    let Some(p) = pick_file(&app, "Choose a backup to restore", Some(("Atlas backup", vec!["atlasbak".into()]))).await? else {
+        return Ok(None);
+    };
+    let conn = atlas_core::storage::validate_backup(&p)?;
+    let count = |t: &str| conn.query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get::<_, i64>(0)).unwrap_or(0);
+    let info = json!({
+        "file": p.file_name().map(|n| n.to_string_lossy().to_string()),
+        "schema_version": conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap_or(0),
+        "conversations": count("conversations"),
+        "memories": count("memories"),
+        "projects": count("projects"),
+        "providers": count("providers"),
+    });
+    *state.pending_restore.lock().map_err(|_| AtlasError::Internal("lock".into()))? = Some(p);
+    Ok(Some(info))
+}
+
+/// Step 2: replace current data with the inspected backup (after explicit confirmation).
+#[tauri::command]
+fn backup_restore_confirm(state: State<'_, AppState>) -> R<()> {
+    let p = state
+        .pending_restore
+        .lock()
+        .map_err(|_| AtlasError::Internal("lock".into()))?
+        .take()
+        .ok_or_else(|| AtlasError::Validation("choose a backup first".into()))?;
+    state.atlas.restore_from(&p)
+}
+
+#[tauri::command]
+fn credentials_remove_all(state: State<'_, AppState>, confirm: String) -> R<()> {
+    if confirm != "REMOVE" {
+        return Err(AtlasError::Validation("confirmation text did not match".into()));
+    }
+    state.atlas.remove_all_credentials()
+}

@@ -7,3 +7,5 @@ dist/
 !.env.example
 /test-results/
 /playwright-report/
+test-results/
+/src-tauri/gen/

@@ -1,0 +1,141 @@
+/*
+ * ATLAS design tokens. Every color, size and duration in the UI comes from here.
+ * Dark ("Deep Orbit") is the primary theme; light ("Daylight") is the alternate.
+ */
+:root,
+:root[data-theme="dark"] {
+  /* Surfaces — deep navy to near-black */
+  --bg-0: #04070d; /* window base */
+  --bg-1: #070c17; /* app background */
+  --bg-2: #0b1323; /* panels */
+  --bg-3: #101b31; /* raised / hover */
+  --bg-4: #16243f; /* pressed / selected */
+  --bg-overlay: rgb(3 6 12 / 0.72);
+
+  /* Lines */
+  --line-1: rgb(125 211 252 / 0.08);
+  --line-2: rgb(125 211 252 / 0.14);
+  --line-3: rgb(125 211 252 / 0.26);
+
+  /* Text */
+  --text-1: #e7f1ff;
+  --text-2: #a8b7cf;
+  --text-3: #6f809c;
+  --text-inverse: #04141b;
+
+  /* Accent — cyan / teal / ice */
+  --accent: #3ccfe6;
+  --accent-strong: #7df3ff;
+  --accent-teal: #2dd4bf;
+  --accent-soft: rgb(60 207 230 / 0.12);
+  --accent-softer: rgb(60 207 230 / 0.06);
+  --accent-glow: rgb(60 207 230 / 0.35);
+
+  /* Semantic */
+  --ok: #34d399;
+  --ok-soft: rgb(52 211 153 / 0.12);
+  --warn: #fbbf24;
+  --warn-soft: rgb(251 191 36 / 0.12);
+  --err: #f87171;
+  --err-soft: rgb(248 113 113 / 0.12);
+  --info: #60a5fa;
+  --info-soft: rgb(96 165 250 / 0.12);
+
+  /* Elevation */
+  --shadow-1: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-2: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 8px 24px rgb(0 0 0 / 0.38);
+  --shadow-3: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 24px 64px rgb(0 0 0 / 0.55), 0 0 0 1px var(--line-2);
+  --glow-accent: 0 0 0 1px rgb(60 207 230 / 0.35), 0 0 24px rgb(60 207 230 / 0.18);
+
+  /* Atmosphere */
+  --atmos-1: radial-gradient(1200px 700px at 78% -10%, rgb(56 189 248 / 0.07), transparent 60%);
+  --atmos-2: radial-gradient(900px 600px at -10% 110%, rgb(45 212 191 / 0.05), transparent 60%);
+
+  --code-bg: #060b15;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg-0: #e9eef6;
+  --bg-1: #f3f6fb;
+  --bg-2: #ffffff;
+  --bg-3: #eef3fa;
+  --bg-4: #e2eaf5;
+  --bg-overlay: rgb(15 23 42 / 0.35);
+  --line-1: rgb(15 40 80 / 0.08);
+  --line-2: rgb(15 40 80 / 0.13);
+  --line-3: rgb(15 40 80 / 0.24);
+  --text-1: #0b1628;
+  --text-2: #3b4a63;
+  --text-3: #66758e;
+  --text-inverse: #ffffff;
+  --accent: #0b8fa8;
+  --accent-strong: #06748a;
+  --accent-teal: #0f9488;
+  --accent-soft: rgb(11 143 168 / 0.1);
+  --accent-softer: rgb(11 143 168 / 0.05);
+  --accent-glow: rgb(11 143 168 / 0.25);
+  --ok: #0f9d6b;
+  --ok-soft: rgb(15 157 107 / 0.1);
+  --warn: #b7791f;
+  --warn-soft: rgb(183 121 31 / 0.12);
+  --err: #d14343;
+  --err-soft: rgb(209 67 67 / 0.1);
+  --info: #2563eb;
+  --info-soft: rgb(37 99 235 / 0.1);
+  --shadow-1: 0 1px 2px rgb(15 23 42 / 0.06);
+  --shadow-2: 0 8px 24px rgb(15 23 42 / 0.08);
+  --shadow-3: 0 24px 64px rgb(15 23 42 / 0.16), 0 0 0 1px var(--line-2);
+  --glow-accent: 0 0 0 1px rgb(11 143 168 / 0.35), 0 0 18px rgb(11 143 168 / 0.12);
+  --atmos-1: radial-gradient(1200px 700px at 78% -10%, rgb(56 189 248 / 0.1), transparent 60%);
+  --atmos-2: radial-gradient(900px 600px at -10% 110%, rgb(45 212 191 / 0.06), transparent 60%);
+  --code-bg: #f1f5fb;
+  color-scheme: light;
+}
+
+:root {
+  /* Typography */
+  --font-display: "Sora Variable", "Inter Variable", system-ui, sans-serif;
+  --font-body: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.75rem;
+
+  /* Radii */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* Motion */
+  --dur-fast: 120ms;
+  --dur-med: 220ms;
+  --dur-slow: 420ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* Layout */
+  --rail-width: 76px;
+  --font-scale: 1;
+}
+
+/* Reduced motion: honor the OS unless the user forced full motion, and always when forced reduced. */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) {
+    --dur-fast: 0ms;
+    --dur-med: 0ms;
+    --dur-slow: 0ms;
+  }
+}
+:root[data-motion="reduced"] {
+  --dur-fast: 0ms;
+  --dur-med: 0ms;
+  --dur-slow: 0ms;
+}

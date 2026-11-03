@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="75%">
+      <stop offset="0" stop-color="#12284A"/>
+      <stop offset="0.55" stop-color="#0A1528"/>
+      <stop offset="1" stop-color="#050A14"/>
+    </radialGradient>
+    <linearGradient id="globe" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9EEBFF"/>
+      <stop offset="0.5" stop-color="#3CCFE6"/>
+      <stop offset="1" stop-color="#1C8FB8"/>
+    </linearGradient>
+    <linearGradient id="orbit" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5EEAD4" stop-opacity="0.15"/>
+      <stop offset="0.5" stop-color="#7DF3FF" stop-opacity="1"/>
+      <stop offset="1" stop-color="#5EEAD4" stop-opacity="0.15"/>
+    </linearGradient>
+    <radialGradient id="node" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.35" stop-color="#C9F7FF"/>
+      <stop offset="1" stop-color="#3CCFE6" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="10"/></filter>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="216" fill="url(#bg)"/>
+  <rect x="32.5" y="32.5" width="959" height="959" rx="215.5" fill="none" stroke="#7DD3FC" stroke-opacity="0.14" stroke-width="2"/>
+  <g transform="translate(512 520)">
+    <circle r="236" fill="url(#globe)" opacity="0.10"/>
+    <circle r="236" fill="none" stroke="url(#globe)" stroke-width="22"/>
+    <ellipse rx="96" ry="236" fill="none" stroke="#7DE6F5" stroke-opacity="0.75" stroke-width="12"/>
+    <ellipse rx="184" ry="236" fill="none" stroke="#7DE6F5" stroke-opacity="0.35" stroke-width="9"/>
+    <line x1="-236" y1="0" x2="236" y2="0" stroke="#7DE6F5" stroke-opacity="0.75" stroke-width="12"/>
+    <path d="M -206 -116 Q 0 -86 206 -116" fill="none" stroke="#7DE6F5" stroke-opacity="0.35" stroke-width="9"/>
+    <path d="M -206 116 Q 0 146 206 116" fill="none" stroke="#7DE6F5" stroke-opacity="0.35" stroke-width="9"/>
+    <g transform="rotate(-22)">
+      <ellipse rx="372" ry="112" fill="none" stroke="url(#orbit)" stroke-width="16" filter="url(#soft)" opacity="0.6"/>
+      <ellipse rx="372" ry="112" fill="none" stroke="url(#orbit)" stroke-width="12"/>
+      <circle cx="300" cy="-66" r="58" fill="url(#node)"/>
+      <circle cx="300" cy="-66" r="20" fill="#FFFFFF"/>
+    </g>
+  </g>
+</svg>
