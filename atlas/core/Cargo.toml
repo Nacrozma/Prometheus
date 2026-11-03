@@ -1,0 +1,36 @@
+[package]
+name = "atlas-core"
+description = "ATLAS Co-Pilot trusted core: providers, tools, permissions, tasks, memory, storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# Deterministic provider and tools used only by automated tests / e2e builds.
+test-support = []
+
+[dependencies]
+async-trait = "0.1.92"
+chrono = { version = "0.4.45", default-features = false, features = ["serde", "clock"] }
+futures-util = "0.3.34"
+hex = "0.4.3"
+jsonschema = { version = "0.60", default-features = false }
+keyring = "4"
+regex = "1.13.1"
+reqwest = { version = "0.13", features = ["json", "stream"] }
+rusqlite = { version = "0.41", features = ["bundled", "backup"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+tokio-util = "0.7.20"
+uuid = { version = "1.26.1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "test-util"] }
+wiremock = "0.6.5"
+atlas-core = { path = ".", features = ["test-support"] }
