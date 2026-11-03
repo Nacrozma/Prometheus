@@ -231,11 +231,13 @@ impl Dispatcher {
                 crate::audit::record(&self.db, "approval.consumed", "info", ctx.task_id.as_deref(), Some(tool_id), json!({"approval_id": id}));
             }
         }
-        let timeout = Duration::from_secs(d.timeout_secs.max(1) as u64);
+        // The tool's own limit, capped by the user's global tool timeout.
+        let secs = d.timeout_secs.min(ctx.settings.limits.tool_timeout_secs).max(1);
+        let timeout = Duration::from_secs(secs as u64);
         let out = tokio::select! {
             _ = ctx.cancel.cancelled() => return Err(AtlasError::Cancelled),
             r = tokio::time::timeout(timeout, tool.execute(input.clone(), ctx)) => match r {
-                Err(_) => return Err(AtlasError::Timeout(format!("'{tool_id}' exceeded {}s", d.timeout_secs))),
+                Err(_) => return Err(AtlasError::Timeout(format!("'{tool_id}' exceeded {secs}s"))),
                 Ok(Err(ToolError { code, message })) => return Err(AtlasError::Tool(format!("[{code}] {message}"))),
                 Ok(Ok(v)) => v,
             },

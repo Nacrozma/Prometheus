@@ -78,7 +78,7 @@ pub fn run() {
                 .inner_size(1320.0, 860.0)
                 .min_inner_size(760.0, 560.0)
                 .background_color(tauri::window::Color(7, 11, 20, 255))
-                .on_navigation(|url| navigation_allowed(url))
+                .on_navigation(navigation_allowed)
                 .build()?;
             Ok(())
         })

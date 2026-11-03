@@ -146,3 +146,24 @@ mod tests {
         assert_eq!(validate_secret(" abc ").unwrap(), "abc");
     }
 }
+
+/// Requires a running OS credential store (on Linux: a Secret Service such as GNOME Keyring).
+/// Run with `cargo test -p atlas-core os_keyring -- --ignored`.
+#[cfg(test)]
+mod os_store_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn os_keyring_roundtrip() {
+        let store = OsKeyring;
+        store.health().expect("credential store reachable");
+        let account = format!("test:{}", uuid::Uuid::new_v4());
+        assert_eq!(store.get(&account).unwrap(), None);
+        store.set(&account, "sk-test-roundtrip-value-1234").unwrap();
+        assert_eq!(store.get(&account).unwrap().as_deref(), Some("sk-test-roundtrip-value-1234"));
+        store.delete(&account).unwrap();
+        assert_eq!(store.get(&account).unwrap(), None);
+        store.delete(&account).expect("deleting a missing entry is not an error");
+    }
+}

@@ -230,14 +230,14 @@ fn workspace_browse(state: State<'_, AppState>, path: Option<String>) -> R<Value
             name,
             path: rel,
             kind: if meta.is_dir() { "dir" } else { "file" },
-            bytes: meta.is_file().then(|| meta.len()),
-            modified: meta.modified().ok().map(|t| chrono_like(t)),
+            bytes: meta.is_file().then_some(meta.len()),
+            modified: meta.modified().ok().map(chrono_like),
         });
         if entries.len() >= 2000 {
             break;
         }
     }
-    entries.sort_by(|a, b| (a.kind != "dir", a.name.to_lowercase()).cmp(&(b.kind != "dir", b.name.to_lowercase())));
+    entries.sort_by_key(|a| (a.kind != "dir", a.name.to_lowercase()));
     Ok(json!({"root": root.to_string_lossy(), "path": atlas_core::workspace::relative_display(&root, &dir), "entries": entries}))
 }
 

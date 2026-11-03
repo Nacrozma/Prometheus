@@ -20,7 +20,7 @@
   /* Text */
   --text-1: #e7f1ff;
   --text-2: #a8b7cf;
-  --text-3: #6f809c;
+  --text-3: #8797b3; /* ≥5.2:1 on every dark surface */
   --text-inverse: #04141b;
 
   /* Accent — cyan / teal / ice */
@@ -67,21 +67,21 @@
   --line-3: rgb(15 40 80 / 0.24);
   --text-1: #0b1628;
   --text-2: #3b4a63;
-  --text-3: #66758e;
+  --text-3: #56657e; /* ≥4.8:1 on every light surface */
   --text-inverse: #ffffff;
-  --accent: #0b8fa8;
-  --accent-strong: #06748a;
+  --accent: #066b7e;
+  --accent-strong: #065f70;
   --accent-teal: #0f9488;
   --accent-soft: rgb(11 143 168 / 0.1);
   --accent-softer: rgb(11 143 168 / 0.05);
   --accent-glow: rgb(11 143 168 / 0.25);
-  --ok: #0f9d6b;
+  --ok: #076e49;
   --ok-soft: rgb(15 157 107 / 0.1);
-  --warn: #b7791f;
+  --warn: #8a5a12;
   --warn-soft: rgb(183 121 31 / 0.12);
-  --err: #d14343;
+  --err: #b02c2c;
   --err-soft: rgb(209 67 67 / 0.1);
-  --info: #2563eb;
+  --info: #1d4fd8;
   --info-soft: rgb(37 99 235 / 0.1);
   --shadow-1: 0 1px 2px rgb(15 23 42 / 0.06);
   --shadow-2: 0 8px 24px rgb(15 23 42 / 0.08);

@@ -5,7 +5,10 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { Builder, By, Key, until } from "selenium-webdriver";
+
+const AXE = fs.readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
 
 const APP = path.resolve("target/debug/atlas-desktop");
 const SHOTS = process.env.ATLAS_SCREENSHOTS; // optional directory for real screenshots
@@ -98,7 +101,8 @@ test("first-run onboarding completes and personalises Atlas", async () => {
 test("a read-only tool runs without approval and the result is verified", async () => {
   await send("calculate 6*7");
   await waitText("Done. Tool result:", 20000);
-  assert.match(await pageText(), /"result":\s*42/);
+  // The reply streams word by word; wait for the full result rather than racing the stream.
+  await driver.wait(async () => /"result":\s*42/.test(await pageText()), 10000, "calculator result 42 shown");
   await shot("05-tool-run");
 });
 
@@ -186,4 +190,30 @@ test("home dashboard reflects state", async () => {
   await go("1");
   await waitText("Recent conversations");
   await shot("14-home");
+});
+
+/** Run axe-core inside the real webview; fail on serious or critical violations. */
+async function audit(page) {
+  await driver.executeScript(AXE);
+  const result = await driver.executeAsyncScript(`
+    const done = arguments[arguments.length - 1];
+    axe.run(document, { resultTypes: ["violations"] }).then(r => done(JSON.stringify(r.violations.map(v => ({
+      id: v.id, impact: v.impact, help: v.help, nodes: v.nodes.slice(0, 3).map(n => n.target.join(" "))
+    }))))).catch(e => done(JSON.stringify([{ id: "axe-error", impact: "critical", help: String(e), nodes: [] }])));
+  `);
+  const violations = JSON.parse(result);
+  const blocking = violations.filter((v) => v.impact === "serious" || v.impact === "critical");
+  if (violations.length) console.log(`[a11y] ${page}:`, JSON.stringify(violations));
+  return blocking;
+}
+
+test("accessibility audit (axe-core) finds no serious or critical issues", async () => {
+  const failures = {};
+  for (const [key, page] of [["1", "home"], ["2", "companion"], ["4", "mission-control"], ["6", "memory"], ["8", "integrations"], [",", "settings"]]) {
+    await go(key);
+    await driver.sleep(500);
+    const blocking = await audit(page);
+    if (blocking.length) failures[page] = blocking;
+  }
+  assert.deepEqual(failures, {});
 });

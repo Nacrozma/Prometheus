@@ -1,5 +1,8 @@
 # Prometheus
 
+> **Also in this repository:** [`atlas/`](atlas/) contains **ATLAS Co-Pilot**, a separate local-first AI
+> desktop app (Tauri + Rust + React). It does not share code with Prometheus. See [atlas/README.md](atlas/README.md).
+
 A local, terminal-based AI assistant written in Python. It talks to LLM providers through an
 OpenAI-compatible router, keeps persistent memory and task state in JSON files, and can call a
 set of tools (files, shell, web search, scheduling, sandboxed code execution).

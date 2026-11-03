@@ -41,7 +41,7 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
   return (
     <aside aria-label="Conversations" className="flex w-72 shrink-0 flex-col border-r border-line-1 bg-bg-0/40">
       <div className="space-y-2 border-b border-line-1 p-3">
-        <Button variant="primary" className="w-full" icon={<MessageSquarePlus className="size-4" aria-hidden />} onClick={() => newConversation(projectId || null)}>
+        <Button variant="primary" className="w-full" icon={<MessageSquarePlus className="size-4" aria-hidden />} onClick={() => newConversation(projectId || undefined)}>
           New conversation
         </Button>
         <div className="relative">
@@ -234,7 +234,7 @@ export function CompanionPage() {
     let id = activeId;
     if (!id) {
       try {
-        const c = await api.createConversation(null);
+        const c = await api.createConversation((await api.settings()).default_project_id);
         id = c.id;
         openConversation(id);
       } catch (e) {

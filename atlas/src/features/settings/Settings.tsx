@@ -322,6 +322,9 @@ function LimitsSection({ s, save }: { s: Settings; save: (n: Settings) => Promis
         <Row title="Request timeout (seconds)">
           <NumberInput label="Request timeout" value={l.request_timeout_secs} min={10} max={1800} onCommit={(v) => set({ request_timeout_secs: v ?? 300 })} />
         </Row>
+        <Row title="Tool time limit (seconds)" desc="Upper bound for any single tool run; a tool's own limit may be lower.">
+          <NumberInput label="Tool time limit" value={l.tool_timeout_secs} min={1} max={300} onCommit={(v) => set({ tool_timeout_secs: v ?? 30 })} />
+        </Row>
         <Row title="Approval timeout (seconds)" desc="An unanswered approval expires and the action is not performed.">
           <NumberInput label="Approval timeout" value={l.approval_timeout_secs} min={15} max={3600} onCommit={(v) => set({ approval_timeout_secs: v ?? 600 })} />
         </Row>

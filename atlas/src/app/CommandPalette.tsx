@@ -6,8 +6,10 @@ import { useAtlasQuery } from "@/lib/query";
 import { useUi, type SettingsSection } from "@/state/ui";
 import { emergencyStop, NAV } from "./Rail";
 
-export async function newConversation(projectId: string | null = null) {
-  const c = await api.createConversation(projectId);
+/** Start a conversation. Without an explicit project, the default project from Settings applies. */
+export async function newConversation(projectId?: string | null) {
+  const project = projectId === undefined ? (await api.settings()).default_project_id : projectId;
+  const c = await api.createConversation(project);
   useUi.getState().openConversation(c.id);
 }
 
