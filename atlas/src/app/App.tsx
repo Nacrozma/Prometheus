@@ -1,5 +1,6 @@
 import * as RadixTooltip from "@radix-ui/react-tooltip";
 import { useEffect, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Toaster } from "sonner";
 import { Emblem } from "@/components/Emblem";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -16,6 +17,8 @@ export function applyAppearance(s: Settings | undefined) {
   const theme = s?.appearance.theme ?? "dark";
   const resolved = theme === "system" ? (window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark") : theme;
   root.dataset.theme = resolved;
+  // Match the native title bar (Windows 10/11, macOS). Cosmetic: ignore failures.
+  if (isTauri()) void getCurrentWindow().setTheme(resolved).catch(() => {});
   root.dataset.motion = s?.appearance.motion ?? "system";
   root.style.setProperty("--font-scale", String((s?.appearance.font_scale ?? 100) / 100));
 }

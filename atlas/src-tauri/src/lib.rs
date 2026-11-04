@@ -78,6 +78,8 @@ pub fn run() {
                 .inner_size(1320.0, 860.0)
                 .min_inner_size(760.0, 560.0)
                 .background_color(tauri::window::Color(7, 11, 20, 255))
+                // Dark title bar on Windows 10/11 from the first frame; the UI updates it with the theme.
+                .theme(Some(tauri::Theme::Dark))
                 .on_navigation(navigation_allowed)
                 .build()?;
             Ok(())

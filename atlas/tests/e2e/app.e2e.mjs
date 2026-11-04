@@ -10,13 +10,19 @@ import { Builder, By, Key, until } from "selenium-webdriver";
 
 const AXE = fs.readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
 
-const APP = path.resolve("target/debug/atlas-desktop");
+const APP = path.resolve(process.platform === "win32" ? "target/debug/atlas-desktop.exe" : "target/debug/atlas-desktop");
 const SHOTS = process.env.ATLAS_SCREENSHOTS; // optional directory for real screenshots
-const HOME = process.env.HOME;
 let driver;
-/** Linux has no Documents folder unless XDG user dirs are configured; Atlas then uses $HOME. */
-const workspaceDir = () =>
-  [path.join(HOME, "Documents", "Atlas Workspace"), path.join(HOME, "Atlas Workspace")].find((p) => fs.existsSync(p)) ?? "";
+let WORKSPACE = "";
+/** The workspace folder as the app itself reports it (Documents differs per OS and setup). */
+async function loadWorkspace() {
+  const settings = await driver.executeAsyncScript(
+    "const done = arguments[arguments.length - 1]; window.__TAURI_INTERNALS__.invoke('settings_get').then(done, (e) => done(null));",
+  );
+  WORKSPACE = settings?.workspace_dir ?? "";
+  assert.ok(WORKSPACE, "the app reports a workspace folder");
+}
+const workspaceDir = () => WORKSPACE;
 
 const xpText = (tag, text) => By.xpath(`//${tag}[contains(normalize-space(.), ${JSON.stringify(text)})]`);
 async function find(locator, ms = 15000) {
@@ -84,6 +90,7 @@ test("first-run onboarding completes and personalises Atlas", async () => {
   await waitText("Choose a workspace folder");
   await click("Use Documents/Atlas Workspace");
   await waitText("Workspace:");
+  await loadWorkspace();
   await click("Add a sample file (demo data)");
   await waitText("Demo file added");
   const sample = path.join(workspaceDir(), "Atlas Sample (demo data)", "household-budget-DEMO.csv");

@@ -111,8 +111,9 @@ pub fn validate_secret(secret: &str) -> Result<String> {
     if s.is_empty() {
         return Err(AtlasError::Validation("the key is empty".into()));
     }
-    if s.len() > 4096 || s.contains(['\n', '\r']) {
-        return Err(AtlasError::Validation("the key must be a single line under 4096 characters".into()));
+    // Windows Credential Manager stores at most 2560 bytes per secret; stay well inside it.
+    if s.len() > 2048 || s.contains(['\n', '\r']) {
+        return Err(AtlasError::Validation("the key must be a single line under 2048 characters".into()));
     }
     Ok(s.to_string())
 }

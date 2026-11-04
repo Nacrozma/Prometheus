@@ -1,4 +1,4 @@
-# Checks and unsigned builds for ATLAS Co-Pilot on Linux, Windows and macOS.
+# ATLAS Co-Pilot: checks, desktop end-to-end tests and unsigned builds.
 name: atlas
 on:
   push:
@@ -41,6 +41,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: cargo test --workspace
+      - name: OS credential store round-trip (Windows Credential Manager)
+        if: runner.os == 'Windows'
+        run: cargo test -p atlas-core --lib os_keyring -- --ignored
       - run: pnpm tauri build
       - uses: actions/upload-artifact@v4
         with:
@@ -52,3 +55,59 @@ jobs:
             atlas/target/release/bundle/**/*.exe
             atlas/target/release/bundle/**/*.dmg
           if-no-files-found: warn
+
+  # Drives the real desktop app over WebDriver (tauri-driver) with the scripted e2e provider.
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: atlas
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb
+      - name: msedgedriver matching the WebView2 runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $ver = (Get-ItemProperty $key).pv
+          Write-Host "WebView2 runtime $ver"
+          $zip = "$env:RUNNER_TEMP\edgedriver.zip"
+          try { Invoke-WebRequest "https://msedgedriver.microsoft.com/$ver/edgedriver_win64.zip" -OutFile $zip }
+          catch { Invoke-WebRequest "https://msedgedriver.azureedge.net/$ver/edgedriver_win64.zip" -OutFile $zip }
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\edgedriver" -Force
+          "MSEDGEDRIVER=$env:RUNNER_TEMP\edgedriver\msedgedriver.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: atlas/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: atlas
+          key: e2e
+      - run: cargo install tauri-driver --locked
+      - run: pnpm install --frozen-lockfile
+      - name: Desktop end-to-end tests
+        run: ATLAS_SCREENSHOTS="$RUNNER_TEMP/screenshots" ATLAS_FAILSHOTS="$RUNNER_TEMP/failures" tests/e2e/run.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/screenshots
+            ${{ runner.temp }}/failures
+          if-no-files-found: ignore

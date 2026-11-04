@@ -26,6 +26,32 @@ fn check_relative(rel: &str) -> Result<PathBuf> {
     Ok(p.to_path_buf())
 }
 
+/// Names Windows reserves for devices; `CON.txt` is still the console device there.
+const RESERVED: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1",
+    "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// Portable file-name rules applied to every component of a path Atlas creates, on every OS, so a
+/// workspace synced between machines never receives a name Windows cannot open (or that opens a device).
+pub fn check_portable_name(name: &str) -> Result<()> {
+    let invalid = |why: &str| Err(AtlasError::Validation(format!("'{name}' is not a valid file name: {why}")));
+    if name.is_empty() || name.chars().count() > 200 {
+        return invalid("it must be 1-200 characters");
+    }
+    if let Some(c) = name.chars().find(|c| c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\\')) {
+        return invalid(&format!("it contains {c:?}"));
+    }
+    if name.ends_with('.') || name.ends_with(' ') {
+        return invalid("it ends with a dot or a space");
+    }
+    let stem = name.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    if RESERVED.contains(&stem.as_str()) {
+        return invalid("Windows reserves that name for a device");
+    }
+    Ok(())
+}
+
 pub fn canonical_root(root: &Path) -> Result<PathBuf> {
     root.canonicalize().map_err(|_| AtlasError::NotFound("the workspace folder does not exist".into()))
 }
@@ -46,6 +72,11 @@ pub fn resolve_existing(root: &Path, rel: &str) -> Result<PathBuf> {
 pub fn resolve_new(root: &Path, rel: &str) -> Result<PathBuf> {
     let root = canonical_root(root)?;
     let rel = check_relative(rel)?;
+    for comp in rel.components() {
+        if let Component::Normal(n) = comp {
+            check_portable_name(&n.to_string_lossy())?;
+        }
+    }
     let file_name = rel.file_name().ok_or_else(|| AtlasError::Validation("missing file name".into()))?.to_owned();
     let ext = rel.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
     if !TEXT_EXTENSIONS.contains(&ext.as_str()) {
@@ -127,6 +158,20 @@ mod tests {
         write_new_file(&p, "hello").unwrap();
         assert_eq!(std::fs::read_to_string(root.join("notes/sub/new.md")).unwrap(), "hello");
         assert!(write_new_file(&p, "again").is_err());
+    }
+
+    #[test]
+    fn refuses_names_windows_cannot_open() {
+        let dir = tempfile::tempdir().unwrap();
+        for bad in ["con.txt", "notes/NUL.md", "aux", "Lpt1.csv", "a:b.txt", "what?.md", "trailing.txt.", "dir /x.md"] {
+            assert!(resolve_new(dir.path(), bad).is_err(), "{bad} must be refused");
+        }
+        // On Windows a backslash is a separator; elsewhere it would create a name Windows can't open.
+        #[cfg(not(windows))]
+        assert!(resolve_new(dir.path(), "x\\y.txt").is_err());
+        for ok in ["console.txt", "notes/null-results.md", "Comet 1.md", "a b/c.txt"] {
+            assert!(resolve_new(dir.path(), ok).is_ok(), "{ok} must be allowed");
+        }
     }
 
     #[cfg(unix)]

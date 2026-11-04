@@ -270,7 +270,13 @@ pub fn slug(title: &str) -> String {
         .collect::<Vec<_>>()
         .join("-");
     let s: String = s.chars().take(60).collect();
-    if s.is_empty() { "untitled".into() } else { s }
+    if s.is_empty() {
+        "untitled".into()
+    } else if crate::workspace::check_portable_name(&s).is_err() {
+        format!("{s}-document") // e.g. a title of "Con" must not become a Windows device name
+    } else {
+        s
+    }
 }
 
 fn draft_path(root: &Path, title: &str) -> String {
@@ -308,5 +314,17 @@ impl Tool for DraftDocument {
         let body = input["body_markdown"].as_str().unwrap_or_default();
         let rel = draft_path(&root, title);
         write_and_verify(&root, &rel, &format!("# {title}\n\n{body}\n"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::slug;
+
+    #[test]
+    fn slugs_are_portable() {
+        assert_eq!(slug("My Trip: Plan!"), "my-trip-plan");
+        assert_eq!(slug("Con"), "con-document");
+        assert_eq!(slug("???"), "untitled");
     }
 }
