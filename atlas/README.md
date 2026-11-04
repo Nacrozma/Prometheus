@@ -38,11 +38,12 @@ What works now, and what doesn't:
 
 | Area | Status |
 |---|---|
-| Desktop app (Linux), first-run setup, all main screens | Built and tested end-to-end on Linux x86_64 |
+| Desktop app, first-run setup, all main screens | Tested end-to-end on Linux x86_64; Windows: see below |
 | Anthropic and OpenAI-compatible streaming, tool calling | Tested against mock servers that replay each API's wire format. Not yet exercised with a live API key. |
 | Ollama (local) | Same adapter as OpenAI-compatible; tested against a mock server |
 | Web search (Tavily) | Tested against a mock server; needs your Tavily key |
-| Windows and macOS builds | Configured (`.github/workflows/atlas.yml`) but **not yet built or tested** |
+| Windows | CI builds `.exe`/`.msi` installers and passes all unit, core and frontend tests on Windows; desktop e2e on Windows is set up in CI (result pending). Installers are **unsigned**. See [docs/WINDOWS.md](docs/WINDOWS.md) |
+| macOS | CI builds and unit tests pass; not run interactively; unsigned |
 | PDF / Word / Excel reading | **Not supported** (UTF-8 text formats only) |
 | Voice | Speech-to-text **not implemented**; read-aloud uses OS voices only where the webview exposes them |
 | Email, calendar, cloud files, Git, custom HTTP tools | **Planned**; shown as "not available in this version" |
@@ -81,6 +82,6 @@ atlas/
 ## Documentation
 
 [Architecture](docs/ARCHITECTURE.md) · [Security](docs/SECURITY.md) · [Privacy](docs/PRIVACY.md) ·
-[Setup](docs/SETUP.md) · [Providers](docs/PROVIDERS.md) · [Tool development](docs/TOOL_DEVELOPMENT.md) ·
+[Setup](docs/SETUP.md) · [Windows](docs/WINDOWS.md) · [Providers](docs/PROVIDERS.md) · [Tool development](docs/TOOL_DEVELOPMENT.md) ·
 [Integrations](docs/INTEGRATIONS.md) · [Memory](docs/MEMORY.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) ·
 [Release](docs/RELEASE.md) · [Testing](docs/TESTING.md) · [Decisions](docs/adr/) · [Changelog](CHANGELOG.md)
