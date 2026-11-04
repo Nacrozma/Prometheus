@@ -26,6 +26,7 @@ export function applyAppearance(s: Settings | undefined) {
 function Splash({ leaving }: { leaving: boolean }) {
   return (
     <div
+      data-splash
       className="atmosphere fixed inset-0 z-50 grid place-items-center bg-bg-0 transition-opacity duration-[var(--dur-slow)]"
       style={{ opacity: leaving ? 0 : 1, pointerEvents: leaving ? "none" : "auto" }}
       aria-hidden={leaving}
@@ -60,6 +61,7 @@ export function App() {
   const settings = useAtlasQuery("settings", () => (isTauri() ? api.settings() : Promise.reject(new Error("no core"))), ["settings"]);
   const [minDelayDone, setMinDelayDone] = useState(false);
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
+  const [splashGone, setSplashGone] = useState(false);
 
   useEffect(() => {
     const motionReduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -79,9 +81,16 @@ export function App() {
     return () => mq?.removeEventListener("change", h);
   }, [settings.data]);
 
+  const ready = Boolean(minDelayDone && (settings.data || settings.error));
+  // Remove the splash from the page once its fade-out has finished.
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => setSplashGone(true), 600);
+    return () => clearTimeout(t);
+  }, [ready]);
+
   if (!isTauri()) return <NotInDesktop />;
 
-  const ready = minDelayDone && (settings.data || settings.error);
   return (
     <RadixTooltip.Provider>
       {settings.error && !settings.data ? (
@@ -101,7 +110,7 @@ export function App() {
           <Shell />
         </ErrorBoundary>
       ) : null}
-      <Splash leaving={Boolean(ready)} />
+      {!splashGone && <Splash leaving={ready} />}
       <Toaster
         position="bottom-center"
         toastOptions={{

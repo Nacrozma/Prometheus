@@ -33,9 +33,10 @@ async function click(text, tag = "button") {
   await driver.wait(until.elementIsEnabled(el), 15000);
   await el.click();
 }
+/** Wait until `text` is visible on the page (matches across text nodes, unlike an XPath text() test). */
 async function waitText(text, ms = 15000) {
   try {
-    return await find(By.xpath(`//*[contains(normalize-space(text()), ${JSON.stringify(text)})]`), ms);
+    await driver.wait(async () => (await driver.executeScript("return document.body.innerText")).includes(text), ms, `text "${text}"`);
   } catch (e) {
     const dir = process.env.ATLAS_FAILSHOTS ?? "test-results";
     fs.mkdirSync(dir, { recursive: true });
@@ -57,7 +58,19 @@ async function go(key) {
   await driver.actions().keyDown(Key.CONTROL).sendKeys(key).keyUp(Key.CONTROL).perform();
   await driver.sleep(250);
 }
+/** Occurrences of `text` on the page, to wait for a new reply rather than matching an earlier one. */
+async function countText(text) {
+  return (await pageText()).split(text).length - 1;
+}
+async function waitForMore(text, before, ms = 20000) {
+  await driver.wait(async () => (await countText(text)) > before, ms, `a new "${text}"`);
+}
+/** Atlas ignores Enter while it is responding (the composer shows Stop), so wait until it is idle. */
+async function waitIdle(ms = 20000) {
+  await driver.wait(async () => (await driver.findElements(xpText("button", "Stop"))).length === 0, ms, "Atlas idle");
+}
 async function send(text) {
+  await waitIdle();
   // The composer can re-render between lookup and typing; retry on a stale reference.
   for (let attempt = 0; ; attempt++) {
     try {
@@ -90,6 +103,8 @@ after(async () => {
 
 test("first-run onboarding completes and personalises Atlas", async () => {
   await waitText("Hello. I'm Atlas.", 30000);
+  // The startup splash fades out over the first screen; wait until it has been removed.
+  await driver.wait(async () => (await driver.findElements(By.css("[data-splash]"))).length === 0, 15000, "splash removed");
   await shot("01-welcome");
   await click("Get started");
   const name = await find(By.id("ob-name"));
@@ -120,19 +135,22 @@ test("first-run onboarding completes and personalises Atlas", async () => {
 });
 
 test("a read-only tool runs without approval and the result is verified", async () => {
+  const before = await countText("Done. Tool result:");
   await send("calculate 6*7");
-  await waitText("Done. Tool result:", 20000);
+  await waitForMore("Done. Tool result:", before);
   // The reply streams word by word; wait for the full result rather than racing the stream.
   await driver.wait(async () => /"result":\s*42/.test(await pageText()), 10000, "calculator result 42 shown");
   await shot("05-tool-run");
 });
 
 test("a local write pauses for approval and runs exactly once when approved", async () => {
+  const before = await countText("Done. Tool result:");
   await send("please create a note");
   await waitText("Approval needed", 20000);
   await shot("06-approval");
   await click("Approve");
-  await waitText("Done. Tool result:", 20000);
+  await waitForMore("Done. Tool result:", before);
+  await waitIdle();
   const file = path.join(workspaceDir(), "e2e", "hello.md");
   assert.equal(fs.readFileSync(file, "utf8"), "# Hello from Atlas\n");
 });
@@ -143,6 +161,7 @@ test("declining an approval performs nothing", async () => {
   await waitText("Approval needed", 20000);
   await click("Decline");
   await waitText("The action did not complete", 20000);
+  await waitIdle();
   const after = fs.readdirSync(path.join(workspaceDir(), "e2e"));
   assert.deepEqual(after, before);
 });
