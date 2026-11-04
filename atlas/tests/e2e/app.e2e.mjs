@@ -66,7 +66,12 @@ async function send(text) {
 before(async () => {
   driver = await new Builder()
     .usingServer("http://127.0.0.1:4444/")
-    .withCapabilities({ browserName: "wry", "tauri:options": { application: APP } })
+    // On Windows, `webviewOptions` puts msedgedriver into WebView2 mode; without it msedgedriver treats the
+    // app as an Edge browser binary and waits for a DevToolsActivePort file that never appears.
+    .withCapabilities({
+      browserName: "wry",
+      "tauri:options": process.platform === "win32" ? { application: APP, webviewOptions: {} } : { application: APP },
+    })
     .build();
 });
 

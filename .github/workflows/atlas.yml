@@ -101,8 +101,29 @@ jobs:
           key: e2e
       - run: cargo install tauri-driver --locked
       - run: pnpm install --frozen-lockfile
+      - name: Build the e2e desktop binary
+        run: pnpm tauri build --debug --no-bundle --features e2e
+      # Independent of WebDriver: launch the app, confirm it stays up, and capture the real Windows desktop.
+      - name: Windows launch smoke test
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $shots = "$env:RUNNER_TEMP\screenshots"; New-Item -ItemType Directory -Force $shots | Out-Null
+          $env:ATLAS_DATA_DIR = "$env:RUNNER_TEMP\smoke-data"
+          $p = Start-Process -FilePath "target\debug\atlas-desktop.exe" -PassThru `
+                 -RedirectStandardOutput "$env:RUNNER_TEMP\smoke.out" -RedirectStandardError "$env:RUNNER_TEMP\smoke.err"
+          Start-Sleep -Seconds 15
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$shots\00-windows-launch.png")
+          Get-Content "$env:RUNNER_TEMP\smoke.err" -ErrorAction SilentlyContinue | Select-Object -Last 30
+          if ($p.HasExited) { Write-Error "Atlas exited during startup with code $($p.ExitCode)"; exit 1 }
+          Write-Host "Atlas is running after 15 s (pid $($p.Id)); WebView2 processes: $((Get-Process msedgewebview2 -ErrorAction SilentlyContinue).Count)"
+          Stop-Process -Id $p.Id -Force
       - name: Desktop end-to-end tests
-        run: ATLAS_SCREENSHOTS="$RUNNER_TEMP/screenshots" ATLAS_FAILSHOTS="$RUNNER_TEMP/failures" tests/e2e/run.sh
+        run: SKIP_BUILD=1 ATLAS_SCREENSHOTS="$RUNNER_TEMP/screenshots" ATLAS_FAILSHOTS="$RUNNER_TEMP/failures" tests/e2e/run.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
