@@ -73,7 +73,13 @@ pub fn run() {
             e2e::seed(&atlas);
             app.manage(AppState { atlas, pending_restore: Mutex::new(None) });
 
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            #[allow(unused_mut)]
+            let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()));
+            #[cfg(all(windows, feature = "e2e"))]
+            {
+                window = e2e::webview2_automation(window);
+            }
+            window
                 .title("ATLAS Co-Pilot")
                 .inner_size(1320.0, 860.0)
                 .min_inner_size(760.0, 560.0)

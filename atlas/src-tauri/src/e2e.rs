@@ -113,3 +113,36 @@ pub fn seed(atlas: &Atlas) {
         }
     }
 }
+
+/// WebDriver on Windows: msedgedriver passes its remote-debugging settings to WebView2 through
+/// `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`. Tauri always sets its own browser arguments and data folder,
+/// which can take precedence, so the automation build merges msedgedriver's arguments in explicitly and
+/// honours its user-data folder. It also records what it received for CI diagnostics.
+#[cfg(windows)]
+pub fn webview2_automation<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
+    mut builder: tauri::WebviewWindowBuilder<'a, R, M>,
+) -> tauri::WebviewWindowBuilder<'a, R, M> {
+    let mut report = format!("args: {:?}\n", std::env::args().collect::<Vec<_>>());
+    for (k, v) in std::env::vars().filter(|(k, _)| k.starts_with("WEBVIEW2")) {
+        report.push_str(&format!("{k}={v}\n"));
+    }
+    if let Ok(extra) = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
+        // Tauri's own defaults, plus everything msedgedriver asked for.
+        let mut args = String::from("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
+        for a in extra.split_whitespace() {
+            if let Some(dir) = a.strip_prefix("--user-data-dir=") {
+                builder = builder.data_directory(std::path::PathBuf::from(dir.trim_matches('"')));
+                report.push_str(&format!("data_directory={dir}\n"));
+            }
+            args.push(' ');
+            args.push_str(a);
+        }
+        report.push_str(&format!("additional_browser_args={args}\n"));
+        builder = builder.additional_browser_args(&args);
+    }
+    if let Ok(dir) = std::env::var("WEBVIEW2_USER_DATA_FOLDER") {
+        builder = builder.data_directory(std::path::PathBuf::from(dir));
+    }
+    let _ = std::fs::write(std::env::temp_dir().join("atlas-e2e-startup.txt"), report);
+    builder
+}

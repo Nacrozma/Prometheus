@@ -58,9 +58,18 @@ async function go(key) {
   await driver.sleep(250);
 }
 async function send(text) {
-  const box = await find(By.id("composer"));
-  await driver.wait(until.elementIsEnabled(box), 15000);
-  await box.sendKeys(text, Key.ENTER);
+  // The composer can re-render between lookup and typing; retry on a stale reference.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const box = await find(By.id("composer"));
+      await driver.wait(until.elementIsEnabled(box), 15000);
+      await box.sendKeys(text, Key.ENTER);
+      return;
+    } catch (e) {
+      if (e?.name !== "StaleElementReferenceError" || attempt >= 4) throw e;
+      await driver.sleep(200);
+    }
+  }
 }
 
 before(async () => {

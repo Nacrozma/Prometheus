@@ -124,6 +124,10 @@ jobs:
           Stop-Process -Id $p.Id -Force
       - name: Desktop end-to-end tests
         run: SKIP_BUILD=1 ATLAS_SCREENSHOTS="$RUNNER_TEMP/screenshots" ATLAS_FAILSHOTS="$RUNNER_TEMP/failures" tests/e2e/run.sh
+      - name: WebView2 automation diagnostics
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: Get-Content "$env:TEMP\atlas-e2e-startup.txt" -ErrorAction SilentlyContinue
       - uses: actions/upload-artifact@v4
         if: always()
         with:
