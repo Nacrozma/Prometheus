@@ -27,8 +27,14 @@ First release of ATLAS Co-Pilot.
 - `pnpm tauri build --bundles deb,appimage`: produced `ATLAS Co-Pilot_0.1.0_amd64.deb` (9.6 MiB) and
   `.AppImage` (83.9 MiB); the `.deb` was installed with `dpkg` and launched.
 
+### Windows (verified in CI on windows-latest, run 6)
+- Unit, core and frontend tests; Windows Credential Manager round-trip; launch smoke test (app running after 15 s);
+  desktop e2e 11/11 including the axe-core audit; NSIS `.exe` and `.msi` installers built.
+- Windows hardening: portable file names (no device names such as `CON`/`NUL`), keys capped below the Credential
+  Manager limit, embedded WebView2 bootstrapper, per-user install, title bar follows the app theme.
+
 ### Known limitations
 - Live provider APIs were not exercised in development (no keys available); adapters are tested against mock
   servers replaying each API's wire format.
-- Windows and macOS builds are configured but not yet built or tested. Installers are unsigned.
+- macOS builds and unit tests pass in CI but the app has not been run interactively there. Installers are unsigned.
 - No PDF/Office parsing, no speech-to-text, no auto-update; external integrations other than web search are planned.

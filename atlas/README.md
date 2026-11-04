@@ -38,11 +38,11 @@ What works now, and what doesn't:
 
 | Area | Status |
 |---|---|
-| Desktop app, first-run setup, all main screens | Tested end-to-end on Linux x86_64; Windows: see below |
+| Desktop app, first-run setup, all main screens | Tested end-to-end (real app over WebDriver) on Linux x86_64 and Windows x64 |
 | Anthropic and OpenAI-compatible streaming, tool calling | Tested against mock servers that replay each API's wire format. Not yet exercised with a live API key. |
 | Ollama (local) | Same adapter as OpenAI-compatible; tested against a mock server |
 | Web search (Tavily) | Tested against a mock server; needs your Tavily key |
-| Windows | CI builds `.exe`/`.msi` installers and passes all unit, core and frontend tests on Windows; desktop e2e on Windows is set up in CI (result pending). Installers are **unsigned**. See [docs/WINDOWS.md](docs/WINDOWS.md) |
+| Windows | CI on Windows: unit, core and frontend tests, Credential Manager round-trip, launch smoke test, and the 11-test desktop e2e suite (incl. accessibility audit) all pass; `.exe`/`.msi` installers built. Installers are **unsigned**. See [docs/WINDOWS.md](docs/WINDOWS.md) |
 | macOS | CI builds and unit tests pass; not run interactively; unsigned |
 | PDF / Word / Excel reading | **Not supported** (UTF-8 text formats only) |
 | Voice | Speech-to-text **not implemented**; read-aloud uses OS voices only where the webview exposes them |
