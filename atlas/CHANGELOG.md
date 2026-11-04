@@ -16,7 +16,7 @@ First release of ATLAS Co-Pilot.
 - Desktop app (Tauri 2 + React 19): first-run wizard, Home, Companion with streaming and inline approvals,
   live Atlas Map, Mission Control, Projects, Memory, Files, Integrations, Voice (honest availability), Settings
   (12 sections), command palette, keyboard shortcuts, emergency stop, dark and light themes, reduced motion.
-- Documentation, ADRs, CI workflow for Linux/Windows/macOS (not yet executed).
+- Documentation, ADRs, and a CI workflow for Linux, Windows and macOS (checks, desktop e2e, installers).
 
 ### Verified for this release (Linux x86_64, Ubuntu 24.04)
 - `cargo test --workspace`: 65 passed (48 core unit, 16 core end-to-end, 1 shell); plus 1 OS-keyring round-trip
