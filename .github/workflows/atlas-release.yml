@@ -1,7 +1,14 @@
 # Publishes an ATLAS Co-Pilot release with the Windows installer attached.
-# Trigger: push a tag named atlas-v<version>, e.g. `git tag atlas-v0.1.0 && git push origin atlas-v0.1.0`.
+# Trigger: Actions → atlas-release → "Run workflow" (enter the tag, e.g. atlas-v0.1.0),
+# or push a tag named atlas-v<version>. The release step creates the tag if it does not exist.
 name: atlas-release
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (atlas-v<version>)"
+        required: true
+        default: "atlas-v0.1.0"
   push:
     tags: ["atlas-v*"]
 
@@ -65,8 +72,9 @@ jobs:
       - name: Create or update the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
+          case "$TAG" in atlas-v*) ;; *) echo "tag must look like atlas-v<version>" >&2; exit 1 ;; esac
           VERSION="${TAG#atlas-v}"
           {
             echo "ATLAS Co-Pilot ${VERSION} for Windows 10/11 (64-bit)."

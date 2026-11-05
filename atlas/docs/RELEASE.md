@@ -21,7 +21,8 @@ Artifacts land in `target/release/bundle/<format>/`.
 
 ## Publishing a release
 
-Push a tag named `atlas-v<version>`; `.github/workflows/atlas-release.yml` runs the checks, builds the Windows
+Run **Actions → atlas-release → Run workflow** with the tag (e.g. `atlas-v0.1.0`), or push a tag named
+`atlas-v<version>`. `.github/workflows/atlas-release.yml` runs the checks, builds the Windows
 installers, and publishes a GitHub Release with `ATLAS-Co-Pilot-Setup-x64.exe`, `ATLAS-Co-Pilot-x64.msi` and
 `SHA256SUMS.txt`. Update the download links in `INSTALL.md` when the version changes.
 
