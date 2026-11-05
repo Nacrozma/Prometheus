@@ -19,6 +19,16 @@ Artifacts land in `target/release/bundle/<format>/`.
 
 `.github/workflows/atlas.yml` runs checks and unsigned builds on all three; it has not been executed yet.
 
+## Publishing a release
+
+Push a tag named `atlas-v<version>`; `.github/workflows/atlas-release.yml` runs the checks, builds the Windows
+installers, and publishes a GitHub Release with `ATLAS-Co-Pilot-Setup-x64.exe`, `ATLAS-Co-Pilot-x64.msi` and
+`SHA256SUMS.txt`. Update the download links in `INSTALL.md` when the version changes.
+
+```bash
+git tag atlas-v0.1.0 && git push origin atlas-v0.1.0
+```
+
 ## Signing (required for a smooth install, not yet done)
 
 * **macOS:** an Apple Developer ID Application certificate and notarization credentials

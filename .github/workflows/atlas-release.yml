@@ -1,0 +1,89 @@
+# Publishes an ATLAS Co-Pilot release with the Windows installer attached.
+# Trigger: push a tag named atlas-v<version>, e.g. `git tag atlas-v0.1.0 && git push origin atlas-v0.1.0`.
+name: atlas-release
+on:
+  push:
+    tags: ["atlas-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: atlas
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: atlas/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: atlas
+      - run: pnpm install --frozen-lockfile
+      - name: Checks before release
+        run: |
+          pnpm typecheck
+          pnpm test
+          cargo test --workspace
+      - run: pnpm tauri build
+      - name: Collect installers with stable names and checksums
+        shell: pwsh
+        run: |
+          $out = "$env:GITHUB_WORKSPACE\release"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $exe = Get-ChildItem target\release\bundle\nsis\*-setup.exe | Select-Object -First 1
+          $msi = Get-ChildItem target\release\bundle\msi\*.msi | Select-Object -First 1
+          Copy-Item $exe.FullName "$out\ATLAS-Co-Pilot-Setup-x64.exe"
+          Copy-Item $msi.FullName "$out\ATLAS-Co-Pilot-x64.msi"
+          Get-ChildItem $out | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Set-Content -Encoding ascii "$out\SHA256SUMS.txt"
+          Get-Content "$out\SHA256SUMS.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: release/*
+
+  publish:
+    needs: windows
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-windows
+          path: release
+      - name: Create or update the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#atlas-v}"
+          {
+            echo "ATLAS Co-Pilot ${VERSION} for Windows 10/11 (64-bit)."
+            echo
+            echo "**Install:** download \`ATLAS-Co-Pilot-Setup-x64.exe\` below and run it."
+            echo "Full instructions: [INSTALL.md](https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/INSTALL.md)"
+            echo
+            echo "The installer is not code-signed yet: if Windows shows \"Windows protected your PC\", click **More info → Run anyway**."
+            echo
+            echo "SHA-256 checksums:"
+            echo '```'
+            cat release/SHA256SUMS.txt
+            echo '```'
+          } > notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" release/* --title "ATLAS Co-Pilot ${VERSION}" --notes-file notes.md --target "$GITHUB_SHA"
+          fi

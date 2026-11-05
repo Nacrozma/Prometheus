@@ -4,6 +4,9 @@ A local-first AI desktop companion and personal command center. Atlas talks with
 provider you choose, remembers only what you approve, carries out tasks with a set of permission-checked
 tools, and shows everything it can reach on a live **Atlas Map**.
 
+> **Just want to use it on Windows? → [How to install ATLAS Co-Pilot](../INSTALL.md)**
+> ([download the installer](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.1.0/ATLAS-Co-Pilot-Setup-x64.exe))
+
 ![Atlas Map](docs/screenshots/09-map-inspector.png)
 
 | | |
