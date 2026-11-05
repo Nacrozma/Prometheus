@@ -9,7 +9,7 @@ Anthropic or OpenAI, or the free Ollama app if you'd rather run AI on your own P
 
 ## 1. Download
 
-**[⬇ Download ATLAS-Co-Pilot-Setup-x64.exe](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.1.0/ATLAS-Co-Pilot-Setup-x64.exe)**
+**[⬇ Download ATLAS-Co-Pilot-Setup-x64.exe](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.1.0/ATLAS-Co-Pilot-Setup-x64.exe)** (8.5 MB)
 
 All files for this version are on the [release page](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.1.0):
 
@@ -109,7 +109,13 @@ In PowerShell, in your Downloads folder:
 Get-FileHash .\ATLAS-Co-Pilot-Setup-x64.exe -Algorithm SHA256
 ```
 
-The value should match the line for `ATLAS-Co-Pilot-Setup-x64.exe` in `SHA256SUMS.txt` on the release page.
+For version 0.1.0 it must be:
+
+```
+D136137A54F05D81E8E3B36B1D59427B55CA39BC002737AC7F47D1E4F6C70913
+```
+
+(The same values are in `SHA256SUMS.txt` on the release page.)
 
 ---
 
