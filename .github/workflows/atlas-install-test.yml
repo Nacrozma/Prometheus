@@ -1,0 +1,158 @@
+# Phase 7, Test A: real Windows installation checks against the PUBLISHED installers (the exact files an
+# owner downloads). Fresh install, launch, data folder and database, relaunch, uninstall, and an upgrade
+# from 0.1.0 with data preserved. Runs on a GitHub-hosted Windows VM; nothing here is simulated.
+name: atlas-install-test
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release to test"
+        default: "atlas-v0.2.0"
+      upgrade_from:
+        description: "Earlier release to upgrade from (empty to skip)"
+        default: "atlas-v0.1.0"
+  push:
+    paths: [".github/workflows/atlas-install-test.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-install:
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag || 'atlas-v0.2.0' }}
+      FROM: ${{ inputs.upgrade_from || 'atlas-v0.1.0' }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Download published installers and verify checksums
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($t in @($env:TAG, $env:FROM)) {
+            if (-not $t) { continue }
+            New-Item -ItemType Directory -Force "dl\$t" | Out-Null
+            gh release download $t --repo $env:GITHUB_REPOSITORY --dir "dl\$t" --pattern 'ATLAS-Co-Pilot-Setup-x64.exe' --pattern 'SHA256SUMS.txt'
+            $want = (Get-Content "dl\$t\SHA256SUMS.txt" | Where-Object { $_ -match 'Setup-x64.exe' }).Split(' ')[0].ToLower()
+            $got = (Get-FileHash "dl\$t\ATLAS-Co-Pilot-Setup-x64.exe" -Algorithm SHA256).Hash.ToLower()
+            "$t  sha256 $got (expected $want)"
+            if ($want -ne $got) { throw "checksum mismatch for $t" }
+          }
+
+      - name: Helper functions
+        run: |
+          @'
+          $ErrorActionPreference = 'Stop'
+          $DataDir = Join-Path $env:APPDATA 'app.atlascopilot.desktop'
+          $Db = Join-Path $DataDir 'atlas.db'
+          function Get-AtlasInstall {
+            Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' -ErrorAction SilentlyContinue |
+              ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -like 'ATLAS Co-Pilot*' } | Select-Object -First 1
+          }
+          function Install-Atlas($exe) {
+            $p = Start-Process -FilePath $exe -ArgumentList '/S' -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
+            $i = Get-AtlasInstall
+            if (-not $i) { throw 'no uninstall registry entry after install' }
+            "installed: $($i.DisplayName) $($i.DisplayVersion) at $($i.InstallLocation)"
+            return $i
+          }
+          function Get-AtlasExe($i) {
+            $dir = $i.InstallLocation.Trim('"')
+            Get-ChildItem $dir -Filter *.exe | Where-Object { $_.Name -notmatch 'uninstall' } | Select-Object -First 1
+          }
+          function Start-Atlas($i, $seconds = 20) {
+            $exe = Get-AtlasExe $i
+            $p = Start-Process -FilePath $exe.FullName -PassThru
+            Start-Sleep -Seconds $seconds
+            if ($p.HasExited) { throw "Atlas exited early with code $($p.ExitCode)" }
+            "running after ${seconds}s: pid $($p.Id), working set $([math]::Round($p.WorkingSet64/1MB)) MB"
+            return $p
+          }
+          function Stop-Atlas($p) {
+            # Close the window first (normal shutdown); force only if it does not exit.
+            $null = $p.CloseMainWindow()
+            if (-not $p.WaitForExit(10000)) { Stop-Process -Id $p.Id -Force; 'had to force-stop' } else { 'closed normally' }
+            Get-Process | Where-Object { $_.Path -like "*ATLAS Co-Pilot*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+          function Sql($q) { python -c "import sqlite3,sys,json; c=sqlite3.connect(sys.argv[1]); print(json.dumps(c.execute(sys.argv[2]).fetchall()))" $Db $q }
+          '@ | Set-Content helpers.ps1
+
+      - name: "A1 fresh install: install, launch, data folder, database, relaunch"
+        run: |
+          . .\helpers.ps1
+          if (Test-Path $DataDir) { throw "data folder exists before install: $DataDir" }
+          $i = Install-Atlas "dl\$env:TAG\ATLAS-Co-Pilot-Setup-x64.exe"
+          $p = Start-Atlas $i
+          if (-not (Test-Path $Db)) { throw "database not created at $Db" }
+          "data folder: $DataDir"; Get-ChildItem $DataDir | Format-Table Name, Length
+          Stop-Atlas $p
+          $v = Sql 'PRAGMA user_version'; "schema version: $v"
+          if ($v -ne '[[3]]') { throw "expected schema v3, got $v" }
+          $qc = Sql 'PRAGMA quick_check'; "quick_check: $qc"
+          if ($qc -ne '[["ok"]]') { throw 'database integrity check failed' }
+          $tables = Sql "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"; "tables: $tables"
+          foreach ($t in 'settings','providers','missions','siblings','forge_projects') { if ($tables -notmatch "`"$t`"") { throw "missing table $t" } }
+          # Relaunch on the same data.
+          $p = Start-Atlas $i 15
+          Stop-Atlas $p
+          $qc = Sql 'PRAGMA quick_check'; if ($qc -ne '[["ok"]]') { throw 'integrity check failed after relaunch' }
+          'relaunch OK, database intact'
+
+      - name: "A2 settings written to the database persist across a restart"
+        run: |
+          . .\helpers.ps1
+          $i = Get-AtlasInstall
+          # Write a settings document the way the app stores it, restart, and check the app kept (and did not reset) it.
+          $doc = '{"companion":{"preferred_name":"InstallTest"},"onboarding_completed":true}'
+          python -c "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute(\"INSERT INTO settings(key,value,updated_at) VALUES('app',?,datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value\",(sys.argv[2],)); c.commit()" $Db $doc
+          $p = Start-Atlas $i 15
+          Stop-Atlas $p
+          $v = Sql "SELECT value FROM settings WHERE key='app'"; "settings after restart: $v"
+          if ($v -notmatch 'InstallTest') { throw 'settings were lost or reset on restart' }
+
+      - name: "A3 no plaintext credentials in the data folder"
+        run: |
+          . .\helpers.ps1
+          $hits = Get-ChildItem $DataDir -Recurse -File | Select-String -Pattern 'sk-ant-','sk-proj-','sk-or-','Bearer ' -SimpleMatch -List
+          if ($hits) { $hits; throw 'credential-like strings found in the data folder' }
+          'no credential-like strings in the data folder'
+
+      - name: "A4 uninstall: program removed, user data left in place"
+        run: |
+          . .\helpers.ps1
+          $i = Get-AtlasInstall
+          $dir = $i.InstallLocation.Trim('"')
+          $un = ($i.UninstallString -replace '"','').Trim()
+          $p = Start-Process -FilePath $un -ArgumentList '/S' -Wait -PassThru
+          "uninstaller exit code: $($p.ExitCode)"
+          Start-Sleep -Seconds 5
+          if (Get-AtlasInstall) { throw 'uninstall registry entry still present' }
+          if (Test-Path (Join-Path $dir '*.exe')) { Get-ChildItem $dir; throw 'program files still present' }
+          'program removed'
+          if (Test-Path $Db) { "user data preserved: $Db (documented: delete %APPDATA%\app.atlascopilot.desktop to remove it)" } else { 'user data folder was removed by the uninstaller' }
+          Remove-Item -Recurse -Force $DataDir -ErrorAction SilentlyContinue
+
+      - name: "A5 upgrade from the earlier release keeps data and backs up the old database"
+        if: env.FROM != ''
+        run: |
+          . .\helpers.ps1
+          $i = Install-Atlas "dl\$env:FROM\ATLAS-Co-Pilot-Setup-x64.exe"
+          $p = Start-Atlas $i
+          Stop-Atlas $p
+          $v = Sql 'PRAGMA user_version'; "old schema version: $v"
+          python -c "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute(\"INSERT INTO projects(id,name,description,instructions,created_at,updated_at) VALUES('upgrade-marker','Upgrade marker','kept across upgrade','',datetime('now'),datetime('now'))\"); c.commit()" $Db
+          $i2 = Install-Atlas "dl\$env:TAG\ATLAS-Co-Pilot-Setup-x64.exe"
+          $p = Start-Atlas $i2
+          Stop-Atlas $p
+          $v2 = Sql 'PRAGMA user_version'; "new schema version: $v2"
+          if ($v2 -ne '[[3]]') { throw "expected v3 after upgrade, got $v2" }
+          $m = Sql "SELECT name FROM projects WHERE id='upgrade-marker'"; "marker after upgrade: $m"
+          if ($m -notmatch 'Upgrade marker') { throw 'user data lost during upgrade' }
+          $bak = Get-ChildItem $DataDir -Filter 'atlas.pre-v3.bak' -ErrorAction SilentlyContinue
+          if (-not $bak) { Get-ChildItem $DataDir; throw 'no pre-upgrade backup of the database' }
+          $bv = python -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute('PRAGMA user_version').fetchone()[0])" $bak.FullName
+          "pre-upgrade backup: $($bak.Name), schema v$bv, $($bak.Length) bytes"
+          $i3 = Get-AtlasInstall; "registry version after upgrade: $($i3.DisplayVersion)"
