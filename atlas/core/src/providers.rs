@@ -5,7 +5,7 @@ use crate::ai::openai::OpenAiProvider;
 use crate::ai::{ChatProvider, ModelInfo, ProviderError, ProviderErrorKind, ProviderKind};
 use crate::credentials::{mask, provider_account, validate_secret, SharedSecrets};
 use crate::error::{AtlasError, Result};
-use crate::settings::Settings;
+use crate::settings::{RoutingMode, Settings, Tier};
 use crate::storage::{new_id, now, Db};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -217,10 +217,8 @@ impl ProviderFactory for DefaultFactory {
         }
         Ok(match cfg.kind {
             ProviderKind::Anthropic => Arc::new(AnthropicProvider::new(self.http.clone(), Some(&cfg.base_url), key.unwrap_or_default(), idle_timeout)),
-            ProviderKind::Openai | ProviderKind::OpenaiCompatible | ProviderKind::Ollama => {
-                Arc::new(OpenAiProvider::new(self.http.clone(), cfg.kind, &cfg.base_url, key, idle_timeout))
-            }
             ProviderKind::Mock => return Err(AtlasError::Validation("mock providers are test-only".into())),
+            _ => Arc::new(OpenAiProvider::new(self.http.clone(), cfg.kind, &cfg.base_url, key, idle_timeout)),
         })
     }
 }
@@ -234,6 +232,106 @@ pub struct Route {
     pub reason: String,
     /// True when the route differs from the user's preferred provider.
     pub fell_back: bool,
+    /// Model tier used, when tier routing chose the model.
+    pub tier: Option<Tier>,
+}
+
+/// What the router knows about a request when picking a tier. Built from the request itself;
+/// never from model output.
+#[derive(Debug, Clone, Default)]
+pub struct RouteSignals {
+    pub text_chars: usize,
+    /// The text looks like engineering work (code, stack traces, build/test talk).
+    pub engineering: bool,
+    /// A Forge discipline whose work is multi-step analysis (Architect, Debugger, Reconstructor).
+    pub deep_discipline: bool,
+    /// A Forge discipline is active at all.
+    pub forge: bool,
+}
+
+impl RouteSignals {
+    pub fn from_text(text: &str) -> Self {
+        let lower = text.to_lowercase();
+        const WORDS: &[&str] = &[
+            "```", "traceback", "stack trace", "exception", "compile", "refactor", "debug", "unit test", "failing test",
+            "segfault", "panic", "architecture", "implement", "function", "regression", "error:", "fn ", "def ", "class ",
+        ];
+        Self { text_chars: text.chars().count(), engineering: WORDS.iter().any(|w| lower.contains(w)), ..Default::default() }
+    }
+}
+
+/// Pick a tier for the routing mode. Returns the tier and a plain-language reason.
+pub fn select_tier(mode: RoutingMode, sig: &RouteSignals) -> Option<(Tier, &'static str)> {
+    match mode {
+        RoutingMode::Manual => None,
+        RoutingMode::Budget => Some((Tier::Fast, "Budget mode")),
+        RoutingMode::Balanced => Some((Tier::Standard, "Balanced mode")),
+        RoutingMode::Quality => Some((Tier::Heavy, "Quality mode")),
+        RoutingMode::Auto => Some(if sig.deep_discipline {
+            (Tier::Heavy, "Auto: multi-step engineering discipline")
+        } else if (sig.engineering && sig.text_chars > 1200) || sig.text_chars > 6000 {
+            (Tier::Heavy, "Auto: long or complex engineering request")
+        } else if sig.text_chars < 280 && !sig.engineering && !sig.forge {
+            (Tier::Fast, "Auto: short everyday request")
+        } else {
+            (Tier::Standard, "Auto: typical request")
+        }),
+    }
+}
+
+/// Tier-aware routing. An explicit provider/model choice for the conversation always wins.
+/// A tier's model is used when it is configured and its provider is usable; otherwise Atlas
+/// steps down to the next configured tier (Heavy → Standard → Fast) and then to your default,
+/// saying so in the reason. Tier providers are ones the owner chose for that tier, so using
+/// them is not a silent provider switch.
+pub fn route_tiered(
+    settings: &Settings,
+    providers: &[ProviderConfig],
+    provider_override: Option<&str>,
+    model_override: Option<&str>,
+    signals: &RouteSignals,
+    needs_tools: bool,
+) -> Result<Route> {
+    let explicit = provider_override.is_some() || model_override.is_some();
+    let picked = if explicit { None } else { select_tier(settings.routing.mode, signals) };
+    let Some((tier, why)) = picked else {
+        return route(settings, providers, provider_override, model_override, needs_tools);
+    };
+    let order: &[Tier] = match tier {
+        Tier::Heavy => &[Tier::Heavy, Tier::Standard, Tier::Fast],
+        Tier::Standard => &[Tier::Standard, Tier::Heavy, Tier::Fast],
+        Tier::Fast => &[Tier::Fast, Tier::Standard, Tier::Heavy],
+    };
+    let mut skipped: Vec<String> = Vec::new();
+    for t in order {
+        let Some(tm) = settings.routing.tier_model(*t) else {
+            skipped.push(format!("{} tier not set", t.label()));
+            continue;
+        };
+        let Some(p) = providers.iter().find(|p| p.id == tm.provider_id) else {
+            skipped.push(format!("{} tier's provider was removed", t.label()));
+            continue;
+        };
+        let usable_now = usable(p).and_then(|_| {
+            if settings.network.offline_mode && !p.local { Err(format!("offline mode is on and {} is a cloud service", p.label)) } else { Ok(()) }
+        });
+        if let Err(problem) = usable_now {
+            skipped.push(format!("{} tier unavailable: {problem}", t.label()));
+            continue;
+        }
+        let model_info = p.models.iter().find(|m| m.id == tm.model).cloned();
+        let mut reason = format!("{why} → {} tier: {} on {}", t.label(), tm.model, p.label);
+        if !skipped.is_empty() {
+            reason.push_str(&format!(" ({})", skipped.join("; ")));
+        }
+        if needs_tools && model_info.as_ref().and_then(|m| m.supports_tools) == Some(false) {
+            reason.push_str("; this model cannot use tools");
+        }
+        return Ok(Route { provider: p.clone(), model: tm.model.clone(), model_info, reason, fell_back: false, tier: Some(*t) });
+    }
+    let mut r = route(settings, providers, None, None, needs_tools)?;
+    r.reason = format!("{} — {why}, but no tier model is usable ({}), so using your default", r.reason, skipped.join("; "));
+    Ok(r)
 }
 
 fn usable(p: &ProviderConfig) -> std::result::Result<(), String> {
@@ -300,9 +398,9 @@ pub fn route(settings: &Settings, providers: &[ProviderConfig], provider_overrid
         .ok_or_else(|| AtlasError::Validation(format!("choose a model for {} (test the connection to load its model list)", chosen.label)))?;
     let model_info = chosen.models.iter().find(|m| m.id == model).cloned();
     if needs_tools && model_info.as_ref().and_then(|m| m.supports_tools) == Some(false) {
-        return Ok(Route { reason: format!("{reason}; this model cannot use tools"), provider: chosen.clone(), model, model_info, fell_back });
+        return Ok(Route { reason: format!("{reason}; this model cannot use tools"), provider: chosen.clone(), model, model_info, fell_back, tier: None });
     }
-    Ok(Route { provider: chosen.clone(), model, model_info, reason, fell_back })
+    Ok(Route { provider: chosen.clone(), model, model_info, reason, fell_back, tier: None })
 }
 
 #[cfg(test)]
@@ -358,5 +456,53 @@ mod tests {
         assert_eq!(r.provider.id, o.id);
         s.routing.allow_cross_provider_fallback = false;
         assert!(route(&s, &list(&db).unwrap(), None, None, true).is_err());
+    }
+
+    #[test]
+    fn auto_mode_picks_tiers_from_the_request() {
+        let sig = |t: &str| RouteSignals::from_text(t);
+        assert_eq!(select_tier(RoutingMode::Auto, &sig("What's a good name for a cat?")).unwrap().0, Tier::Fast);
+        let long_code = format!("Please refactor this module:\n```rust\n{}\n```", "fn a() {}\n".repeat(200));
+        assert_eq!(select_tier(RoutingMode::Auto, &sig(&long_code)).unwrap().0, Tier::Heavy);
+        assert_eq!(select_tier(RoutingMode::Auto, &sig("Why does this panic? fn main() { let v: Vec<u8> = vec![]; v[0]; }")).unwrap().0, Tier::Standard);
+        let deep = RouteSignals { deep_discipline: true, forge: true, ..sig("hi") };
+        assert_eq!(select_tier(RoutingMode::Auto, &deep).unwrap().0, Tier::Heavy);
+        assert_eq!(select_tier(RoutingMode::Budget, &deep).unwrap().0, Tier::Fast);
+        assert_eq!(select_tier(RoutingMode::Quality, &sig("hi")).unwrap().0, Tier::Heavy);
+        assert!(select_tier(RoutingMode::Manual, &sig("hi")).is_none());
+    }
+
+    #[test]
+    fn tiers_route_to_configured_models_and_step_down_honestly() {
+        use crate::settings::TierModel;
+        let (db, secrets) = setup();
+        let a = create(&db, ProviderKind::Anthropic, "Claude", "https://api.anthropic.com", Some("claude-opus-5-5")).unwrap();
+        set_key(&db, &secrets, &a.id, "sk-ant-api03-abcdefghijklmnop").unwrap();
+        let o = create(&db, ProviderKind::Openai, "OpenAI", "https://api.openai.com/v1", Some("gpt-4.1")).unwrap();
+        let mut s = Settings::default();
+        s.default_provider_id = Some(a.id.clone());
+        s.routing.mode = RoutingMode::Quality;
+        s.routing.heavy = Some(TierModel { provider_id: o.id.clone(), model: "gpt-5.5".into() });
+        s.routing.standard = Some(TierModel { provider_id: a.id.clone(), model: "claude-sonnet-5-5".into() });
+        let sig = RouteSignals::from_text("hi");
+        // OpenAI has no key → Heavy is skipped, Standard is used, and the reason says why.
+        let r = route_tiered(&s, &list(&db).unwrap(), None, None, &sig, true).unwrap();
+        assert_eq!((r.model.as_str(), r.tier), ("claude-sonnet-5-5", Some(Tier::Standard)));
+        assert!(r.reason.contains("Heavy tier unavailable") && r.reason.contains("no API key"), "{}", r.reason);
+        set_key(&db, &secrets, &o.id, "sk-proj-abcdefghijklmnopqrstu").unwrap();
+        let r = route_tiered(&s, &list(&db).unwrap(), None, None, &sig, true).unwrap();
+        assert_eq!((r.provider.id.as_str(), r.model.as_str()), (o.id.as_str(), "gpt-5.5"));
+        // An explicit choice for the conversation overrides tiers.
+        let r = route_tiered(&s, &list(&db).unwrap(), Some(&a.id), None, &sig, true).unwrap();
+        assert_eq!((r.model.as_str(), r.tier), ("claude-opus-5-5", None));
+        // Manual ignores tiers entirely.
+        s.routing.mode = RoutingMode::Manual;
+        assert_eq!(route_tiered(&s, &list(&db).unwrap(), None, None, &sig, true).unwrap().model, "claude-opus-5-5");
+        // No usable tier → default, with an explanation.
+        s.routing.mode = RoutingMode::Budget;
+        s.routing.heavy = None;
+        s.routing.standard = None;
+        let r = route_tiered(&s, &list(&db).unwrap(), None, None, &sig, true).unwrap();
+        assert!(r.tier.is_none() && r.reason.contains("no tier model is usable"), "{}", r.reason);
     }
 }

@@ -75,6 +75,12 @@ impl ChatProvider for Scripted {
         if lower.contains("create a note") {
             return Ok(call("files_create", json!({"path": "e2e/hello.md", "content": "# Hello from Atlas\n"})));
         }
+        if lower.contains("read main.py") {
+            return Ok(call("forge_read_file", json!({"path": "main.py"})));
+        }
+        if lower.contains("fix the bug") {
+            return Ok(call("forge_edit_file", json!({"path": "main.py", "old": "return a - b", "new": "return a + b"})));
+        }
         if lower.contains("wait") {
             cancel.cancelled().await;
             return Err(ProviderError::new(ProviderErrorKind::Cancelled, "cancelled"));
@@ -106,6 +112,13 @@ pub fn services() -> (SharedSecrets, Option<Arc<dyn ProviderFactory>>) {
 }
 
 pub fn seed(atlas: &Atlas) {
+    // A small sample project for Atlas Forge (the native folder dialog cannot be driven by WebDriver).
+    if atlas.forge_projects().map(|p| p.is_empty()).unwrap_or(false) {
+        let root = std::env::temp_dir().join(format!("atlas-e2e-forge-{}", std::process::id())).join("e2e-sample");
+        if std::fs::create_dir_all(&root).is_ok() && std::fs::write(root.join("main.py"), "def add(a, b):\n    return a - b\n").is_ok() {
+            let _ = atlas.forge_add_project("e2e-sample", &root, Some("git --version"), None);
+        }
+    }
     if atlas.providers().map(|p| p.is_empty()).unwrap_or(false) {
         if let Ok(p) = atlas.add_provider(ProviderKind::Mock, "E2E scripted provider", "http://127.0.0.1:1", Some("scripted")) {
             // Run the real connection test against the scripted provider so it reports "connected".

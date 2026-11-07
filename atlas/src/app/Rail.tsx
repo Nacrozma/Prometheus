@@ -1,4 +1,4 @@
-import { Activity, Brain, FolderKanban, FolderOpen, Home, MessageSquareText, Mic, Octagon, Orbit, Plug, Settings2 } from "lucide-react";
+import { Activity, Brain, Hammer, FolderKanban, FolderOpen, Home, MessageSquareText, Mic, Octagon, Orbit, Plug, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { Emblem } from "@/components/Emblem";
 import { Tooltip } from "@/components/ui/primitives";
@@ -12,12 +12,13 @@ export const NAV: { route: Route; label: string; icon: typeof Home; shortcut: st
   { route: "home", label: "Home", icon: Home, shortcut: "1" },
   { route: "companion", label: "Companion", icon: MessageSquareText, shortcut: "2" },
   { route: "map", label: "Atlas Map", icon: Orbit, shortcut: "3" },
-  { route: "mission", label: "Mission Control", icon: Activity, shortcut: "4" },
-  { route: "projects", label: "Projects", icon: FolderKanban, shortcut: "5" },
-  { route: "memory", label: "Memory", icon: Brain, shortcut: "6" },
-  { route: "files", label: "Files", icon: FolderOpen, shortcut: "7" },
-  { route: "integrations", label: "Integrations", icon: Plug, shortcut: "8" },
-  { route: "voice", label: "Voice", icon: Mic, shortcut: "9" },
+  { route: "forge", label: "Atlas Forge", icon: Hammer, shortcut: "4" },
+  { route: "mission", label: "Mission Control", icon: Activity, shortcut: "5" },
+  { route: "projects", label: "Projects", icon: FolderKanban, shortcut: "6" },
+  { route: "memory", label: "Memory", icon: Brain, shortcut: "7" },
+  { route: "files", label: "Files", icon: FolderOpen, shortcut: "8" },
+  { route: "integrations", label: "Integrations", icon: Plug, shortcut: "9" },
+  { route: "voice", label: "Voice", icon: Mic, shortcut: "" },
 ];
 
 export async function emergencyStop() {
@@ -42,7 +43,7 @@ export function Rail() {
       <Tooltip key={r} label={<span>{label}{shortcut && <span className="ml-2 text-text-3">Ctrl {shortcut}</span>}</span>}>
         <button
           onClick={() => navigate(r)}
-          aria-label={label}
+          aria-label={badge ? `${label} (${badge} waiting for approval)` : label}
           aria-current={active ? "page" : undefined}
           className={cn(
             "group relative grid size-11 place-items-center rounded-md transition-colors duration-[var(--dur-fast)]",
@@ -52,7 +53,7 @@ export function Rail() {
           <span aria-hidden className={cn("absolute -left-[13px] h-5 w-[3px] rounded-r-full bg-accent transition-opacity", active ? "opacity-100" : "opacity-0")} />
           <Icon className="size-[1.15rem]" strokeWidth={1.75} aria-hidden />
           {badge ? (
-            <span className="absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-warn px-1 text-[0.625rem] font-bold leading-4 text-text-inverse">
+            <span aria-hidden className="absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-warn px-1 text-[0.625rem] font-bold leading-4 text-text-inverse">
               {badge}
             </span>
           ) : null}

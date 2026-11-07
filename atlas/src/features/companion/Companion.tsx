@@ -12,6 +12,7 @@ import type { Conversation } from "@/lib/schemas";
 import { useTurns } from "@/state/turns";
 import { useUi } from "@/state/ui";
 import { Composer } from "./Composer";
+import { BudgetPrompt } from "@/components/BudgetPrompt";
 import { LiveTurn } from "./LiveTurn";
 import { ModelPicker, type ModelChoice } from "./ModelPicker";
 import { Thread } from "./Thread";
@@ -290,6 +291,7 @@ export function CompanionPage() {
               {turn && <LiveTurn turn={turn} />}
             </>
           )}
+          {activeId && <BudgetPrompt conversationId={activeId} />}
         </div>
         <Composer
           running={running}

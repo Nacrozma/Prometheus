@@ -24,6 +24,12 @@ pub enum ProviderKind {
     OpenaiCompatible,
     /// Ollama's OpenAI-compatible endpoint on this machine.
     Ollama,
+    /// OpenRouter (OpenAI-compatible API that fronts many vendors).
+    Openrouter,
+    /// Mistral AI's API (OpenAI-compatible chat completions).
+    Mistral,
+    /// Cerebras Inference API (OpenAI-compatible chat completions).
+    Cerebras,
     /// Deterministic scripted provider for automated tests only.
     Mock,
 }
@@ -33,7 +39,27 @@ impl ProviderKind {
         matches!(self, ProviderKind::Ollama | ProviderKind::Mock)
     }
     pub fn needs_key(self) -> bool {
-        matches!(self, ProviderKind::Anthropic | ProviderKind::Openai | ProviderKind::OpenaiCompatible)
+        matches!(
+            self,
+            ProviderKind::Anthropic
+                | ProviderKind::Openai
+                | ProviderKind::OpenaiCompatible
+                | ProviderKind::Openrouter
+                | ProviderKind::Mistral
+                | ProviderKind::Cerebras
+        )
+    }
+    /// Kinds served by the OpenAI Chat Completions adapter.
+    pub fn openai_wire(self) -> bool {
+        matches!(
+            self,
+            ProviderKind::Openai
+                | ProviderKind::OpenaiCompatible
+                | ProviderKind::Ollama
+                | ProviderKind::Openrouter
+                | ProviderKind::Mistral
+                | ProviderKind::Cerebras
+        )
     }
 }
 

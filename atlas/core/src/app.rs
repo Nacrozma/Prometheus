@@ -52,6 +52,7 @@ pub struct Atlas {
     pub(crate) turns: Mutex<HashMap<String, ActiveTurn>>,
     pub(crate) me: Weak<Atlas>,
     pub(crate) recovered_tasks: usize,
+    pub(crate) forge_cancels: Mutex<HashMap<String, CancellationToken>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -72,6 +73,10 @@ impl Atlas {
         let recovered = tasks::recover_after_restart(&db)?;
         if recovered > 0 {
             audit::record(&db, "tasks.recovered", "warn", None, None, json!({"interrupted": recovered}));
+        }
+        let runs = crate::forge::recover_runs(&db)?;
+        if runs > 0 {
+            audit::record(&db, "forge.runs_interrupted", "warn", None, None, json!({"interrupted": runs}));
         }
         let settings = Settings::load(&db)?;
         if let Some(days) = settings.retention.conversation_days {
@@ -95,6 +100,7 @@ impl Atlas {
             version: cfg.version,
             data_dir: cfg.data_dir,
             turns: Mutex::new(HashMap::new()),
+            forge_cancels: Mutex::new(HashMap::new()),
             me: me.clone(),
             recovered_tasks: recovered,
         }))
@@ -119,6 +125,7 @@ impl Atlas {
             project_id,
             cancel,
             services: self.arc(),
+            forge: None,
         }
     }
 
@@ -493,6 +500,152 @@ impl Atlas {
     }
     pub fn search_conversations(&self, q: &str) -> Result<Vec<conversations::SearchHit>> {
         conversations::search(&self.db, q, 50)
+    }
+
+    // ---------- Atlas Forge ----------
+    pub fn forge_projects(&self) -> Result<Vec<crate::forge::ForgeProject>> {
+        crate::forge::list_projects(&self.db)
+    }
+
+    pub fn forge_add_project(&self, name: &str, root: &Path, test_command: Option<&str>, build_command: Option<&str>) -> Result<crate::forge::ForgeProject> {
+        let p = crate::forge::add_project(&self.db, name, root, test_command, build_command)?;
+        audit::record(&self.db, "forge.project_added", "info", None, None, json!({"project_id": p.id}));
+        notify(&self.bus, Topic::Forge, Some(&p.id));
+        Ok(p)
+    }
+
+    pub fn forge_update_project(&self, id: &str, name: &str, test_command: Option<&str>, build_command: Option<&str>) -> Result<crate::forge::ForgeProject> {
+        let p = crate::forge::update_project(&self.db, id, name, test_command, build_command)?;
+        notify(&self.bus, Topic::Forge, Some(id));
+        Ok(p)
+    }
+
+    pub fn forge_remove_project(&self, id: &str) -> Result<()> {
+        crate::forge::remove_project(&self.db, id)?;
+        audit::record(&self.db, "forge.project_removed", "info", None, None, json!({"project_id": id}));
+        notify(&self.bus, Topic::Forge, Some(id));
+        notify(&self.bus, Topic::Conversations, None);
+        Ok(())
+    }
+
+    fn forge_root(&self, project_id: &str) -> Result<PathBuf> {
+        Ok(crate::forge::scope(&self.db, project_id, crate::forge::Discipline::Architect)?.root)
+    }
+
+    pub fn forge_tree(&self, project_id: &str, rel: &str, depth: u32) -> Result<Value> {
+        let (entries, truncated) = crate::forge::tree(&self.forge_root(project_id)?, rel, depth, 5000)?;
+        Ok(json!({"entries": entries, "truncated": truncated}))
+    }
+
+    pub fn forge_read_file(&self, project_id: &str, rel: &str) -> Result<Value> {
+        let root = self.forge_root(project_id)?;
+        let (full, content) = crate::forge::read_text(&root, rel)?;
+        Ok(json!({"path": crate::forge::display_rel(&root, &full), "content": content}))
+    }
+
+    pub fn forge_create_session(&self, project_id: &str, discipline: crate::forge::Discipline) -> Result<conversations::Conversation> {
+        let title = format!("{} session", discipline.label());
+        let c = conversations::create_forge(&self.db, project_id, discipline, &title)?;
+        notify(&self.bus, Topic::Forge, Some(project_id));
+        Ok(c)
+    }
+
+    pub fn forge_sessions(&self, project_id: &str) -> Result<Vec<conversations::Conversation>> {
+        conversations::list_forge(&self.db, project_id, 100)
+    }
+
+    pub fn forge_set_discipline(&self, conversation_id: &str, discipline: crate::forge::Discipline) -> Result<conversations::Conversation> {
+        let c = conversations::set_discipline(&self.db, conversation_id, discipline)?;
+        notify(&self.bus, Topic::Conversations, Some(conversation_id));
+        Ok(c)
+    }
+
+    /// A command the owner typed in the Forge terminal. It is the owner's own action, so it
+    /// needs no approval, but it still runs without a shell, with limits, and is audited.
+    pub async fn forge_run(&self, project_id: &str, command: &str) -> Result<crate::forge::RunRecord> {
+        let root = self.forge_root(project_id)?;
+        let argv = crate::forge::runner::parse_command(command)?;
+        let settings = self.settings()?;
+        let run_id = crate::forge::start_run(&self.db, project_id, &argv, "user", None)?;
+        notify(&self.bus, Topic::Forge, Some(project_id));
+        audit::record(&self.db, "forge.command", "info", None, None, json!({"project_id": project_id, "program": argv[0]}));
+        let spec = crate::forge::runner::RunSpec {
+            argv: &argv,
+            cwd: &root,
+            timeout: Duration::from_secs(settings.forge.command_timeout_secs as u64),
+            max_output: settings.forge.max_output_kb as usize * 1024,
+            extra_env: &[],
+        };
+        let cancel = CancellationToken::new();
+        if let Ok(mut m) = self.forge_cancels.lock() {
+            m.insert(run_id.clone(), cancel.clone());
+        }
+        let res = crate::forge::runner::run(spec, &cancel).await;
+        if let Ok(mut m) = self.forge_cancels.lock() {
+            m.remove(&run_id);
+        }
+        match res {
+            Ok(out) => crate::forge::finish_run(&self.db, &run_id, &out)?,
+            Err(e) => {
+                crate::forge::fail_run(&self.db, &run_id, &e.to_string());
+                notify(&self.bus, Topic::Forge, Some(project_id));
+                return Err(e);
+            }
+        }
+        notify(&self.bus, Topic::Forge, Some(project_id));
+        crate::forge::list_runs(&self.db, project_id, 50)?.into_iter().find(|r| r.id == run_id).ok_or_else(|| AtlasError::NotFound("run".into()))
+    }
+
+    pub fn forge_cancel_run(&self, run_id: &str) -> bool {
+        self.forge_cancels.lock().ok().and_then(|m| m.get(run_id).cloned()).map(|c| c.cancel()).is_some()
+    }
+
+    pub fn forge_runs(&self, project_id: &str) -> Result<Vec<crate::forge::RunRecord>> {
+        crate::forge::list_runs(&self.db, project_id, 50)
+    }
+
+    pub async fn forge_git_status(&self, project_id: &str) -> Result<crate::forge::git::Status> {
+        crate::forge::git::status(&self.forge_root(project_id)?, &CancellationToken::new()).await
+    }
+
+    pub async fn forge_git_diff(&self, project_id: &str, path: Option<&str>) -> Result<String> {
+        crate::forge::git::diff(&self.forge_root(project_id)?, path, false, &CancellationToken::new()).await
+    }
+
+    pub async fn forge_git_log(&self, project_id: &str) -> Result<Vec<crate::forge::git::Commit>> {
+        crate::forge::git::log(&self.forge_root(project_id)?, 50, &CancellationToken::new()).await
+    }
+
+    pub async fn forge_git_commit(&self, project_id: &str, message: &str, paths: &[String]) -> Result<String> {
+        let h = crate::forge::git::commit(&self.forge_root(project_id)?, message, paths, &CancellationToken::new()).await?;
+        audit::record(&self.db, "forge.commit", "info", None, None, json!({"project_id": project_id, "by": "user"}));
+        notify(&self.bus, Topic::Forge, Some(project_id));
+        Ok(h)
+    }
+
+    pub async fn forge_git_branch(&self, project_id: &str, name: &str) -> Result<()> {
+        crate::forge::git::create_branch(&self.forge_root(project_id)?, name, &CancellationToken::new()).await?;
+        notify(&self.bus, Topic::Forge, Some(project_id));
+        Ok(())
+    }
+
+    pub fn forge_changes(&self, project_id: &str) -> Result<Vec<crate::forge::Change>> {
+        crate::forge::list_changes(&self.db, project_id, 200)
+    }
+
+    pub fn forge_change_diff(&self, change_id: &str) -> Result<String> {
+        crate::forge::change_diff(&self.db, change_id)
+    }
+
+    pub fn forge_revert(&self, change_id: &str) -> Result<crate::forge::Change> {
+        let c = crate::forge::revert_change(&self.db, change_id)?;
+        audit::record(&self.db, "forge.reverted", "info", None, None, json!({"change_id": change_id}));
+        notify(&self.bus, Topic::Forge, Some(&c.project_id));
+        Ok(c)
+    }
+
+    pub fn pricing_schedule(&self) -> Value {
+        json!({"entries": crate::pricing::schedule(), "seed_conflicts": crate::pricing::seed_conflicts()})
     }
 
     // ---------- file grants ----------

@@ -3,6 +3,7 @@
 pub mod calc;
 pub mod data;
 pub mod files;
+pub mod forge_tools;
 pub mod memory_tools;
 pub mod system;
 #[cfg(any(test, feature = "test-support"))]
@@ -64,6 +65,17 @@ pub fn register_all(reg: &ToolRegistry) -> crate::error::Result<()> {
         Arc::new(web::WebSearch::new()),
         Arc::new(data::ImportPreview::new()),
         Arc::new(data::Export::new()),
+        Arc::new(forge_tools::Tree::new()),
+        Arc::new(forge_tools::ReadFile::new()),
+        Arc::new(forge_tools::Search::new()),
+        Arc::new(forge_tools::GitStatus::new()),
+        Arc::new(forge_tools::GitDiff::new()),
+        Arc::new(forge_tools::GitLog::new()),
+        Arc::new(forge_tools::EditFile::new()),
+        Arc::new(forge_tools::WriteFile::new()),
+        Arc::new(forge_tools::RunTests::new()),
+        Arc::new(forge_tools::RunCommand::new()),
+        Arc::new(forge_tools::GitCommit::new()),
     ];
     for t in tools {
         reg.register(t)?;

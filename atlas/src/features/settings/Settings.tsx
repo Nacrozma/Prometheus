@@ -7,18 +7,22 @@ import { Badge, Button, ErrorNote, Input, Kbd, Panel, Segmented, Select, Skeleto
 import { api, AtlasError } from "@/lib/bridge";
 import { cn, formatTokens, formatUsd, permissionLabel, relativeTime } from "@/lib/format";
 import { useAtlasQuery } from "@/lib/query";
-import type { Settings } from "@/lib/schemas";
+import type { RoutingMode, Settings, Tier, TierModel } from "@/lib/schemas";
+import { SiblingSettingsSection } from "@/features/siblings/SiblingSettings";
 import { useUi, type SettingsSection } from "@/state/ui";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "companion", label: "Companion" },
-  { id: "models", label: "Models & routing" },
+  { id: "models", label: "Models" },
+  { id: "routing", label: "Model routing" },
+  { id: "usage", label: "Usage & budgets" },
+  { id: "forge", label: "Atlas Forge" },
+  { id: "siblings", label: "Sibling link" },
   { id: "permissions", label: "Permissions" },
   { id: "memory", label: "Memory" },
   { id: "appearance", label: "Appearance" },
   { id: "files", label: "File workspace" },
   { id: "limits", label: "Limits & network" },
-  { id: "usage", label: "Usage & costs" },
   { id: "data", label: "Data & privacy" },
   { id: "diagnostics", label: "Diagnostics" },
   { id: "shortcuts", label: "Shortcuts" },
@@ -121,6 +125,12 @@ function Section({ id, s, save }: { id: SettingsSection; s: Settings; save: (n: 
       return <CompanionSection s={s} save={save} />;
     case "models":
       return <ModelsSection s={s} save={save} />;
+    case "routing":
+      return <RoutingSection s={s} save={save} />;
+    case "forge":
+      return <ForgeSection s={s} save={save} />;
+    case "siblings":
+      return <SiblingSettingsSection />;
     case "permissions":
       return <PermissionsSection s={s} save={save} />;
     case "memory":
@@ -257,7 +267,65 @@ function ModelsSection({ s, save }: { s: Settings; save: (n: Settings) => Promis
           <span className="font-mono text-xs text-text-2">{def?.default_model ?? "—"}</span>
         </Row>
       </Panel>
-      <h2 className="mb-2 mt-8 text-sm font-semibold text-text-2">Routing &amp; fallback</h2>
+    </>
+  );
+}
+
+const MODES: { value: RoutingMode; label: string; desc: string }[] = [
+  { value: "auto", label: "Auto", desc: "Picks a tier per request: Fast for short everyday questions, Heavy for long engineering work and the Architect, Debugger and Reconstructor disciplines, Standard otherwise." },
+  { value: "budget", label: "Budget", desc: "Always the Fast tier." },
+  { value: "balanced", label: "Balanced", desc: "Always the Standard tier." },
+  { value: "quality", label: "Quality", desc: "Always the Heavy tier." },
+  { value: "manual", label: "Manual", desc: "Always your default provider and model. Tiers are ignored." },
+];
+
+function TierPicker({ tier, value, onChange }: { tier: Tier; value: TierModel | null; onChange: (v: TierModel | null) => void }) {
+  const providers = useAtlasQuery("providers", api.providers, ["providers"]);
+  const [model, setModel] = useState(value?.model ?? "");
+  useEffect(() => setModel(value?.model ?? ""), [value?.model]);
+  const prov = providers.data?.find((p) => p.id === value?.provider_id);
+  const listId = `tier-models-${tier}`;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Select aria-label={`${tier} tier provider`} className="w-44" value={value?.provider_id ?? ""} onChange={(e) => onChange(e.target.value ? { provider_id: e.target.value, model: model || (providers.data?.find((p) => p.id === e.target.value)?.default_model ?? "") } : null)}>
+        <option value="">Not set</option>
+        {(providers.data ?? []).filter((p) => p.kind !== "mock").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+      </Select>
+      <Input
+        aria-label={`${tier} tier model`}
+        list={listId}
+        className="w-52 font-mono text-xs"
+        placeholder="model id"
+        value={model}
+        disabled={!value}
+        onChange={(e) => setModel(e.target.value)}
+        onBlur={() => value && model.trim() && model !== value.model && onChange({ ...value, model: model.trim() })}
+      />
+      <datalist id={listId}>{prov?.models.map((m) => <option key={m.id} value={m.id} />)}</datalist>
+    </div>
+  );
+}
+
+function RoutingSection({ s, save }: { s: Settings; save: (n: Settings) => Promise<void> }) {
+  const mode = MODES.find((m) => m.value === s.routing.mode);
+  const setTier = (t: Tier, v: TierModel | null) => save({ ...s, routing: { ...s.routing, [t]: v } });
+  return (
+    <>
+      <Panel className="mt-6 px-5">
+        <Row title="Routing mode" desc={mode?.desc}>
+          <Segmented label="Routing mode" value={s.routing.mode} onChange={(v) => save({ ...s, routing: { ...s.routing, mode: v } })} options={MODES.map((m) => ({ value: m.value, label: m.label }))} />
+        </Row>
+      </Panel>
+      <h2 className="mb-2 mt-8 text-sm font-semibold text-text-2">Model tiers</h2>
+      <Panel className="px-5">
+        <Row title="Fast" desc="Quick, inexpensive replies (for example a Haiku-class or nano model)."><TierPicker tier="fast" value={s.routing.fast} onChange={(v) => setTier("fast", v)} /></Row>
+        <Row title="Standard" desc="Everyday work (for example a Sonnet-class model)."><TierPicker tier="standard" value={s.routing.standard} onChange={(v) => setTier("standard", v)} /></Row>
+        <Row title="Heavy" desc="Hard, multi-step engineering (for example an Opus-class model)."><TierPicker tier="heavy" value={s.routing.heavy} onChange={(v) => setTier("heavy", v)} /></Row>
+        <Row title="If a tier is not usable" desc="Atlas steps to the nearest configured tier, then to your default provider, and the reply shows which model was used and why. A choice you make in a conversation always wins.">
+          <span />
+        </Row>
+      </Panel>
+      <h2 className="mb-2 mt-8 text-sm font-semibold text-text-2">Fallback</h2>
       <Panel className="px-5">
         <Row
           title="Fall back to another provider"
@@ -271,8 +339,93 @@ function ModelsSection({ s, save }: { s: Settings; save: (n: Settings) => Promis
         >
           <Switch checked={s.routing.anthropic_refusal_fallback} label="Anthropic refusal fallback" onChange={(v) => save({ ...s, routing: { ...s.routing, anthropic_refusal_fallback: v } })} />
         </Row>
-        <Row title="How routing decides" desc="Your per-conversation choice, then your default provider and its default model. Tools are only offered to models that accept them; reasoning effort and summaries only to models that support them. Atlas never switches provider silently.">
+      </Panel>
+    </>
+  );
+}
+
+function PricingTable({ s, save }: { s: Settings; save: (n: Settings) => Promise<void> }) {
+  const sched = useAtlasQuery("pricing", api.pricingSchedule, ["settings"]);
+  const [model, setModel] = useState("");
+  const [inp, setInp] = useState("");
+  const [out, setOut] = useState("");
+  const tone = { verified: "ok", unverified: "warn", user: "info" } as const;
+  const add = () => {
+    const i = Number(inp);
+    const o = Number(out);
+    if (!model.trim() || !Number.isFinite(i) || !Number.isFinite(o) || i < 0 || o < 0) {
+      toast.error("Enter a model id and two prices (USD per million tokens)");
+      return;
+    }
+    const rest = s.usage.price_overrides.filter((p) => p.model !== model.trim());
+    void save({ ...s, usage: { ...s.usage, price_overrides: [...rest, { model: model.trim(), input_per_mtok: i, output_per_mtok: o }] } }).then(() => {
+      setModel("");
+      setInp("");
+      setOut("");
+    });
+  };
+  return (
+    <>
+      <Panel className="overflow-x-auto">
+        <table className="w-full min-w-[620px] text-sm">
+          <thead>
+            <tr className="text-left text-[0.6875rem] uppercase tracking-wider text-text-3">
+              {["Model", "Input / MTok", "Output / MTok", "Status", ""].map((h) => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {s.usage.price_overrides.map((p) => (
+              <tr key={`u-${p.model}`} className="border-t border-line-1">
+                <td className="px-4 py-2 font-mono text-xs">{p.model}</td>
+                <td className="px-4 py-2">${p.input_per_mtok.toFixed(2)}</td>
+                <td className="px-4 py-2">${p.output_per_mtok.toFixed(2)}</td>
+                <td className="px-4 py-2"><Badge tone="info">your price</Badge></td>
+                <td className="px-4 py-2 text-right">
+                  <Button size="sm" variant="ghost" onClick={() => save({ ...s, usage: { ...s.usage, price_overrides: s.usage.price_overrides.filter((x) => x.model !== p.model) } })}>Remove</Button>
+                </td>
+              </tr>
+            ))}
+            {sched.data?.entries.map((e) => (
+              <tr key={`${e.vendor}-${e.model}`} className="border-t border-line-1" title={e.source}>
+                <td className="px-4 py-2"><span className="font-mono text-xs">{e.model}</span> <span className="text-[0.6875rem] text-text-3">{e.vendor}</span></td>
+                <td className="px-4 py-2">${e.input_per_mtok.toFixed(2)}</td>
+                <td className="px-4 py-2">${e.output_per_mtok.toFixed(2)}</td>
+                <td className="px-4 py-2"><Badge tone={tone[e.verification]}>{e.verification === "verified" ? `verified ${e.as_of ?? ""}` : e.verification === "unverified" ? "unverified seed" : "your price"}</Badge></td>
+                <td />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+      {sched.data && sched.data.seed_conflicts.length > 0 && <p className="mt-2 text-xs text-warn">Seed rates that disagree with verified prices (verified wins): {sched.data.seed_conflicts.join("; ")}</p>}
+      <div className="mt-3 flex flex-wrap items-end gap-2">
+        <Input aria-label="Model id for custom price" className="w-56 font-mono text-xs" placeholder="model id, e.g. mistral-large-latest" value={model} onChange={(e) => setModel(e.target.value)} />
+        <Input aria-label="Input price per million tokens" className="w-32" placeholder="input $/MTok" inputMode="decimal" value={inp} onChange={(e) => setInp(e.target.value)} />
+        <Input aria-label="Output price per million tokens" className="w-32" placeholder="output $/MTok" inputMode="decimal" value={out} onChange={(e) => setOut(e.target.value)} />
+        <Button variant="secondary" onClick={add}>Add your price</Button>
+      </div>
+      <p className="mt-2 text-xs text-text-3">Unverified seed rates came with the product brief and have not been checked against the vendor's pricing page; costs built on them are marked approximate. A price you enter takes precedence for that model id on any provider.</p>
+    </>
+  );
+}
+
+function ForgeSection({ s, save }: { s: Settings; save: (n: Settings) => Promise<void> }) {
+  const navigate = useUi((x) => x.navigate);
+  return (
+    <>
+      <p className="mt-1 text-sm text-text-2">Atlas Forge works on project folders you choose. Edits, commands and commits always ask first; workspace file tools and Forge tools never mix.</p>
+      <Panel className="mt-6 px-5">
+        <Row title="Command time limit (seconds)" desc="A command or test run that takes longer is stopped, including any programs it started.">
+          <NumberInput label="Command time limit" value={s.forge.command_timeout_secs} min={5} max={3600} onCommit={(v) => save({ ...s, forge: { ...s.forge, command_timeout_secs: v ?? 600 } })} />
+        </Row>
+        <Row title="Output kept per command (KB)" desc="Longer output keeps the beginning and the end, where errors usually are.">
+          <NumberInput label="Output kept per command" value={s.forge.max_output_kb} min={16} max={4096} onCommit={(v) => save({ ...s, forge: { ...s.forge, max_output_kb: v ?? 256 } })} />
+        </Row>
+        <Row title="What Atlas will not run for the model" desc="Shells (bash, cmd, PowerShell), inline code (python -c, node -e), deletion, privilege changes, network clients (curl, ssh), git push/reset --hard/clean, and publishing (npm/cargo publish). You can still run anything yourself in the Forge terminal — without a shell.">
           <span />
+        </Row>
+        <Row title="Projects" desc="Add or remove project folders, set test commands, and open sessions.">
+          <Button size="sm" variant="secondary" onClick={() => navigate("forge")}>Open Atlas Forge</Button>
         </Row>
       </Panel>
     </>
@@ -350,8 +503,8 @@ function UsageSection({ s, save }: { s: Settings; save: (n: Settings) => Promise
       <p className="mt-1 text-sm text-text-2">Costs are <strong>estimates</strong> from published per-token prices and provider-reported token counts; prompt-cache discounts are not applied. Unknown prices are shown as unknown, never guessed.</p>
       {u && (
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
-          <Panel className="p-4"><p className="text-xs text-text-3">Estimated this month</p><p className="font-display text-xl font-semibold">{formatUsd(u.month_estimated_cost_usd)}</p>{u.month_has_unknown_costs && <p className="text-[0.6875rem] text-warn">+ requests with unknown cost</p>}</Panel>
-          <Panel className="p-4"><p className="text-xs text-text-3">Requests today</p><p className="font-display text-xl font-semibold">{u.today_requests}</p></Panel>
+          <Panel className="p-4"><p className="text-xs text-text-3">Estimated this month</p><p className="font-display text-xl font-semibold">{formatUsd(u.month_estimated_cost_usd)}</p>{u.month_has_unknown_costs && <p className="text-[0.6875rem] text-warn">+ requests with unknown cost</p>}{u.month_unverified_cost_usd > 0 && <p className="text-[0.6875rem] text-warn">{formatUsd(u.month_unverified_cost_usd)} from unverified rates</p>}</Panel>
+          <Panel className="p-4"><p className="text-xs text-text-3">Today</p><p className="font-display text-xl font-semibold">{formatUsd(u.today_estimated_cost_usd)}</p><p className="text-[0.6875rem] text-text-3">{u.today_requests} requests</p></Panel>
           <Panel className="p-4"><p className="text-xs text-text-3">Since</p><p className="font-display text-xl font-semibold">{new Date(u.period_start).toLocaleDateString()}</p></Panel>
         </div>
       )}
@@ -374,15 +527,32 @@ function UsageSection({ s, save }: { s: Settings; save: (n: Settings) => Promise
           </table>
         </Panel>
       )}
-      <h2 className="mb-2 mt-8 text-sm font-semibold text-text-2">Limits</h2>
+      <h2 className="mb-2 mt-8 text-sm font-semibold text-text-2">Budgets</h2>
       <Panel className="px-5">
-        <Row title="Monthly budget (USD)" desc="When estimated spend reaches this, new requests are blocked until next month or until you raise it.">
+        <Row title="When a budget would be exceeded" desc="Ask first holds the message and lets you send it once anyway. Stop refuses it. The daily request limit always stops.">
+          <Segmented label="When a budget would be exceeded" value={s.usage.on_exceed} onChange={(v) => save({ ...s, usage: { ...s.usage, on_exceed: v } })} options={[{ value: "ask", label: "Ask first" }, { value: "stop", label: "Stop" }]} />
+        </Row>
+        <Row title="Per request (USD)" desc="Checked against a worst-case estimate: the prompt plus the full output allowance.">
+          <NumberInput label="Per-request limit" nullable value={s.usage.per_request_usd} min={0} max={100000} step={0.01} onCommit={(v) => save({ ...s, usage: { ...s.usage, per_request_usd: v } })} />
+        </Row>
+        <Row title="Per mission (USD)" desc="Total estimated spend of one Forge or sibling mission.">
+          <NumberInput label="Mission budget" nullable value={s.usage.mission_budget_usd} min={0} max={100000} step={0.5} onCommit={(v) => save({ ...s, usage: { ...s.usage, mission_budget_usd: v } })} />
+        </Row>
+        <Row title="Daily (USD)">
+          <NumberInput label="Daily budget" nullable value={s.usage.daily_budget_usd} min={0} max={100000} step={0.5} onCommit={(v) => save({ ...s, usage: { ...s.usage, daily_budget_usd: v } })} />
+        </Row>
+        <Row title="Monthly (USD)">
           <NumberInput label="Monthly budget" nullable value={s.usage.monthly_budget_usd} min={0} max={100000} step={0.5} onCommit={(v) => save({ ...s, usage: { ...s.usage, monthly_budget_usd: v } })} />
         </Row>
-        <Row title="Daily request limit">
-          <NumberInput label="Daily request limit" nullable value={s.usage.daily_request_limit} min={1} max={100000} onCommit={(v) => save({ ...s, usage: { ...s.usage, daily_request_limit: v } })} />
+        <Row title="Warn at (% of a budget)">
+          <NumberInput label="Warn threshold" value={s.usage.warn_at_percent} min={1} max={100} onCommit={(v) => save({ ...s, usage: { ...s.usage, warn_at_percent: v ?? 80 } })} />
+        </Row>
+        <Row title="Daily request limit" desc="Hard cap on model requests per day.">
+          <NumberInput label="Daily request limit" nullable value={s.usage.daily_request_limit} min={0} max={100000} onCommit={(v) => save({ ...s, usage: { ...s.usage, daily_request_limit: v } })} />
         </Row>
       </Panel>
+      <h2 className="mb-2 mt-8 text-sm font-semibold text-text-2">Price schedule</h2>
+      <PricingTable s={s} save={save} />
     </>
   );
 }

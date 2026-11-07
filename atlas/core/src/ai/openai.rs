@@ -9,6 +9,21 @@ use std::time::Duration;
 
 pub const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 pub const OLLAMA_BASE_URL: &str = "http://127.0.0.1:11434/v1";
+pub const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
+pub const MISTRAL_BASE_URL: &str = "https://api.mistral.ai/v1";
+pub const CEREBRAS_BASE_URL: &str = "https://api.cerebras.ai/v1";
+
+/// Mistral only accepts tool-call ids of exactly nine ASCII letters/digits. Ids produced by
+/// other providers earlier in a conversation are mapped deterministically so a call and its
+/// result keep matching.
+fn mistral_call_id(id: &str) -> String {
+    if id.len() == 9 && id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return id.to_string();
+    }
+    use sha2::{Digest, Sha256};
+    const ALPHA: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    Sha256::digest(id.as_bytes()).iter().take(9).map(|b| ALPHA[(*b as usize) % ALPHA.len()] as char).collect()
+}
 
 pub struct OpenAiProvider {
     http: reqwest::Client,
@@ -30,6 +45,8 @@ impl OpenAiProvider {
     }
 
     fn auth(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        // OpenRouter's optional attribution header; carries no user data.
+        let rb = if self.kind == ProviderKind::Openrouter { rb.header("X-Title", "ATLAS Co-Pilot") } else { rb };
         match &self.api_key {
             Some(k) => rb.bearer_auth(k),
             None => rb,
@@ -37,6 +54,7 @@ impl OpenAiProvider {
     }
 
     pub fn build_body(kind: ProviderKind, req: &ChatRequest) -> Value {
+        let cid = |id: &str| if kind == ProviderKind::Mistral { mistral_call_id(id) } else { id.to_string() };
         let mut messages = Vec::new();
         if !req.system.is_empty() {
             messages.push(json!({"role": "system", "content": req.system}));
@@ -48,7 +66,7 @@ impl OpenAiProvider {
                     for p in &m.parts {
                         if let Part::ToolResult { call_id, content, is_error } = p {
                             let content = if *is_error { format!("ERROR: {content}") } else { content.clone() };
-                            messages.push(json!({"role": "tool", "tool_call_id": call_id, "content": content}));
+                            messages.push(json!({"role": "tool", "tool_call_id": cid(call_id), "content": content}));
                         }
                     }
                     if !text.is_empty() {
@@ -61,7 +79,7 @@ impl OpenAiProvider {
                         .tool_calls()
                         .into_iter()
                         .map(|(id, name, input)| {
-                            json!({"id": id, "type": "function", "function": {"name": name, "arguments": input.to_string()}})
+                            json!({"id": cid(&id), "type": "function", "function": {"name": name, "arguments": input.to_string()}})
                         })
                         .collect();
                     if text.is_empty() && calls.is_empty() {
@@ -79,8 +97,11 @@ impl OpenAiProvider {
             "model": req.model,
             "messages": messages,
             "stream": true,
-            "stream_options": {"include_usage": true},
         });
+        // Mistral and Cerebras reject unknown request fields; they report usage without asking.
+        if !matches!(kind, ProviderKind::Mistral | ProviderKind::Cerebras) {
+            body["stream_options"] = json!({"include_usage": true});
+        }
         // OpenAI's own API uses max_completion_tokens; compatible servers widely accept max_tokens.
         if kind == ProviderKind::Openai {
             body["max_completion_tokens"] = json!(req.max_tokens);
@@ -367,5 +388,28 @@ mod tests {
         let p = OpenAiProvider::new(reqwest::Client::new(), ProviderKind::Ollama, "http://127.0.0.1:9/v1", None, Duration::from_secs(5));
         let e = p.list_models().await.unwrap_err();
         assert!(matches!(e.kind, ProviderErrorKind::Unavailable | ProviderErrorKind::Network), "{e:?}");
+    }
+
+    #[test]
+    fn mistral_and_cerebras_bodies_omit_unsupported_fields_and_map_ids() {
+        let mut r = req();
+        r.messages.push(ChatMessage {
+            role: Role::Assistant,
+            parts: vec![Part::ToolCall { id: "toolu_01ABCdef".into(), name: "calc".into(), input: serde_json::json!({}) }],
+            native: None,
+        });
+        r.messages.push(ChatMessage { role: Role::User, parts: vec![Part::ToolResult { call_id: "toolu_01ABCdef".into(), content: "4".into(), is_error: false }], native: None });
+        let b = OpenAiProvider::build_body(ProviderKind::Mistral, &r);
+        assert!(b.get("stream_options").is_none());
+        let msgs = b["messages"].as_array().unwrap();
+        let call_id = msgs.iter().find_map(|m| m["tool_calls"][0]["id"].as_str()).unwrap().to_string();
+        let result_id = msgs.iter().find_map(|m| m["tool_call_id"].as_str()).unwrap().to_string();
+        assert_eq!(call_id, result_id);
+        assert_eq!(call_id.len(), 9);
+        assert!(call_id.chars().all(|c| c.is_ascii_alphanumeric()));
+        assert!(OpenAiProvider::build_body(ProviderKind::Cerebras, &r).get("stream_options").is_none());
+        let o = OpenAiProvider::build_body(ProviderKind::Openrouter, &r);
+        assert_eq!(o["stream_options"]["include_usage"], true);
+        assert!(o["messages"].as_array().unwrap().iter().any(|m| m["tool_call_id"] == "toolu_01ABCdef"));
     }
 }

@@ -4,6 +4,8 @@ export type Route =
   | "home"
   | "companion"
   | "map"
+  | "forge"
+  | "siblings"
   | "mission"
   | "projects"
   | "memory"
@@ -15,6 +17,9 @@ export type Route =
 export type SettingsSection =
   | "companion"
   | "models"
+  | "routing"
+  | "forge"
+  | "siblings"
   | "permissions"
   | "memory"
   | "appearance"
@@ -33,6 +38,8 @@ interface UiState {
   activeConversationId: string | null;
   focusTaskId: string | null;
   focusMapNode: string | null;
+  forgeProjectId: string | null;
+  setForgeProject: (id: string | null) => void;
   navigate: (route: Route) => void;
   openSettings: (section: SettingsSection) => void;
   openConversation: (id: string | null) => void;
@@ -48,6 +55,8 @@ export const useUi = create<UiState>((set) => ({
   activeConversationId: null,
   focusTaskId: null,
   focusMapNode: null,
+  forgeProjectId: null,
+  setForgeProject: (forgeProjectId) => set({ forgeProjectId }),
   navigate: (route) => set({ route, paletteOpen: false }),
   openSettings: (settingsSection) => set({ route: "settings", settingsSection, paletteOpen: false }),
   openConversation: (activeConversationId) => set({ route: "companion", activeConversationId, paletteOpen: false }),

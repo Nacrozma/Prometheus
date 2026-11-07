@@ -141,7 +141,7 @@ impl Dispatcher {
             Decision::Deny { reason } => return failed(tool_id, None, "denied", format!("permission denied: {reason}")),
             Decision::Allow => {}
             Decision::Ask => {
-                let preview = tool.preview(input);
+                let preview = tool.preview_in(input, ctx);
                 let id = match approvals::create(&self.db, task_id, step_id, tool_id, hash, &preview) {
                     Ok(id) => id,
                     Err(e) => return failed(tool_id, None, "failed", e.to_string()),

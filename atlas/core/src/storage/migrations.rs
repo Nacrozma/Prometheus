@@ -205,6 +205,59 @@ pub const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_audit_ts ON audit_events(ts);
     "#,
+    // v2 — Atlas Forge (engineering projects, change snapshots, command runs) and pricing provenance.
+    r#"
+    ALTER TABLE usage_records ADD COLUMN price_status TEXT;
+    ALTER TABLE usage_records ADD COLUMN mission_id TEXT;
+    CREATE INDEX idx_usage_mission ON usage_records(mission_id);
+
+    ALTER TABLE conversations ADD COLUMN forge_project_id TEXT;
+    ALTER TABLE conversations ADD COLUMN discipline TEXT;
+
+    CREATE TABLE forge_projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        root_path TEXT NOT NULL UNIQUE,
+        test_command TEXT,
+        build_command TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+
+    -- One row per file Atlas changed in a Forge project. before_content lets a change be
+    -- reverted, but only while the file still matches after_sha256 (checked at revert time).
+    CREATE TABLE forge_changes (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES forge_projects(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('create','modify')),
+        before_content TEXT,
+        before_sha256 TEXT,
+        after_sha256 TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        task_id TEXT,
+        source TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        reverted_at TEXT
+    );
+    CREATE INDEX idx_forge_changes_project ON forge_changes(project_id, created_at);
+
+    CREATE TABLE forge_runs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES forge_projects(id) ON DELETE CASCADE,
+        argv TEXT NOT NULL,
+        initiated_by TEXT NOT NULL CHECK (initiated_by IN ('user','model')),
+        status TEXT NOT NULL,
+        exit_code INTEGER,
+        duration_ms INTEGER,
+        output TEXT NOT NULL DEFAULT '',
+        summary TEXT,
+        task_id TEXT,
+        created_at TEXT NOT NULL,
+        finished_at TEXT
+    );
+    CREATE INDEX idx_forge_runs_project ON forge_runs(project_id, created_at);
+    "#,
 ];
 
 pub const CURRENT_SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

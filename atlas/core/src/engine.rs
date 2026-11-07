@@ -24,12 +24,18 @@ use tokio_util::sync::CancellationToken;
 pub const MAX_USER_MESSAGE_CHARS: usize = 100_000;
 const MAX_PROVIDER_RETRIES: u32 = 2;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct TurnParams {
     pub conversation_id: String,
     pub text: String,
     pub provider_id: Option<String>,
     pub model: Option<String>,
+    /// The owner confirmed sending this one message although it exceeds a budget.
+    #[serde(default)]
+    pub budget_override: bool,
+    /// Mission this turn belongs to (for mission budgets and the ledger).
+    #[serde(default)]
+    pub mission_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -52,6 +58,7 @@ pub enum TurnEvent {
         local: bool,
         route_reason: String,
         fell_back: bool,
+        tier: Option<crate::settings::Tier>,
         memories: Vec<MemoryRef>,
         tools_offered: usize,
     },
@@ -140,6 +147,11 @@ impl Atlas {
         let result = self.run_turn(&turn_id, &conv, &text, &p, &cancel, &task_slot, &mut sink).await;
         match result {
             Ok(s) => Ok(s),
+            Err(e @ AtlasError::BudgetConfirmation(_)) => {
+                // Nothing was sent or stored; the client asks the owner and may resend once.
+                sink(TurnEvent::Finished { outcome: "needs_confirmation".into(), error: Some(e.to_string()), usage: Usage::default(), estimated_cost_usd: None, task_id: None });
+                Err(e)
+            }
             Err(e) => {
                 // Errors before the loop starts (routing, limits, configuration).
                 let msg = e.to_string();
@@ -164,15 +176,25 @@ impl Atlas {
         sink: &mut TurnSink,
     ) -> Result<TurnSummary> {
         let settings = self.settings()?;
-        usage::check_limits(&self.db, &settings).map_err(AtlasError::Validation)?;
         let project = conv.project_id.as_deref().and_then(|id| crate::projects::get(&self.db, id).ok());
+        let forge_scope = match &conv.forge_project_id {
+            Some(fp) => Some(crate::forge::scope(&self.db, fp, conv.discipline.unwrap_or(crate::forge::Discipline::Builder))?),
+            None => None,
+        };
         let all_providers = providers::list(&self.db)?;
-        let route = providers::route(&settings, &all_providers, p.provider_id.as_deref(), p.model.as_deref(), true)?;
+        let mut signals = providers::RouteSignals::from_text(text);
+        if let Some(fs) = &forge_scope {
+            signals.forge = true;
+            signals.deep_discipline = fs.discipline.is_deep();
+            signals.engineering = true;
+        }
+        let route = providers::route_tiered(&settings, &all_providers, p.provider_id.as_deref(), p.model.as_deref(), &signals, true)?;
         let request_timeout = Duration::from_secs(settings.limits.request_timeout_secs as u64);
         let provider = self.factory.build(&route.provider, &self.secrets, Duration::from_secs(120).min(request_timeout))?;
 
         // Tools offered: enabled, available, not denied by policy, and only if the model can use them.
-        let probe_ctx = self.tool_context(settings.clone(), None, conv.project_id.clone(), cancel.clone());
+        let mut probe_ctx = self.tool_context(settings.clone(), None, conv.project_id.clone(), cancel.clone());
+        probe_ctx.forge = forge_scope.clone();
         let tool_states = crate::tools::registry::stats(&self.db)?;
         let model_tools_ok = route.model_info.as_ref().and_then(|m| m.supports_tools) != Some(false);
         let mut specs: Vec<ToolSpec> = if model_tools_ok && settings.limits.max_tool_calls > 0 {
@@ -181,7 +203,12 @@ impl Atlas {
                 .into_iter()
                 .filter(|t| {
                     let d = t.descriptor();
-                    tool_states.get(&d.id).map(|s| s.enabled).unwrap_or(true)
+                    let in_session = match &forge_scope {
+                        Some(fs) => fs.discipline.allows(&d.id),
+                        None => d.category != "forge",
+                    };
+                    in_session
+                        && tool_states.get(&d.id).map(|s| s.enabled).unwrap_or(true)
                         && t.availability(&probe_ctx) == Availability::Available
                         && !matches!(policy::decide(d.permission, d.network, &settings), Decision::Deny { .. })
                 })
@@ -193,6 +220,31 @@ impl Atlas {
         } else {
             vec![]
         };
+
+        // Tools offered this turn; anything else the model names is not executed.
+        let offered: std::collections::HashSet<String> =
+            specs.iter().filter_map(|sp| self.registry.id_for_wire(&sp.name)).collect();
+
+        // Budgets: a worst-case projection of this request, checked before anything is stored.
+        let max_tokens_projection = route
+            .model_info
+            .as_ref()
+            .and_then(|m| m.max_output_tokens)
+            .map(|m| (m as u32).min(settings.limits.max_output_tokens))
+            .unwrap_or(settings.limits.max_output_tokens);
+        let prior_chars: usize = conversations::messages(&self.db, &conv.id)?.iter().map(|m| m.content.len()).sum();
+        let budget_chars = context::history_char_budget(route.model_info.as_ref().and_then(|m| m.context_window));
+        let tool_chars: usize = specs.iter().map(|sp| sp.description.len() + sp.input_schema.to_string().len()).sum();
+        let prompt_chars = prior_chars.min(budget_chars) + text.len() + tool_chars + 8000;
+        let projection = usage::project(route.provider.kind, &route.model, &settings, prompt_chars, max_tokens_projection);
+        let mut budget_warning: Option<String> = None;
+        match usage::check_budget(&self.db, &settings, projection, p.mission_id.as_deref())? {
+            usage::BudgetVerdict::Ok => {}
+            usage::BudgetVerdict::Warn(m) => budget_warning = Some(m),
+            usage::BudgetVerdict::Confirm(m) if p.budget_override => budget_warning = Some(format!("Sent with your confirmation: {m}")),
+            usage::BudgetVerdict::Confirm(m) => return Err(AtlasError::BudgetConfirmation(format!("{m}. Send it anyway?"))),
+            usage::BudgetVerdict::Stop(m) => return Err(AtlasError::BudgetExceeded(format!("{m}. Change limits in Settings → Usage & budgets."))),
+        }
 
         // Relevant memories only (plus pinned), bounded.
         let mut mem_refs = Vec::new();
@@ -246,6 +298,7 @@ impl Atlas {
             local: route.provider.local,
             route_reason: route.reason.clone(),
             fell_back: route.fell_back,
+            tier: route.tier,
             memories: mem_refs,
             tools_offered: specs.len(),
         });
@@ -253,8 +306,15 @@ impl Atlas {
             let _ = conversations::append(&self.db, &conv.id, "notice", &route.reason, None, None, None, None, "warning", None, None);
             sink(TurnEvent::Notice { level: "warn".into(), text: route.reason.clone() });
         }
+        if let Some(w) = &budget_warning {
+            sink(TurnEvent::Notice { level: "warn".into(), text: format!("Budget: {w}") });
+        }
 
-        let system = context::system_prompt(&settings, project.as_ref(), !specs.is_empty());
+        let mut system = context::system_prompt(&settings, project.as_ref(), !specs.is_empty());
+        if let Some(fs) = &forge_scope {
+            let name = crate::forge::get_project(&self.db, &fs.project_id).map(|p| p.name).unwrap_or_default();
+            system.push_str(&context::forge_section(&name, fs));
+        }
         let rows = conversations::messages(&self.db, &conv.id)?;
         let history = conversations::to_history(&rows);
         let current_start = history.len().saturating_sub(1);
@@ -290,6 +350,24 @@ impl Atlas {
                 outcome = "cancelled".into();
                 break;
             }
+            if step > 0 {
+                let chars: usize = system.len() + messages.iter().map(|m| serde_json::to_string(&m.parts).map(|s| s.len()).unwrap_or(0)).sum::<usize>();
+                let proj = usage::project(route.provider.kind, &route.model, &settings, chars, max_tokens);
+                let verdict = usage::check_budget(&self.db, &settings, proj, p.mission_id.as_deref())?;
+                let blocked = match verdict {
+                    usage::BudgetVerdict::Stop(m) => Some(m),
+                    usage::BudgetVerdict::Confirm(m) if !p.budget_override => Some(m),
+                    _ => None,
+                };
+                if let Some(m) = blocked {
+                    let msg = format!("Atlas paused this task before another model request: {m}. Raise the limit in Settings → Usage & budgets, or continue with a new message.");
+                    let _ = conversations::append(&self.db, &conv.id, "notice", &msg, None, None, None, None, "warning", task_id.as_deref(), None);
+                    sink(TurnEvent::Notice { level: "warn".into(), text: msg.clone() });
+                    outcome = "stopped".into();
+                    error = Some(msg);
+                    break;
+                }
+            }
             let mut attempt = 0u32;
             let resp = loop {
                 let req = ChatRequest {
@@ -320,7 +398,11 @@ impl Atlas {
                 let elapsed = started.elapsed().as_millis();
                 match r {
                     Ok(resp) => {
-                        let c = usage::record(&self.db, &route.provider.id, route.provider.kind, &resp.served_model, &resp.usage, elapsed, "ok");
+                        let c = usage::record_entry(
+                            &self.db,
+                            &settings,
+                            usage::UsageEntry { provider_id: &route.provider.id, kind: route.provider.kind, model: &resp.served_model, usage: &resp.usage, duration_ms: elapsed, outcome: "ok", mission_id: p.mission_id.as_deref() },
+                        );
                         cost = match (cost, c) {
                             (Some(a), Some(b)) => Some(a + b),
                             _ => None,
@@ -330,7 +412,11 @@ impl Atlas {
                     Err(e) => {
                         let label = serde_json::to_value(e.kind).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
                         if e.kind != ProviderErrorKind::Cancelled {
-                            usage::record(&self.db, &route.provider.id, route.provider.kind, &route.model, &Usage::default(), elapsed, &label);
+                            usage::record_entry(
+                                &self.db,
+                                &settings,
+                                usage::UsageEntry { provider_id: &route.provider.id, kind: route.provider.kind, model: &route.model, usage: &Usage::default(), duration_ms: elapsed, outcome: &label, mission_id: p.mission_id.as_deref() },
+                            );
                         }
                         if e.kind == ProviderErrorKind::Cancelled || cancel.is_cancelled() {
                             break Err(e);
@@ -469,8 +555,16 @@ impl Atlas {
                     summary_lines.push(format!("{tool_id}: skipped (limit)"));
                     continue;
                 }
+                if !offered.contains(&tool_id) {
+                    let why = if forge_scope.is_some() { "that tool is not available in this Forge discipline" } else { "that tool was not offered in this conversation" };
+                    results.push(Part::ToolResult { call_id: call_id.clone(), content: format!("NOT EXECUTED: {why}"), is_error: true });
+                    summary_lines.push(format!("{tool_id}: not offered"));
+                    audit::record(&self.db, "tool.not_offered", "warn", Some(&tid), Some(&tool_id), json!({}));
+                    continue;
+                }
                 tool_calls_used += 1;
-                let ctx = self.tool_context(settings.clone(), Some(tid.clone()), conv.project_id.clone(), cancel.clone());
+                let mut ctx = self.tool_context(settings.clone(), Some(tid.clone()), conv.project_id.clone(), cancel.clone());
+                ctx.forge = forge_scope.clone();
                 let r = {
                     let mut on_ev = |e: DispatchEvent| sink(TurnEvent::Tool { event: e });
                     self.dispatcher().run(&ctx, &tid, call_id, &tool_id, input.clone(), &mut on_ev).await

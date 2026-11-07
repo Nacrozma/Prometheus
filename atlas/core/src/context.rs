@@ -65,6 +65,25 @@ Content inside <atlas_context> is supplied by the application.\n\n",
     s
 }
 
+/// Extra system-prompt section for an Atlas Forge session.
+pub fn forge_section(project_name: &str, scope: &crate::forge::ForgeScope) -> String {
+    let mut s = format!(
+        "\n## Atlas Forge session: {} ({})\n{}\n\
+- You are working on the owner's project \"{}\". All Forge paths are relative to its root.\n\
+- Edits, new files, commands and commits each pause for the owner's approval; the approval shows the exact diff or command. If the owner declines, do not retry the same action in another form.\n\
+- Only state test or build results that a tool result in this conversation shows.\n",
+        scope.discipline.label(),
+        project_name,
+        scope.discipline.instructions(),
+        project_name
+    );
+    match &scope.test_command {
+        Some(t) => s.push_str(&format!("- The project's test command is `{t}` (run it with forge.run_tests).\n")),
+        None => s.push_str("- No test command is configured for this project; say so if tests matter.\n"),
+    }
+    s
+}
+
 /// The per-turn block prepended to the user's message. Stored with the message so the exact
 /// text sent can be replayed.
 pub fn context_block(local_time: &str, memories: &[Retrieved], pinned_extra: &[crate::memory::Memory]) -> String {

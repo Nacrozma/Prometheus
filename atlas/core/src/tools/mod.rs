@@ -22,7 +22,8 @@ pub enum PermissionClass {
     ReadOnly,
     /// Create a draft or a new file inside the approved workspace, save a memory.
     LocalWrite,
-    /// Send, publish, modify external records, purchase.
+    /// Send, publish, modify external records, purchase, change existing project files or run
+    /// programs. Always asks.
     Consequential,
     /// Permanent deletion, privileged system operations, unrestricted execution.
     Destructive,
@@ -108,6 +109,8 @@ pub struct ToolContext {
     pub project_id: Option<String>,
     pub cancel: CancellationToken,
     pub services: Arc<dyn ToolServices>,
+    /// The active Forge project, only inside a Forge session.
+    pub forge: Option<crate::forge::ForgeScope>,
 }
 
 #[async_trait]
@@ -124,6 +127,11 @@ pub trait Tool: Send + Sync {
             details: crate::ai::truncate(&serde_json::to_string_pretty(input).unwrap_or_default(), 4000),
             consequences: String::new(),
         }
+    }
+    /// Preview with access to the context (e.g. to diff against the file as it is now). The
+    /// approval shows this; execution still re-validates everything.
+    fn preview_in(&self, input: &Value, _ctx: &ToolContext) -> ActionPreview {
+        self.preview(input)
     }
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError>;
 }

@@ -96,7 +96,7 @@ export function CommandPalette() {
           {NAV.map((n) => (
             <Command.Item key={n.route} className={item} onSelect={run(() => ui.navigate(n.route))} keywords={[n.route]}>
               <n.icon className="size-4" aria-hidden /> {n.label}
-              <span className="ml-auto text-[0.6875rem] text-text-3">Ctrl {n.shortcut}</span>
+              {n.shortcut && <span className="ml-auto text-[0.6875rem] text-text-3">Ctrl {n.shortcut}</span>}
             </Command.Item>
           ))}
         </Command.Group>

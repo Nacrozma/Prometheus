@@ -35,6 +35,11 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         file_share_pick, grants_list, grant_revoke,
         usage_summary, map_graph,
         export_all, backup_create, backup_inspect, backup_restore_confirm, credentials_remove_all,
+        pricing_schedule,
+        forge_projects, forge_project_pick, forge_project_update, forge_project_remove, forge_tree, forge_read_file,
+        forge_session_create, forge_sessions, forge_set_discipline, forge_run, forge_run_cancel, forge_runs,
+        forge_git_status, forge_git_diff, forge_git_log, forge_git_commit, forge_git_branch,
+        forge_changes, forge_change_diff, forge_revert,
     ]
 }
 
@@ -400,7 +405,7 @@ async fn conversation_export(app: AppHandle, state: State<'_, AppState>, id: Str
 #[tauri::command]
 async fn chat_send(state: State<'_, AppState>, params: TurnParamsIn, on_event: Channel<TurnEvent>) -> R<TurnSummary> {
     let atlas = state.atlas.clone();
-    let p = TurnParams { conversation_id: params.conversation_id, text: params.text, provider_id: params.provider_id, model: params.model };
+    let p = TurnParams { conversation_id: params.conversation_id, text: params.text, provider_id: params.provider_id, model: params.model, budget_override: params.budget_override, mission_id: None };
     atlas
         .send_message(p, Box::new(move |e| {
             let _ = on_event.send(e);
@@ -415,6 +420,8 @@ pub struct TurnParamsIn {
     text: String,
     provider_id: Option<String>,
     model: Option<String>,
+    #[serde(default)]
+    budget_override: bool,
 }
 
 #[tauri::command]
@@ -667,4 +674,119 @@ fn credentials_remove_all(state: State<'_, AppState>, confirm: String) -> R<()> 
         return Err(AtlasError::Validation("confirmation text did not match".into()));
     }
     state.atlas.remove_all_credentials()
+}
+
+// ---------------- pricing ----------------
+
+#[tauri::command]
+fn pricing_schedule(state: State<'_, AppState>) -> Value {
+    state.atlas.pricing_schedule()
+}
+
+// ---------------- Atlas Forge ----------------
+// Project folders only ever come from the native folder dialog the owner operated. Every other
+// Forge path is relative to a registered project and confined by the core.
+
+#[tauri::command]
+fn forge_projects(state: State<'_, AppState>) -> R<Vec<atlas_core::forge::ForgeProject>> {
+    state.atlas.forge_projects()
+}
+
+#[tauri::command]
+async fn forge_project_pick(app: AppHandle, state: State<'_, AppState>, test_command: Option<String>) -> R<Option<atlas_core::forge::ForgeProject>> {
+    match pick_folder(&app, "Choose a project folder for Atlas Forge").await? {
+        Some(dir) => Ok(Some(state.atlas.forge_add_project("", &dir, test_command.as_deref(), None)?)),
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+fn forge_project_update(state: State<'_, AppState>, id: String, name: String, test_command: Option<String>, build_command: Option<String>) -> R<atlas_core::forge::ForgeProject> {
+    state.atlas.forge_update_project(&id, &name, test_command.as_deref(), build_command.as_deref())
+}
+
+#[tauri::command]
+fn forge_project_remove(state: State<'_, AppState>, id: String) -> R<()> {
+    state.atlas.forge_remove_project(&id)
+}
+
+#[tauri::command]
+fn forge_tree(state: State<'_, AppState>, project_id: String, path: Option<String>, depth: Option<u32>) -> R<Value> {
+    state.atlas.forge_tree(&project_id, path.as_deref().unwrap_or("."), depth.unwrap_or(1))
+}
+
+#[tauri::command]
+fn forge_read_file(state: State<'_, AppState>, project_id: String, path: String) -> R<Value> {
+    state.atlas.forge_read_file(&project_id, &path)
+}
+
+#[tauri::command]
+fn forge_session_create(state: State<'_, AppState>, project_id: String, discipline: atlas_core::forge::Discipline) -> R<atlas_core::conversations::Conversation> {
+    state.atlas.forge_create_session(&project_id, discipline)
+}
+
+#[tauri::command]
+fn forge_sessions(state: State<'_, AppState>, project_id: String) -> R<Vec<atlas_core::conversations::Conversation>> {
+    state.atlas.forge_sessions(&project_id)
+}
+
+#[tauri::command]
+fn forge_set_discipline(state: State<'_, AppState>, conversation_id: String, discipline: atlas_core::forge::Discipline) -> R<atlas_core::conversations::Conversation> {
+    state.atlas.forge_set_discipline(&conversation_id, discipline)
+}
+
+/// A command the owner typed in the Forge terminal (no shell; time and output limits apply).
+#[tauri::command]
+async fn forge_run(state: State<'_, AppState>, project_id: String, command: String) -> R<atlas_core::forge::RunRecord> {
+    state.atlas.clone().forge_run(&project_id, &command).await
+}
+
+#[tauri::command]
+fn forge_run_cancel(state: State<'_, AppState>, run_id: String) -> bool {
+    state.atlas.forge_cancel_run(&run_id)
+}
+
+#[tauri::command]
+fn forge_runs(state: State<'_, AppState>, project_id: String) -> R<Vec<atlas_core::forge::RunRecord>> {
+    state.atlas.forge_runs(&project_id)
+}
+
+#[tauri::command]
+async fn forge_git_status(state: State<'_, AppState>, project_id: String) -> R<atlas_core::forge::git::Status> {
+    state.atlas.clone().forge_git_status(&project_id).await
+}
+
+#[tauri::command]
+async fn forge_git_diff(state: State<'_, AppState>, project_id: String, path: Option<String>) -> R<String> {
+    state.atlas.clone().forge_git_diff(&project_id, path.as_deref()).await
+}
+
+#[tauri::command]
+async fn forge_git_log(state: State<'_, AppState>, project_id: String) -> R<Vec<atlas_core::forge::git::Commit>> {
+    state.atlas.clone().forge_git_log(&project_id).await
+}
+
+#[tauri::command]
+async fn forge_git_commit(state: State<'_, AppState>, project_id: String, message: String, paths: Vec<String>) -> R<String> {
+    state.atlas.clone().forge_git_commit(&project_id, &message, &paths).await
+}
+
+#[tauri::command]
+async fn forge_git_branch(state: State<'_, AppState>, project_id: String, name: String) -> R<()> {
+    state.atlas.clone().forge_git_branch(&project_id, &name).await
+}
+
+#[tauri::command]
+fn forge_changes(state: State<'_, AppState>, project_id: String) -> R<Vec<atlas_core::forge::Change>> {
+    state.atlas.forge_changes(&project_id)
+}
+
+#[tauri::command]
+fn forge_change_diff(state: State<'_, AppState>, change_id: String) -> R<String> {
+    state.atlas.forge_change_diff(&change_id)
+}
+
+#[tauri::command]
+fn forge_revert(state: State<'_, AppState>, change_id: String) -> R<atlas_core::forge::Change> {
+    state.atlas.forge_revert(&change_id)
 }

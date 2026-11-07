@@ -175,7 +175,7 @@ test("a running response can be stopped", async () => {
 });
 
 test("Mission Control shows the real execution history", async () => {
-  await go("4");
+  await go("5");
   await waitText("Execution timeline");
   await driver.sleep(300);
   const body = await pageText();
@@ -196,7 +196,7 @@ test("the Atlas Map renders nodes from live state", async () => {
 });
 
 test("memory can be added, found and deleted", async () => {
-  await go("6");
+  await go("7");
   await click("Add memory");
   const box = await find(By.id("mem-c"));
   await box.sendKeys("Prefers metric units for measurements");
@@ -209,7 +209,7 @@ test("memory can be added, found and deleted", async () => {
 });
 
 test("integrations show honest states and settings persist", async () => {
-  await go("8");
+  await go("9");
   await waitText("Web search (Tavily)");
   await waitText("Planned — not available in this version");
   await shot("11-integrations");
@@ -224,6 +224,29 @@ test("integrations show honest states and settings persist", async () => {
   await shot("13-settings-light");
   await click("Appearance");
   await click("Deep Orbit");
+});
+
+test("Atlas Forge: explorer, approved edit with revertible snapshot, terminal", async () => {
+  await go("4");
+  await waitText("e2e-sample");
+  await click("main.py", "button");
+  await waitText("return a - b");
+  await click("Session", "button");
+  await send("Please fix the bug in add");
+  await waitText("Waiting for your approval", 20000);
+  await waitText("+    return a + b");
+  // The floating approval dock can overlap the card in the session pane; use the in-pane button.
+  const approve = await find(By.xpath("//section[@aria-label='Forge workspace']//button[normalize-space()='Approve']"));
+  await driver.executeScript("arguments[0].scrollIntoView({block: 'center'}); arguments[0].click();", approve);
+  await waitText("Done. Tool result", 20000);
+  await click("Changes", "button");
+  await waitText("edited");
+  await shot("15-forge");
+  await click("Terminal", "button");
+  const cmd = await find(By.css('input[aria-label="Command"]'));
+  await cmd.sendKeys("git --version", Key.ENTER);
+  await waitText("git version", 20000);
+  await shot("16-forge-terminal");
 });
 
 test("home dashboard reflects state", async () => {
@@ -249,7 +272,7 @@ async function audit(page) {
 
 test("accessibility audit (axe-core) finds no serious or critical issues", async () => {
   const failures = {};
-  for (const [key, page] of [["1", "home"], ["2", "companion"], ["4", "mission-control"], ["6", "memory"], ["8", "integrations"], [",", "settings"]]) {
+  for (const [key, page] of [["1", "home"], ["2", "companion"], ["4", "forge"], ["5", "mission-control"], ["7", "memory"], ["9", "integrations"], [",", "settings"]]) {
     await go(key);
     await driver.sleep(500);
     const blocking = await audit(page);

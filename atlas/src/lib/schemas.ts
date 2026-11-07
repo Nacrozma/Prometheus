@@ -9,6 +9,14 @@ export type AppErrorShape = z.infer<typeof AppErrorSchema>;
 
 // ---------- settings ----------
 const gate = z.enum(["ask", "allow"]);
+export const RoutingModeSchema = z.enum(["auto", "budget", "balanced", "quality", "manual"]);
+export type RoutingMode = z.infer<typeof RoutingModeSchema>;
+export const TierSchema = z.enum(["fast", "standard", "heavy"]);
+export type Tier = z.infer<typeof TierSchema>;
+export const TierModelSchema = z.object({ provider_id: z.string(), model: z.string() });
+export type TierModel = z.infer<typeof TierModelSchema>;
+export const PriceOverrideSchema = z.object({ model: z.string(), input_per_mtok: z.number(), output_per_mtok: z.number() });
+export type PriceOverride = z.infer<typeof PriceOverrideSchema>;
 export const SettingsSchema = z.object({
   onboarding_completed: z.boolean(),
   companion: z.object({
@@ -21,7 +29,14 @@ export const SettingsSchema = z.object({
   }),
   default_provider_id: z.string().nullable(),
   default_model: z.string().nullable(),
-  routing: z.object({ allow_cross_provider_fallback: z.boolean(), anthropic_refusal_fallback: z.boolean() }),
+  routing: z.object({
+    allow_cross_provider_fallback: z.boolean(),
+    anthropic_refusal_fallback: z.boolean(),
+    mode: RoutingModeSchema,
+    fast: TierModelSchema.nullable(),
+    standard: TierModelSchema.nullable(),
+    heavy: TierModelSchema.nullable(),
+  }),
   permissions: z.object({ local_write: gate, network_tools: gate }),
   memory: z.object({ enabled: z.boolean(), max_retrieved: z.number() }),
   workspace_dir: z.string().nullable(),
@@ -40,14 +55,24 @@ export const SettingsSchema = z.object({
   }),
   network: z.object({ offline_mode: z.boolean() }),
   retention: z.object({ conversation_days: z.number().nullable(), audit_days: z.number().nullable() }),
-  usage: z.object({ monthly_budget_usd: z.number().nullable(), daily_request_limit: z.number().nullable() }),
+  usage: z.object({
+    monthly_budget_usd: z.number().nullable(),
+    daily_budget_usd: z.number().nullable(),
+    per_request_usd: z.number().nullable(),
+    mission_budget_usd: z.number().nullable(),
+    daily_request_limit: z.number().nullable(),
+    warn_at_percent: z.number(),
+    on_exceed: z.enum(["stop", "ask"]),
+    price_overrides: z.array(PriceOverrideSchema),
+  }),
   voice: z.object({ enabled: z.boolean(), speak_responses: z.boolean(), language: z.string() }),
   default_project_id: z.string().nullable(),
+  forge: z.object({ command_timeout_secs: z.number(), max_output_kb: z.number() }),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
 // ---------- providers ----------
-export const ProviderKindSchema = z.enum(["anthropic", "openai", "openai_compatible", "ollama", "mock"]);
+export const ProviderKindSchema = z.enum(["anthropic", "openai", "openai_compatible", "ollama", "openrouter", "mistral", "cerebras", "mock"]);
 export type ProviderKind = z.infer<typeof ProviderKindSchema>;
 export const ProviderStatusSchema = z.enum([
   "not_configured",
@@ -97,6 +122,8 @@ export const ProviderTemplateSchema = z.object({
   needs_key: z.boolean(),
   local: z.boolean(),
   key_help: z.string(),
+  key_placeholder: z.string(),
+  optional: z.boolean(),
   privacy_note: z.string(),
 });
 export type ProviderTemplate = z.infer<typeof ProviderTemplateSchema>;
@@ -166,6 +193,8 @@ export const ConversationSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   message_count: z.number(),
+  forge_project_id: z.string().nullable().optional(),
+  discipline: z.lazy(() => DisciplineSchema).nullable().optional(),
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
 
@@ -277,6 +306,7 @@ export const TurnEventSchema = z.discriminatedUnion("type", [
     local: z.boolean(),
     route_reason: z.string(),
     fell_back: z.boolean(),
+    tier: TierSchema.nullable().optional(),
     memories: z.array(z.object({ id: z.string(), content: z.string(), reason: z.string() })),
     tools_offered: z.number(),
   }),
@@ -363,7 +393,9 @@ export const UsageSummarySchema = z.object({
   ),
   month_estimated_cost_usd: z.number(),
   month_has_unknown_costs: z.boolean(),
+  month_unverified_cost_usd: z.number(),
   today_requests: z.number(),
+  today_estimated_cost_usd: z.number(),
 });
 export type UsageSummary = z.infer<typeof UsageSummarySchema>;
 
@@ -434,6 +466,77 @@ export const TOPICS = [
   "conversations",
   "settings",
   "usage",
+  "forge",
+  "siblings",
+  "missions",
 ] as const;
 export type Topic = (typeof TOPICS)[number];
 export const ChangeEventSchema = z.object({ topic: z.enum(TOPICS), id: z.string().nullable() });
+
+// ---------- pricing ----------
+export const PriceEntrySchema = z.object({
+  vendor: z.string(),
+  model: z.string(),
+  input_per_mtok: z.number(),
+  output_per_mtok: z.number(),
+  verification: z.enum(["verified", "unverified", "user"]),
+  source: z.string(),
+  as_of: z.string().nullable(),
+});
+export type PriceEntry = z.infer<typeof PriceEntrySchema>;
+export const PricingScheduleSchema = z.object({ entries: z.array(PriceEntrySchema), seed_conflicts: z.array(z.string()) });
+
+// ---------- Atlas Forge ----------
+export const DisciplineSchema = z.enum(["architect", "builder", "debugger", "reconstructor"]);
+export type Discipline = z.infer<typeof DisciplineSchema>;
+export const ForgeProjectSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  root_path: z.string(),
+  test_command: z.string().nullable(),
+  build_command: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  exists: z.boolean(),
+});
+export type ForgeProject = z.infer<typeof ForgeProjectSchema>;
+export const ForgeTreeSchema = z.object({
+  entries: z.array(z.object({ path: z.string(), kind: z.enum(["file", "dir"]), bytes: z.number().nullable() })),
+  truncated: z.boolean(),
+});
+export const ForgeRunSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  command: z.string(),
+  initiated_by: z.enum(["user", "model"]),
+  status: z.string(),
+  exit_code: z.number().nullable(),
+  duration_ms: z.number().nullable(),
+  output: z.string(),
+  summary: z.object({ framework: z.string(), passed: z.number(), failed: z.number() }).nullable(),
+  created_at: z.string(),
+  finished_at: z.string().nullable(),
+});
+export type ForgeRun = z.infer<typeof ForgeRunSchema>;
+export const GitStatusSchema = z.object({
+  is_repo: z.boolean(),
+  branch: z.string().nullable(),
+  ahead_behind: z.string().nullable(),
+  files: z.array(z.object({ path: z.string(), code: z.string() })),
+});
+export type GitStatus = z.infer<typeof GitStatusSchema>;
+export const GitCommitSchema = z.object({ hash: z.string(), author: z.string(), date: z.string(), subject: z.string() });
+export const ForgeChangeSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  path: z.string(),
+  kind: z.enum(["create", "modify"]),
+  summary: z.string(),
+  source: z.string(),
+  task_id: z.string().nullable(),
+  created_at: z.string(),
+  reverted_at: z.string().nullable(),
+  revertible: z.boolean(),
+  revert_blocker: z.string().nullable(),
+});
+export type ForgeChange = z.infer<typeof ForgeChangeSchema>;

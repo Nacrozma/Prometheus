@@ -30,6 +30,13 @@ pub enum AtlasError {
     Io(String),
     #[error("internal error: {0}")]
     Internal(String),
+    /// A budget would be exceeded and the owner chose "ask first". The client may resend the
+    /// same message once with `budget_override`.
+    #[error("{0}")]
+    BudgetConfirmation(String),
+    /// A budget is exhausted and the owner chose "stop".
+    #[error("{0}")]
+    BudgetExceeded(String),
 }
 
 impl AtlasError {
@@ -47,6 +54,8 @@ impl AtlasError {
             AtlasError::Conflict(_) => "conflict",
             AtlasError::Io(_) => "io",
             AtlasError::Internal(_) => "internal",
+            AtlasError::BudgetConfirmation(_) => "budget_confirmation_required",
+            AtlasError::BudgetExceeded(_) => "budget_exceeded",
         }
     }
 }

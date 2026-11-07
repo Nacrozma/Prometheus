@@ -69,7 +69,7 @@ async fn send(h: &Harness, text: &str) -> (atlas_core::error::Result<atlas_core:
     let r = h
         .atlas
         .send_message(
-            TurnParams { conversation_id: h.conv.clone(), text: text.into(), provider_id: None, model: None },
+            TurnParams { conversation_id: h.conv.clone(), text: text.into(), provider_id: None, model: None, ..Default::default() },
             Box::new(move |e| e2.lock().unwrap().push(e)),
         )
         .await;
@@ -86,7 +86,7 @@ async fn send_and_decide(h: &Harness, text: &str, approve: bool) -> (atlas_core:
     let e2 = events.clone();
     let handle = tokio::spawn(async move {
         atlas
-            .send_message(TurnParams { conversation_id: conv, text, provider_id: None, model: None }, Box::new(move |e| e2.lock().unwrap().push(e)))
+            .send_message(TurnParams { conversation_id: conv, text, provider_id: None, model: None, ..Default::default() }, Box::new(move |e| e2.lock().unwrap().push(e)))
             .await
     });
     let mut decided = false;
@@ -236,10 +236,13 @@ async fn destructive_tools_are_denied_and_never_offered() {
     let (r, _) = send(&h, "Delete everything").await;
     let r = r.unwrap();
     assert_eq!(h.destroyed.load(Ordering::SeqCst), 0);
+    // A tool that was never offered is refused before it reaches the dispatcher at all.
     let d = h.atlas.task_detail(&r.task_id.unwrap()).unwrap();
-    assert_eq!(d.steps[0].status, "denied");
+    assert!(d.steps.is_empty(), "no step may run for a tool that was not offered");
     let reqs = h.mock.requests.lock().unwrap();
     assert!(!reqs[0].tools.iter().any(|t| t.name == "test_destroy"), "denied tools must not be offered");
+    let result = reqs[1].messages.last().unwrap();
+    assert!(serde_json::to_string(&result.parts).unwrap().contains("NOT EXECUTED: that tool was not offered"));
 }
 
 #[tokio::test]
@@ -268,7 +271,7 @@ async fn cancellation_stops_a_running_turn() {
     let atlas = h.atlas.clone();
     let conv = h.conv.clone();
     let handle = tokio::spawn(async move {
-        atlas.send_message(TurnParams { conversation_id: conv, text: "long".into(), provider_id: None, model: None }, Box::new(|_| {})).await
+        atlas.send_message(TurnParams { conversation_id: conv, text: "long".into(), provider_id: None, model: None, ..Default::default() }, Box::new(|_| {})).await
     });
     tokio::time::sleep(Duration::from_millis(100)).await;
     // A second message in the same conversation is refused while one is running.
@@ -286,7 +289,7 @@ async fn emergency_stop_cancels_waiting_approval() {
     let atlas = h.atlas.clone();
     let conv = h.conv.clone();
     let handle = tokio::spawn(async move {
-        atlas.send_message(TurnParams { conversation_id: conv, text: "write".into(), provider_id: None, model: None }, Box::new(|_| {})).await
+        atlas.send_message(TurnParams { conversation_id: conv, text: "write".into(), provider_id: None, model: None, ..Default::default() }, Box::new(|_| {})).await
     });
     for _ in 0..100 {
         if !h.atlas.pending_approvals().unwrap().is_empty() {
@@ -429,4 +432,134 @@ async fn web_search_uses_tavily_with_bearer_key_and_cites_urls() {
     // Injected text in results did not approve anything by itself.
     assert!(h.atlas.pending_approvals().unwrap().is_empty());
     assert_eq!(d.approvals.len(), 1);
+}
+
+// ---------- Atlas Forge ----------
+
+async fn send_in(h: &Harness, conv: &str, text: &str, approve: Option<bool>) -> (atlas_core::engine::TurnSummary, Vec<TurnEvent>) {
+    let atlas = h.atlas.clone();
+    let conv = conv.to_string();
+    let text = text.to_string();
+    let events: Events = Arc::new(Mutex::new(vec![]));
+    let e2 = events.clone();
+    let handle = tokio::spawn(async move {
+        atlas.send_message(TurnParams { conversation_id: conv, text, ..Default::default() }, Box::new(move |e| e2.lock().unwrap().push(e))).await
+    });
+    if let Some(ok) = approve {
+        for _ in 0..200 {
+            if let Some(a) = h.atlas.pending_approvals().unwrap().first() {
+                h.atlas.decide_approval(&a.id, ok).unwrap();
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+    let r = tokio::time::timeout(Duration::from_secs(10), handle).await.unwrap().unwrap().unwrap();
+    let ev = events.lock().unwrap().clone();
+    (r, ev)
+}
+
+fn forge_project(h: &Harness) -> (tempfile::TempDir, String) {
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("app");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/main.py"), "def add(a, b):\n    return a - b\n").unwrap();
+    let p = h.atlas.forge_add_project("app", &root, None, None).unwrap();
+    (base, p.id)
+}
+
+#[tokio::test]
+async fn forge_architect_reads_but_cannot_edit() {
+    let h = harness(vec![
+        MockProvider::tool_call("c1", "forge_read_file", json!({"path": "src/main.py"})),
+        MockProvider::tool_call("c2", "forge_edit_file", json!({"path": "src/main.py", "old": "a - b", "new": "a + b"})),
+        MockProvider::text("The bug is the minus sign; Builder should change it."),
+    ]);
+    let (_d, pid) = forge_project(&h);
+    let conv = h.atlas.forge_create_session(&pid, atlas_core::forge::Discipline::Architect).unwrap().id;
+    let (r, _) = send_in(&h, &conv, "Why does add() fail?", None).await;
+    assert_eq!(r.outcome, "completed");
+    let reqs = h.mock.requests.lock().unwrap();
+    let offered: Vec<&str> = reqs[0].tools.iter().map(|t| t.name.as_str()).collect();
+    assert!(offered.contains(&"forge_read_file") && !offered.contains(&"forge_edit_file") && !offered.contains(&"files_create"), "{offered:?}");
+    assert!(reqs[0].system.contains("Forge ARCHITECT"));
+    let read_result = serde_json::to_string(&reqs[1].messages.last().unwrap().parts).unwrap();
+    assert!(read_result.contains("return a - b") && read_result.contains("untrusted"), "{read_result}");
+    let edit_result = serde_json::to_string(&reqs[2].messages.last().unwrap().parts).unwrap();
+    assert!(edit_result.contains("not available in this Forge discipline"), "{edit_result}");
+    drop(reqs);
+    assert!(h.atlas.forge_changes(&pid).unwrap().is_empty());
+    assert!(std::fs::read_to_string(_d.path().join("app/src/main.py")).unwrap().contains("a - b"));
+    // Forge sessions stay out of the normal conversation list.
+    assert!(!h.atlas.conversations(None, false, 100, 0).unwrap().iter().any(|c| c.id == conv));
+}
+
+#[tokio::test]
+async fn forge_builder_edit_requires_approval_and_can_be_reverted() {
+    let h = harness(vec![
+        MockProvider::tool_call("c1", "forge_edit_file", json!({"path": "src/main.py", "old": "a - b", "new": "a + b"})),
+        MockProvider::text("Fixed."),
+        MockProvider::tool_call("c2", "forge_edit_file", json!({"path": "src/main.py", "old": "return a + b", "new": "return 0"})),
+        MockProvider::text("Not applied."),
+    ]);
+    let (d, pid) = forge_project(&h);
+    let file = d.path().join("app/src/main.py");
+    let conv = h.atlas.forge_create_session(&pid, atlas_core::forge::Discipline::Builder).unwrap().id;
+    let (r, ev) = send_in(&h, &conv, "Fix add()", Some(true)).await;
+    assert_eq!(r.outcome, "completed");
+    let approval_diff = ev.iter().find_map(|e| match e {
+        TurnEvent::Tool { event: atlas_core::tools::dispatch::DispatchEvent::ApprovalRequired { approval } } => Some(approval.preview.details.clone()),
+        _ => None,
+    });
+    let approval_diff = approval_diff.unwrap();
+    assert!(
+        approval_diff.contains("-    return a - b") && approval_diff.contains("+    return a + b") && approval_diff.contains(" def add(a, b):"),
+        "the approval shows the real diff against the file, with context: {approval_diff}"
+    );
+    assert!(std::fs::read_to_string(&file).unwrap().contains("a + b"));
+    let changes = h.atlas.forge_changes(&pid).unwrap();
+    assert_eq!(changes.len(), 1);
+    assert!(changes[0].revertible);
+    // A declined edit changes nothing.
+    let (r2, _) = send_in(&h, &conv, "Now break it", Some(false)).await;
+    assert_eq!(r2.outcome, "completed");
+    assert!(std::fs::read_to_string(&file).unwrap().contains("return a + b"));
+    assert_eq!(h.atlas.forge_changes(&pid).unwrap().len(), 1);
+    // Revert restores the original exactly.
+    h.atlas.forge_revert(&changes[0].id).unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "def add(a, b):\n    return a - b\n");
+}
+
+#[tokio::test]
+async fn forge_model_commands_are_policed_before_approval() {
+    let h = harness(vec![
+        MockProvider::tool_call("c1", "forge_run_command", json!({"command": "bash -c 'rm -rf ~'"})),
+        MockProvider::text("Refused."),
+    ]);
+    let (_d, pid) = forge_project(&h);
+    let conv = h.atlas.forge_create_session(&pid, atlas_core::forge::Discipline::Builder).unwrap().id;
+    // Consequential → asks; even if approved, the runner policy refuses a shell.
+    let (r, ev) = send_in(&h, &conv, "clean up", Some(true)).await;
+    assert_eq!(r.outcome, "completed");
+    let preview = ev.iter().find_map(|e| match e {
+        TurnEvent::Tool { event: atlas_core::tools::dispatch::DispatchEvent::ApprovalRequired { approval } } => Some(approval.preview.consequences.clone()),
+        _ => None,
+    });
+    assert!(preview.unwrap().contains("will refuse"), "the approval card warns before the owner decides");
+    let reqs = h.mock.requests.lock().unwrap();
+    let res = serde_json::to_string(&reqs[1].messages.last().unwrap().parts).unwrap();
+    assert!(res.contains("arbitrary shell code"), "{res}");
+    assert!(h.atlas.forge_runs(&pid).unwrap().is_empty(), "nothing was started");
+}
+
+#[tokio::test]
+async fn budget_stop_refuses_before_anything_is_sent_or_stored() {
+    let h = harness(vec![MockProvider::text("should not be reached")]);
+    let mut s = h.atlas.settings().unwrap();
+    s.usage.daily_request_limit = Some(0);
+    h.atlas.update_settings(s).unwrap();
+    let (r, _) = send(&h, "hello").await;
+    let e = r.unwrap_err();
+    assert_eq!(e.code(), "budget_exceeded");
+    assert!(h.mock.requests.lock().unwrap().is_empty());
 }

@@ -16,6 +16,9 @@ pub enum Topic {
     Conversations,
     Settings,
     Usage,
+    Forge,
+    Siblings,
+    Missions,
 }
 
 #[derive(Debug, Clone, Serialize)]

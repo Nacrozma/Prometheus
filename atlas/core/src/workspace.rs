@@ -70,6 +70,12 @@ pub fn resolve_existing(root: &Path, rel: &str) -> Result<PathBuf> {
 /// Resolve a path for a new file. Parent directories are created inside the workspace; the
 /// target must not already exist (Atlas never overwrites files).
 pub fn resolve_new(root: &Path, rel: &str) -> Result<PathBuf> {
+    resolve_new_with(root, rel, true)
+}
+
+/// Like `resolve_new`; `text_only` restricts the extension to `TEXT_EXTENSIONS`. Forge projects
+/// pass false (source trees hold many file types), and every Forge write is approved first.
+pub fn resolve_new_with(root: &Path, rel: &str, text_only: bool) -> Result<PathBuf> {
     let root = canonical_root(root)?;
     let rel = check_relative(rel)?;
     for comp in rel.components() {
@@ -79,7 +85,7 @@ pub fn resolve_new(root: &Path, rel: &str) -> Result<PathBuf> {
     }
     let file_name = rel.file_name().ok_or_else(|| AtlasError::Validation("missing file name".into()))?.to_owned();
     let ext = rel.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
-    if !TEXT_EXTENSIONS.contains(&ext.as_str()) {
+    if text_only && !TEXT_EXTENSIONS.contains(&ext.as_str()) {
         return Err(AtlasError::Validation(format!("'.{ext}' is not a supported text file type")));
     }
     let parent_rel = rel.parent().map(Path::to_path_buf).unwrap_or_default();

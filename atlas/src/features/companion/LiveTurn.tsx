@@ -48,6 +48,7 @@ export function LiveTurn({ turn }: { turn: TurnState }) {
             {s.local ? "On this computer" : "Cloud"} · {s.provider_label} · <span className="font-mono">{s.model}</span>
           </span>
           {s.fell_back && <span className="text-warn">fallback provider</span>}
+          {s.tier && <span className="rounded-sm border border-line-2 px-1.5 py-px font-mono text-[0.68rem] uppercase tracking-wide text-text-2" title={s.route_reason}>{s.tier} tier</span>}
           <MemoryChips memories={s.memories} />
         </div>
       )}

@@ -181,9 +181,11 @@ const tones: Record<Tone, string> = {
   info: "bg-info-soft text-info border-transparent",
 };
 
-export function Badge({ tone = "neutral", children, className }: { tone?: Tone; children: ReactNode; className?: string }) {
+/** `solid` swaps the translucent tint for an opaque surface, for badges on tinted backgrounds. */
+export function Badge({ tone = "neutral", children, className, solid }: { tone?: Tone; children: ReactNode; className?: string; solid?: boolean }) {
+  const t = solid ? tones[tone].replace(/\bbg-\S+/, "bg-bg-1") : tones[tone];
   return (
-    <span className={cn("inline-flex items-center gap-1 rounded-xs border px-1.5 py-0.5 text-[0.6875rem] font-medium leading-none", tones[tone], className)}>
+    <span className={cn("inline-flex items-center gap-1 rounded-xs border px-1.5 py-0.5 text-[0.6875rem] font-medium leading-none", t, className)}>
       {children}
     </span>
   );

@@ -117,7 +117,7 @@ export const api = {
 
   /** Stream a turn. `onEvent` receives validated events; malformed events are dropped and logged. */
   send: (
-    params: { conversationId: string; text: string; providerId?: string | null; model?: string | null },
+    params: { conversationId: string; text: string; providerId?: string | null; model?: string | null; budgetOverride?: boolean },
     onEvent: (e: S.TurnEvent) => void,
   ) => {
     const channel = new Channel<unknown>();
@@ -134,6 +134,7 @@ export const api = {
           text: params.text,
           providerId: params.providerId ?? null,
           model: params.model ?? null,
+          budgetOverride: params.budgetOverride ?? false,
         },
         onEvent: channel,
       },
@@ -190,6 +191,29 @@ export const api = {
   backupInspect: () => call("backup_inspect", {}, Opt(z.record(z.string(), z.unknown()))),
   backupRestoreConfirm: () => call("backup_restore_confirm", {}, Void),
   removeAllCredentials: (confirm: string) => call("credentials_remove_all", { confirm }, Void),
+  pricingSchedule: () => call("pricing_schedule", {}, S.PricingScheduleSchema),
+
+  forgeProjects: () => call("forge_projects", {}, z.array(S.ForgeProjectSchema)),
+  forgePickProject: (testCommand: string | null) => call("forge_project_pick", { testCommand }, Opt(S.ForgeProjectSchema)),
+  forgeUpdateProject: (id: string, name: string, testCommand: string | null, buildCommand: string | null) =>
+    call("forge_project_update", { id, name, testCommand, buildCommand }, S.ForgeProjectSchema),
+  forgeRemoveProject: (id: string) => call("forge_project_remove", { id }, Void),
+  forgeTree: (projectId: string, path: string, depth = 1) => call("forge_tree", { projectId, path, depth }, S.ForgeTreeSchema),
+  forgeReadFile: (projectId: string, path: string) => call("forge_read_file", { projectId, path }, z.object({ path: z.string(), content: z.string() })),
+  forgeCreateSession: (projectId: string, discipline: S.Discipline) => call("forge_session_create", { projectId, discipline }, S.ConversationSchema),
+  forgeSessions: (projectId: string) => call("forge_sessions", { projectId }, z.array(S.ConversationSchema)),
+  forgeSetDiscipline: (conversationId: string, discipline: S.Discipline) => call("forge_set_discipline", { conversationId, discipline }, S.ConversationSchema),
+  forgeRun: (projectId: string, command: string) => call("forge_run", { projectId, command }, S.ForgeRunSchema),
+  forgeCancelRun: (runId: string) => call("forge_run_cancel", { runId }, z.boolean()),
+  forgeRuns: (projectId: string) => call("forge_runs", { projectId }, z.array(S.ForgeRunSchema)),
+  forgeGitStatus: (projectId: string) => call("forge_git_status", { projectId }, S.GitStatusSchema),
+  forgeGitDiff: (projectId: string, path: string | null) => call("forge_git_diff", { projectId, path }, z.string()),
+  forgeGitLog: (projectId: string) => call("forge_git_log", { projectId }, z.array(S.GitCommitSchema)),
+  forgeGitCommit: (projectId: string, message: string, paths: string[]) => call("forge_git_commit", { projectId, message, paths }, z.string()),
+  forgeGitBranch: (projectId: string, name: string) => call("forge_git_branch", { projectId, name }, Void),
+  forgeChanges: (projectId: string) => call("forge_changes", { projectId }, z.array(S.ForgeChangeSchema)),
+  forgeChangeDiff: (changeId: string) => call("forge_change_diff", { changeId }, z.string()),
+  forgeRevert: (changeId: string) => call("forge_revert", { changeId }, S.ForgeChangeSchema),
 };
 
 export type Api = typeof api;

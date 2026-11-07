@@ -36,8 +36,9 @@ export function ApprovalCard({ approval, compact = false }: { approval: Approval
       <div className="flex items-center gap-2 border-b border-line-1 bg-warn-soft px-4 py-2.5">
         <ShieldAlert className="size-4 text-warn" aria-hidden />
         <p className="text-sm font-semibold text-text-1">Approval needed</p>
-        {tool && <Badge tone={tool.permission === "consequential" ? "err" : "warn"}>{permissionLabel[tool.permission]}</Badge>}
-        {tool?.network && <Badge tone="info">Sends data off this computer</Badge>}
+        {/* Solid backgrounds keep these readable on the tinted header (WCAG AA). */}
+        {tool && <Badge tone={tool.permission === "consequential" ? "err" : "warn"} solid>{permissionLabel[tool.permission]}</Badge>}
+        {tool?.network && <Badge tone="info" solid>Sends data off this computer</Badge>}
         <span className="ml-auto text-xs text-text-3">{relativeTime(approval.created_at)}</span>
       </div>
       <dl className="grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-2 px-4 py-3 text-sm">

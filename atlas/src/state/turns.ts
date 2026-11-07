@@ -23,14 +23,20 @@ export interface TurnState {
   error?: string;
   /** Bumped whenever persisted messages changed so the thread reloads. */
   revision: number;
+  /** A message held back because it would exceed a budget; the owner may send it once anyway. */
+  budgetPrompt?: { text: string; message: string; opts?: SendOpts };
 }
+
+type SendOpts = { providerId?: string | null; model?: string | null };
 
 export const empty = (): TurnState => ({ running: false, text: "", reasoning: "", tools: [], notices: [], revision: 0 });
 
 interface TurnsStore {
   byConversation: Record<string, TurnState>;
   get: (conversationId: string) => TurnState;
-  send: (conversationId: string, text: string, opts?: { providerId?: string | null; model?: string | null }) => Promise<void>;
+  send: (conversationId: string, text: string, opts?: SendOpts & { budgetOverride?: boolean }) => Promise<void>;
+  confirmBudget: (conversationId: string) => Promise<void>;
+  dismissBudget: (conversationId: string) => void;
   cancel: (conversationId: string) => Promise<void>;
   anyRunning: () => boolean;
 }
@@ -93,12 +99,27 @@ export const useTurns = create<TurnsStore>((set, get) => ({
       set((st) => ({ byConversation: { ...st.byConversation, [conversationId]: fn(st.byConversation[conversationId] ?? empty()) } }));
     patch((s) => ({ ...empty(), revision: s.revision + 1, running: true }));
     try {
-      await api.send({ conversationId, text, providerId: opts?.providerId, model: opts?.model }, (e) => patch((s) => reduce(s, e)));
+      await api.send(
+        { conversationId, text, providerId: opts?.providerId, model: opts?.model, budgetOverride: opts?.budgetOverride },
+        (e) => patch((s) => reduce(s, e)),
+      );
     } catch (e) {
+      if (e instanceof AtlasError && e.code === "budget_confirmation_required") {
+        const held = { text, message: e.message, opts: { providerId: opts?.providerId, model: opts?.model } };
+        patch((s) => ({ ...s, running: false, outcome: undefined, error: undefined, budgetPrompt: held }));
+        return;
+      }
       const msg = e instanceof AtlasError ? e.message : String(e);
       patch((s) => ({ ...s, running: false, error: msg, outcome: "failed", revision: s.revision + 1 }));
     }
   },
+  confirmBudget: async (conversationId) => {
+    const held = get().byConversation[conversationId]?.budgetPrompt;
+    if (!held) return;
+    await get().send(conversationId, held.text, { ...held.opts, budgetOverride: true });
+  },
+  dismissBudget: (conversationId) =>
+    set((st) => ({ byConversation: { ...st.byConversation, [conversationId]: { ...(st.byConversation[conversationId] ?? empty()), budgetPrompt: undefined } } })),
   cancel: async (conversationId) => {
     await api.cancel(conversationId);
   },

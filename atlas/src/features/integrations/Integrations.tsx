@@ -20,7 +20,19 @@ async function act<T>(fn: () => Promise<T>, ok?: string): Promise<T | undefined>
   }
 }
 
-function KeyDialog({ open, onOpenChange, title, onSave }: { open: boolean; onOpenChange: (v: boolean) => void; title: string; onSave: (k: string) => Promise<unknown> }) {
+const KEY_PLACEHOLDERS: Record<string, string> = {
+  anthropic: "Paste your Anthropic API key",
+  openai: "Paste your OpenAI API key",
+  openrouter: "Paste your OpenRouter API key",
+  mistral: "Paste your Mistral API key",
+  cerebras: "Paste your Cerebras API key",
+  openai_compatible: "Paste the API key for this server",
+};
+function keyPlaceholder(kind: string) {
+  return KEY_PLACEHOLDERS[kind] ?? "Paste your API key";
+}
+
+function KeyDialog({ open, onOpenChange, title, onSave, placeholder }: { open: boolean; onOpenChange: (v: boolean) => void; title: string; onSave: (k: string) => Promise<unknown>; placeholder?: string }) {
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   return (
@@ -49,7 +61,7 @@ function KeyDialog({ open, onOpenChange, title, onSave }: { open: boolean; onOpe
         </>
       }
     >
-      <Input type="password" autoComplete="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} aria-label="API key" className="font-mono" autoFocus />
+      <Input type="password" autoComplete="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} aria-label="API key" className="font-mono" placeholder={placeholder} autoFocus />
     </Dialog>
   );
 }
@@ -104,7 +116,7 @@ function ProviderCard({ p, isDefault }: { p: ProviderConfig; isDefault: boolean 
       </Field>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="subtle" loading={testing} onClick={test}>Test connection</Button>
-        {["anthropic", "openai", "openai_compatible"].includes(p.kind) && (
+        {["anthropic", "openai", "openai_compatible", "openrouter", "mistral", "cerebras"].includes(p.kind) && (
           <Button size="sm" onClick={() => setKeyOpen(true)}>{p.has_credential ? "Replace key" : "Add key"}</Button>
         )}
         {p.has_credential && <Button size="sm" variant="ghost" onClick={() => void act(() => api.clearProviderKey(p.id), "Key removed from the credential store")}>Remove key</Button>}
@@ -118,7 +130,7 @@ function ProviderCard({ p, isDefault }: { p: ProviderConfig; isDefault: boolean 
           Remove
         </Button>
       </div>
-      <KeyDialog open={keyOpen} onOpenChange={setKeyOpen} title={`API key for ${p.label}`} onSave={(k) => act(() => api.setProviderKey(p.id, k), "Key saved — test the connection to confirm it works")} />
+      <KeyDialog open={keyOpen} onOpenChange={setKeyOpen} title={`API key for ${p.label}`} placeholder={keyPlaceholder(p.kind)} onSave={(k) => act(() => api.setProviderKey(p.id, k), "Key saved — test the connection to confirm it works")} />
       <Dialog
         open={edit}
         onOpenChange={setEdit}

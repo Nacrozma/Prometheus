@@ -86,7 +86,7 @@ export function AddProviderForm({ onDone, compact }: { onDone?: (p: ProviderConf
               {t.local ? <Cpu className="size-4 text-accent-teal" aria-hidden /> : <Cloud className="size-4 text-accent" aria-hidden />}
               {t.label}
             </span>
-            <span className="text-xs text-text-3">{t.local ? "Runs on this computer" : "Cloud service · your API key"}</span>
+            <span className="text-xs text-text-3">{t.local ? "Runs on this computer" : "Cloud service · your API key"}{t.optional && !t.local ? " · advanced" : t.optional ? " · optional" : ""}</span>
           </button>
         ))}
       </div>
@@ -110,7 +110,7 @@ export function AddProviderForm({ onDone, compact }: { onDone?: (p: ProviderConf
               <Field label="API key" htmlFor="pv-key" hint={tpl.key_help}>
                 <div className="relative">
                   <KeyRound className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-text-3" aria-hidden />
-                  <Input id="pv-key" type="password" autoComplete="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} className="pl-8 font-mono" placeholder="Paste your key" />
+                  <Input id="pv-key" type="password" autoComplete="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} className="pl-8 font-mono" placeholder={tpl.key_placeholder} />
                 </div>
               </Field>
             )}

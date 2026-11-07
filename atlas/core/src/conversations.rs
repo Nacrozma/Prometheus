@@ -15,6 +15,9 @@ pub struct Conversation {
     pub created_at: String,
     pub updated_at: String,
     pub message_count: i64,
+    /// Set for Atlas Forge sessions.
+    pub forge_project_id: Option<String>,
+    pub discipline: Option<crate::forge::Discipline>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,7 +51,7 @@ pub fn create(db: &Db, project_id: Option<&str>, title: &str) -> Result<Conversa
 }
 
 const COLS: &str = "c.id, c.project_id, c.title, c.archived, c.created_at, c.updated_at,
-  (SELECT count(*) FROM messages m WHERE m.conversation_id = c.id AND m.role IN ('user','assistant'))";
+  (SELECT count(*) FROM messages m WHERE m.conversation_id = c.id AND m.role IN ('user','assistant')), c.forge_project_id, c.discipline";
 
 fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> {
     Ok(Conversation {
@@ -59,7 +62,36 @@ fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> {
         created_at: r.get(4)?,
         updated_at: r.get(5)?,
         message_count: r.get(6)?,
+        forge_project_id: r.get(7)?,
+        discipline: r.get::<_, Option<String>>(8)?.and_then(|d| crate::forge::Discipline::parse(&d)),
     })
+}
+
+/// Start an Atlas Forge session on a project in a discipline.
+pub fn create_forge(db: &Db, forge_project_id: &str, discipline: crate::forge::Discipline, title: &str) -> Result<Conversation> {
+    crate::forge::get_project(db, forge_project_id)?;
+    let c = create(db, None, title)?;
+    db.conn()?.execute(
+        "UPDATE conversations SET forge_project_id = ?1, discipline = ?2 WHERE id = ?3",
+        rusqlite::params![forge_project_id, discipline.as_str(), c.id],
+    )?;
+    get(db, &c.id)
+}
+
+pub fn set_discipline(db: &Db, id: &str, discipline: crate::forge::Discipline) -> Result<Conversation> {
+    let c = get(db, id)?;
+    if c.forge_project_id.is_none() {
+        return Err(AtlasError::Validation("only Forge sessions have a discipline".into()));
+    }
+    db.conn()?.execute("UPDATE conversations SET discipline = ?1 WHERE id = ?2", rusqlite::params![discipline.as_str(), id])?;
+    get(db, id)
+}
+
+pub fn list_forge(db: &Db, forge_project_id: &str, limit: u32) -> Result<Vec<Conversation>> {
+    let conn = db.conn()?;
+    let mut stmt = conn.prepare(&format!("SELECT {COLS} FROM conversations c WHERE c.forge_project_id = ?1 ORDER BY c.updated_at DESC LIMIT ?2"))?;
+    let rows = stmt.query_map(rusqlite::params![forge_project_id, limit], row)?;
+    Ok(rows.collect::<std::result::Result<_, _>>()?)
 }
 
 pub fn get(db: &Db, id: &str) -> Result<Conversation> {
@@ -69,7 +101,7 @@ pub fn get(db: &Db, id: &str) -> Result<Conversation> {
 pub fn list(db: &Db, project_id: Option<&str>, include_archived: bool, limit: u32, offset: u32) -> Result<Vec<Conversation>> {
     let conn = db.conn()?;
     let mut stmt = conn.prepare(&format!(
-        "SELECT {COLS} FROM conversations c WHERE (?1 IS NULL OR c.project_id = ?1) AND (?2 = 1 OR c.archived = 0)
+        "SELECT {COLS} FROM conversations c WHERE (?1 IS NULL OR c.project_id = ?1) AND (?2 = 1 OR c.archived = 0) AND c.forge_project_id IS NULL
          ORDER BY c.updated_at DESC LIMIT ?3 OFFSET ?4"
     ))?;
     let rows = stmt.query_map(rusqlite::params![project_id, include_archived as i64, limit, offset], row)?;

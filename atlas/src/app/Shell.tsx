@@ -1,3 +1,4 @@
+import { ForgePage } from "@/features/forge/Forge";
 import { lazy, Suspense, useEffect } from "react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Spinner } from "@/components/ui/primitives";
@@ -64,6 +65,7 @@ export function Shell() {
               <AtlasMapPage />
             </Suspense>
           )}
+          {route === "forge" && <ForgePage />}
           {route === "mission" && <MissionControlPage />}
           {route === "projects" && <ProjectsPage />}
           {route === "memory" && <MemoryPage />}
