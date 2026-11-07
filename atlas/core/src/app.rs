@@ -810,10 +810,28 @@ impl Atlas {
         if let Ok(ids) = crate::sibling::missions::active_ids(&self.db) {
             for id in ids {
                 let before = crate::sibling::missions::get(&self.db, &id).ok();
-                if let Ok(after) = crate::sibling::missions::sync(&link, &id, 0).await
-                    && before.map(|b| b.remote_seq != after.remote_seq || b.state != after.state).unwrap_or(true) {
-                        self.mission_changed(&id);
+                match crate::sibling::missions::sync(&link, &id, 0).await {
+                    Ok(after) => {
+                        if before.map(|b| b.remote_seq != after.remote_seq || b.state != after.state).unwrap_or(true) {
+                            self.mission_changed(&id);
+                        }
                     }
+                    Err(e) => {
+                        // Never leave a mission claiming to run when the sibling cannot be reached.
+                        if crate::sibling::missions::mark_unreachable(&self.db, &id, &e.to_string()).is_ok() {
+                            audit::record(&self.db, "mission.contact_lost", "warn", None, None, json!({"mission_id": id}));
+                            self.mission_changed(&id);
+                        }
+                    }
+                }
+            }
+        }
+        // Missions paused by lost contact: check again, read-only, once the sibling answers.
+        if let Ok(ids) = crate::sibling::missions::unreachable_ids(&self.db) {
+            for id in ids {
+                if crate::sibling::missions::reconnect(&link, &id).await.is_ok() {
+                    self.mission_changed(&id);
+                }
             }
         }
         let due = self.sibling_health_at.lock().map(|t| t.map(|t| t.elapsed() > Duration::from_secs(30)).unwrap_or(true)).unwrap_or(false);

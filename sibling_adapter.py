@@ -234,42 +234,66 @@ class Backend:
     def chat(self, messages: List[Dict[str, Any]], max_tokens: int = 1500) -> str:
         raise NotImplementedError
 
-    def run_tools(self, objective: str, context: str, emit: Callable[[str, str], None], cancelled: Callable[[], bool], max_steps: int) -> Tuple[str, str]:
+    def run_tools(self, objective: str, context: str, emit: Callable[[str, str], None], cancelled: Callable[[], bool], max_steps: int, mission_id: str = "") -> Tuple[str, str]:
         raise NotImplementedError
 
 
+# Sibling-mission tool policy. Prometheus's own non-dangerous tools include ones that read or change
+# its owner's private state (memory, task scratchpad, schedule, usage history, self-modification
+# proposals) or reach the network. A peer must never get those, so delegated missions use an explicit
+# allowlist instead of "everything not dangerous".
+SIBLING_SAFE_TOOLS = {"engineering_calc", "arm_plan", "synthetic_council", "list_skills", "get_router_status", "read_file"}
+# Dangerous tools a sibling mission may *request* only when the owner started the adapter with
+# --allow-dangerous; each one still needs the owner's y/N in this terminal. Everything else in
+# DANGEROUS_TOOLS (desktop control, self-modification, memory export, new skills) is never offered.
+SIBLING_DANGEROUS_WITH_CONSENT = {"write_file", "edit_file", "execute_shell", "run_code_forge", "run_skill"}
+# Tools whose `path` argument is confined to the mission's own workspace folder.
+SIBLING_PATH_TOOLS = {"read_file", "write_file", "edit_file"}
+
+
+def safe_mission_dir_name(mission_id: str) -> Optional[str]:
+    return mission_id if mission_id and len(mission_id) <= 100 and all(c.isalnum() or c in "-_" for c in mission_id) else None
+
+
 class PrometheusBackend(Backend):
-    """Imports prometheus.py lazily (that builds Prometheus's LLM router from its own .env)."""
+    """Imports prometheus.py lazily (that builds Prometheus's LLM router from its own .env).
+    `module` is for tests only (a stand-in exposing the same names)."""
 
     name = "Prometheus"
 
-    def __init__(self, allow_dangerous: bool = False):
-        import prometheus as P  # noqa: N812 — Prometheus's own module, unmodified
-        self.P = P
+    def __init__(self, allow_dangerous: bool = False, module: Any = None):
+        if module is None:
+            import prometheus as module  # noqa: N812 — Prometheus's own module, unmodified
+        self.P = module
         self.allow_dangerous = allow_dangerous
-        self.version = getattr(P, "__version__", None) or "6.3"
+        self.version = getattr(module, "__version__", None) or "6.3"
         self.started = time.time()
 
     def _is_dangerous(self, name: str) -> bool:
         return name in self.P.DANGEROUS_TOOLS
+
+    def sibling_allowed(self, name: str) -> bool:
+        if self._is_dangerous(name):
+            return self.allow_dangerous and name in SIBLING_DANGEROUS_WITH_CONSENT
+        return name in SIBLING_SAFE_TOOLS
 
     def capabilities(self) -> Dict[str, Any]:
         tools = []
         for t in self.P.TOOLS:
             fn = t.get("function", {})
             name = fn.get("name", "")
-            dangerous = self._is_dangerous(name)
             tools.append({
                 "name": name,
                 "description": (fn.get("description") or "")[:300],
-                "dangerous": dangerous,
-                "available_to_siblings": (not dangerous) or self.allow_dangerous,
+                "dangerous": self._is_dangerous(name),
+                "available_to_siblings": self.sibling_allowed(name),
             })
         return {
             "modes": ["consultation", "collaborative", "delegated"],
             "providers": list(getattr(self.P.llm_router, "active_providers", [])),
             "tools": tools,
             "dangerous_tools_policy": "owner_confirms_in_terminal" if self.allow_dangerous else "refused",
+            "workspace_policy": "delegated missions read and write only inside sibling_missions/<mission_id>/",
         }
 
     def health(self) -> Dict[str, Any]:
@@ -283,12 +307,43 @@ class PrometheusBackend(Backend):
         resp = self.P.llm_router.completion(messages=[{"role": "system", "content": self._system()}] + messages, max_tokens=max_tokens)
         return (resp.choices[0].message.content or "").strip()
 
-    def run_tools(self, objective, context, emit, cancelled, max_steps):
+    def mission_workspace(self, mission_id: str, context: str) -> str:
+        name = safe_mission_dir_name(mission_id)
+        if not name:
+            raise ValueError("invalid mission id for a workspace folder")
+        ws = os.path.realpath(os.path.join(self.P.BASE_DIR, "sibling_missions", name))
+        os.makedirs(ws, exist_ok=True)
+        if context:
+            with open(os.path.join(ws, "atlas_context.md"), "w", encoding="utf-8") as f:
+                f.write(context)
+        return ws
+
+    @staticmethod
+    def confine(ws: str, args: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Resolve `path` against the mission workspace; refuse anything that lands outside it."""
+        raw = str(args.get("path", ""))
+        if not raw:
+            return None, "a path is required"
+        full = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(ws, raw))
+        try:
+            inside = os.path.commonpath([full, ws]) == ws
+        except ValueError:
+            inside = False
+        if not inside:
+            return None, f"'{raw}' is outside this mission's workspace (sibling_missions/{os.path.basename(ws)}/)"
+        return dict(args, path=full), None
+
+    def run_tools(self, objective, context, emit, cancelled, max_steps, mission_id: str = ""):
         P = self.P
-        tools = [t for t in P.TOOLS if self.allow_dangerous or not self._is_dangerous(t["function"]["name"])]
+        ws = self.mission_workspace(mission_id, context)
+        tools = [t for t in P.TOOLS if self.sibling_allowed(t["function"]["name"])]
         msgs: List[Dict[str, Any]] = [
             {"role": "system", "content": self._system()},
-            {"role": "user", "content": f"Delegated mission from ATLAS Co-Pilot.\n\nObjective:\n{objective}\n\nContext shared by Atlas's owner:\n{context or '(none)'}"},
+            {"role": "user", "content": (
+                f"Delegated mission from ATLAS Co-Pilot.\n\nObjective:\n{objective}\n\n"
+                f"Your workspace for this mission is the folder {ws}. File tools only work inside it; relative paths are relative to it."
+                + (" The context Atlas's owner shared is in atlas_context.md there." if context else "")
+                + f"\n\nContext shared by Atlas's owner:\n{context or '(none)'}")},
         ]
         for _ in range(max_steps):
             if cancelled():
@@ -304,20 +359,30 @@ class PrometheusBackend(Backend):
             msgs.append({"role": "assistant", "content": m.content, "tool_calls": [
                 {"id": c.id, "type": "function", "function": {"name": c.function.name, "arguments": c.function.arguments}} for c in calls]})
             for c in calls:
+                if cancelled():
+                    return "cancelled", "Cancelled by Atlas."
                 name, args = c.function.name, c.function.arguments
                 emit("tool_request", json.dumps({"tool": name, "arguments": args})[:4000])
-                if self._is_dangerous(name):
-                    if not self.allow_dangerous:
-                        result = {"status": "refused", "reason": "dangerous tools are not available to sibling missions"}
-                    else:
-                        try:
-                            parsed = json.loads(args) if isinstance(args, str) else args
-                        except Exception:
-                            parsed = {"raw_input": args}
+                try:
+                    parsed = json.loads(args) if isinstance(args, str) else dict(args or {})
+                except Exception:
+                    parsed = None
+                if not self.sibling_allowed(name):
+                    why = "dangerous tools are not available to sibling missions" if self._is_dangerous(name) else "this tool is not available to sibling missions (it touches the owner's private state or the network)"
+                    result = {"status": "refused", "reason": why}
+                elif not isinstance(parsed, dict):
+                    result = {"status": "error", "message": "tool arguments were not a JSON object"}
+                else:
+                    err = None
+                    if name in SIBLING_PATH_TOOLS:
+                        parsed, err = self.confine(ws, parsed)
+                    if err:
+                        result = {"status": "refused", "reason": err}
+                    elif self._is_dangerous(name):
                         ok = P._confirm_tool(name, parsed)  # the owner's y/N in this terminal
                         result = P.dispatch_tool(name, parsed) if ok else {"status": "denied", "reason": "the Prometheus operator declined"}
-                else:
-                    result = P.dispatch_tool(name, args)
+                    else:
+                        result = P.dispatch_tool(name, parsed)
                 out = json.dumps(result, default=str)[:8000]
                 emit("tool_result", json.dumps({"tool": name, "result": out[:3000]}))
                 msgs.append({"role": "tool", "tool_call_id": c.id, "content": out})
@@ -344,7 +409,7 @@ class TestBackend(Backend):
         last = messages[-1]["content"]
         return f"[test backend] received {len(last)} characters: {last[:80]}"
 
-    def run_tools(self, objective, context, emit, cancelled, max_steps):
+    def run_tools(self, objective, context, emit, cancelled, max_steps, mission_id=""):
         emit("tool_request", json.dumps({"tool": "execute_shell", "arguments": "{}"}))
         emit("tool_result", json.dumps({"tool": "execute_shell", "result": "refused: dangerous tools are not available to sibling missions"}))
         for _ in range(20):
@@ -491,7 +556,7 @@ class Adapter:
                 m.emit("message", answer)
                 m.set_state("waiting_for_atlas")
             elif m.mode == "delegated":
-                outcome, summary = self.backend.run_tools(m.objective, m.context, m.emit, m.cancel.is_set, self.max_steps)
+                outcome, summary = self.backend.run_tools(m.objective, m.context, m.emit, m.cancel.is_set, self.max_steps, mission_id=m.mission_id)
                 self._finish(m, outcome, summary)
             else:
                 self._finish(m, "failed", f"unknown mode {m.mode}")
@@ -523,7 +588,7 @@ class Adapter:
             key = str(p.get("idempotency_key", ""))[:100]
             mid = str(p.get("mission_id", ""))[:100]
             mode = p.get("mode")
-            if not key or not mid or mode not in ("consultation", "collaborative", "delegated"):
+            if not key or not safe_mission_dir_name(mid) or mode not in ("consultation", "collaborative", "delegated"):
                 return "MISSION_ACK", {"mission_id": mid, "accepted": False, "reason": "mission_id, idempotency_key and a valid mode are required"}
             with self.registry.lock:
                 rec = self.registry.data["missions"].get(mid)

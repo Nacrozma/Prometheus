@@ -232,3 +232,93 @@ class SiblingAdapterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakeCall:
+    def __init__(self, i, name, args):
+        self.id = f"c{i}"
+        self.function = type("F", (), {"name": name, "arguments": json.dumps(args)})()
+
+
+class FakePrometheus:
+    """Stands in for prometheus.py's public names so the sibling tool policy can be unit-tested.
+    The same policy is exercised against the real runtime in atlas/core/tests/real_prometheus_runtime.rs."""
+
+    SYSTEM_PROMPT = "fake system prompt"
+    DANGEROUS_TOOLS = {"execute_shell", "write_file", "ghost_control"}
+
+    def __init__(self, base, script):
+        self.BASE_DIR = base
+        self.TOOLS = [{"type": "function", "function": {"name": n, "description": n}} for n in
+                      ["read_file", "recall_memory", "update_memory", "engineering_calc", "execute_shell", "write_file", "ghost_control", "web_search"]]
+        self.dispatched = []
+        self.offered = []
+        script = list(script)
+        outer = self
+
+        class Router:
+            active_providers = ["fake"]
+
+            def completion(self, messages, tools=None, max_tokens=0):
+                outer.offered.append([t["function"]["name"] for t in tools or []])
+                step = sum(1 for m in messages if m.get("role") == "tool")
+                if step < len(script):
+                    msg = type("M", (), {"content": None, "tool_calls": [FakeCall(step, *script[step])]})()
+                else:
+                    msg = type("M", (), {"content": "done", "tool_calls": None})()
+                return type("R", (), {"choices": [type("C", (), {"message": msg})()]})()
+
+        self.llm_router = Router()
+
+    def dispatch_tool(self, name, args):
+        self.dispatched.append((name, args))
+        if name == "read_file":
+            with open(args["path"], encoding="utf-8") as f:
+                return {"status": "success", "content": f.read()}
+        return {"status": "success", "tool": name}
+
+    def _confirm_tool(self, name, args):
+        return True
+
+
+class SiblingToolPolicyTests(unittest.TestCase):
+    def run_mission(self, script, allow_dangerous=False, context="ctx-ok"):
+        base = tempfile.mkdtemp()
+        with open(os.path.join(base, "memory.json"), "w") as f:
+            f.write("PRIVATE-MEMORY")
+        P = FakePrometheus(base, script)
+        b = S.PrometheusBackend(allow_dangerous=allow_dangerous, module=P)
+        events = []
+        outcome, _ = b.run_tools("obj", context, lambda k, t: events.append((k, t)), lambda: False, 10, mission_id="mis_abc")
+        return P, b, events, outcome
+
+    def test_private_state_and_network_tools_are_never_offered_or_run(self):
+        P, b, ev, outcome = self.run_mission([("recall_memory", {"query": "x"}), ("update_memory", {"fact": "y"}), ("web_search", {"query": "z"}), ("ghost_control", {})])
+        self.assertEqual(outcome, "completed")
+        self.assertEqual(P.dispatched, [], "none of them reached Prometheus's dispatcher")
+        self.assertEqual(set(P.offered[0]), {"read_file", "engineering_calc"})
+        self.assertTrue(all("refused" in t for k, t in ev if k == "tool_result"))
+        caps = {t["name"]: t["available_to_siblings"] for t in b.capabilities()["tools"]}
+        self.assertEqual({k for k, v in caps.items() if v}, {"read_file", "engineering_calc"}, "capabilities report the real policy")
+
+    def test_file_tools_are_confined_to_the_mission_workspace(self):
+        P, _, ev, _ = self.run_mission([("read_file", {"path": "../../memory.json"}), ("read_file", {"path": os.path.join(tempfile.gettempdir(), "x")}), ("read_file", {"path": "atlas_context.md"})])
+        results = [t for k, t in ev if k == "tool_result"]
+        self.assertIn("outside this mission", results[0])
+        self.assertIn("outside this mission", results[1])
+        self.assertIn("ctx-ok", results[2])
+        self.assertTrue(all("PRIVATE-MEMORY" not in t for _, t in ev))
+        self.assertEqual(len(P.dispatched), 1)
+
+    def test_dangerous_tools_need_the_flag_and_stay_confined(self):
+        P, _, ev, _ = self.run_mission([("execute_shell", {"command": "ls"})])
+        self.assertEqual(P.dispatched, [])
+        P, _, ev, _ = self.run_mission([("write_file", {"path": "../escape.txt", "content": "x"}), ("write_file", {"path": "ok.txt", "content": "x"}), ("ghost_control", {})], allow_dangerous=True)
+        names = [n for n, _ in P.dispatched]
+        self.assertEqual(names, ["write_file"], "only the in-workspace write ran; desktop control never does")
+        self.assertTrue(P.dispatched[0][1]["path"].endswith(os.path.join("sibling_missions", "mis_abc", "ok.txt")))
+
+    def test_mission_ids_that_are_not_safe_folder_names_are_refused(self):
+        self.assertIsNone(S.safe_mission_dir_name("../x"))
+        self.assertIsNone(S.safe_mission_dir_name("a/b"))
+        self.assertEqual(S.safe_mission_dir_name("mis_1-2"), "mis_1-2")

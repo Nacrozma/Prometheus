@@ -436,6 +436,39 @@ pub fn recover(db: &Db) -> Result<usize> {
     Ok(rows.len())
 }
 
+/// Contact with the sibling was lost while a mission was running. The ledger must not keep claiming
+/// it is running: pause it with the reason, remembering that the cause was contact loss so Atlas can
+/// check again (read-only) once the sibling is reachable.
+pub fn mark_unreachable(db: &Db, id: &str, err: &str) -> Result<Mission> {
+    let m = get(db, id)?;
+    if m.state != MissionState::Running {
+        return Ok(m);
+    }
+    db.conn()?.execute(
+        "UPDATE missions SET remote_state = 'unreachable', last_error = ?1, updated_at = ?2 WHERE id = ?3",
+        rusqlite::params![crate::redact::redact(err), now(), id],
+    )?;
+    transition(db, id, MissionState::Paused, "lost contact with the sibling; Atlas will check again when it is reachable")
+}
+
+/// Missions paused only because contact was lost.
+pub fn unreachable_ids(db: &Db) -> Result<Vec<String>> {
+    let conn = db.conn()?;
+    let mut stmt = conn.prepare("SELECT id FROM missions WHERE state = 'PAUSED' AND remote_state = 'unreachable' AND sibling_id IS NOT NULL")?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
+    Ok(rows.collect::<std::result::Result<_, _>>()?)
+}
+
+/// Contact is back: ask the sibling what happened (read-only), then reflect it. Never re-sends.
+pub async fn reconnect(link: &Link<'_>, id: &str) -> Result<Mission> {
+    let m = get(link.db, id)?;
+    let sid = m.sibling_id.clone().ok_or_else(|| AtlasError::Validation("no sibling".into()))?;
+    let (_, st) = link.call(&sid, "MISSION_STATUS", json!({"mission_id": m.id, "after_seq": m.remote_seq}), Duration::from_secs(8)).await?;
+    set_error(link.db, id, None)?;
+    transition(link.db, id, MissionState::Running, "contact with the sibling restored")?;
+    ingest(link.db, id, &st)
+}
+
 pub fn active_ids(db: &Db) -> Result<Vec<String>> {
     let conn = db.conn()?;
     let mut stmt = conn.prepare("SELECT id FROM missions WHERE state = 'RUNNING' AND sibling_id IS NOT NULL")?;
@@ -502,6 +535,22 @@ mod tests {
         transition(&db, &m.id, NeedsUserInput, "").unwrap();
         transition(&db, &m.id, Running, "").unwrap();
         assert_eq!(ingest(&db, &m.id, &lost).unwrap().state, Paused);
+    }
+
+    #[test]
+    fn lost_contact_pauses_instead_of_claiming_running() {
+        let db = Db::open_in_memory().unwrap();
+        let m = mk(&db);
+        for s in [Planned, AwaitingApproval, Running] {
+            transition(&db, &m.id, s, "").unwrap();
+        }
+        let p = mark_unreachable(&db, &m.id, "the sibling adapter is not running").unwrap();
+        assert_eq!((p.state, p.remote_state.as_deref()), (Paused, Some("unreachable")));
+        assert_eq!(unreachable_ids(&db).unwrap(), vec![m.id.clone()]);
+        assert!(events(&db, &m.id).unwrap().iter().any(|e| e.content.contains("lost contact")));
+        // Only running missions are affected.
+        let d = mk(&db);
+        assert_eq!(mark_unreachable(&db, &d.id, "x").unwrap().state, Draft);
     }
 
     #[test]
