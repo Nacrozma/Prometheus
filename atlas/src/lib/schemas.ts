@@ -482,6 +482,8 @@ export const PriceEntrySchema = z.object({
   verification: z.enum(["verified", "unverified", "user"]),
   source: z.string(),
   as_of: z.string().nullable(),
+  availability: z.enum(["current", "deprecated", "unavailable", "unknown"]).optional(),
+  availability_note: z.string().nullable().optional(),
 });
 export type PriceEntry = z.infer<typeof PriceEntrySchema>;
 export const PricingScheduleSchema = z.object({ entries: z.array(PriceEntrySchema), seed_conflicts: z.array(z.string()) });

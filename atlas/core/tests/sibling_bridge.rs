@@ -210,3 +210,205 @@ async fn atlas_keeps_working_when_the_sibling_goes_away() {
     a.sibling_sync_once().await;
     assert!(a.consult("still there?", "").await.is_err());
 }
+
+// ---------- Phase 7: recovery, approvals, isolation and reliability (real adapter, test backend) ----------
+
+use atlas_core::ai::mock::MockProvider;
+use atlas_core::ai::ChatProvider;
+use atlas_core::credentials::SharedSecrets;
+use atlas_core::engine::TurnParams;
+use atlas_core::providers::{ProviderConfig, ProviderFactory};
+
+struct Fixed(Arc<MockProvider>);
+impl ProviderFactory for Fixed {
+    fn build(&self, _c: &ProviderConfig, _s: &SharedSecrets, _t: Duration) -> atlas_core::error::Result<Arc<dyn ChatProvider>> {
+        Ok(self.0.clone())
+    }
+}
+
+fn atlas_with(db: Option<std::path::PathBuf>, secrets: SharedSecrets, mock: Option<Arc<MockProvider>>) -> Arc<Atlas> {
+    Atlas::new(AtlasConfig {
+        db_path: db,
+        secrets,
+        bus: Arc::new(RecordingBus::default()),
+        factory: mock.map(|m| Arc::new(Fixed(m)) as Arc<dyn ProviderFactory>),
+        version: "test".into(),
+        data_dir: None,
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn atlas_restart_during_a_mission_resumes_without_resending() {
+    let Some(ad) = start_adapter() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("atlas.db");
+    let secrets: SharedSecrets = Arc::new(MemorySecrets::default());
+    let a1 = atlas_with(Some(db.clone()), secrets.clone(), None);
+    let s = a1.sibling_pair(&format!("127.0.0.1:{}", ad.port), &ad.code).await.unwrap();
+    let m = a1
+        .mission_create(NewMission { title: "", mode: Mode::Delegated, objective: "slow restart test", shared_context: "", sibling_id: Some(&s.id), forge_project_id: None, conversation_id: None })
+        .unwrap();
+    a1.mission_transition(&m.id, MissionState::Planned).unwrap();
+    a1.mission_transition(&m.id, MissionState::AwaitingApproval).unwrap();
+    a1.mission_send(&m.id).await.unwrap();
+    drop(a1); // Atlas closes while the sibling is still working.
+    let a2 = atlas_with(Some(db), secrets, None);
+    assert_eq!(atlas_core::sibling::missions::get(&a2.db, &m.id).unwrap().state, MissionState::Running, "the ledger survived the restart");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        a2.sibling_sync_once().await;
+        if atlas_core::sibling::missions::get(&a2.db, &m.id).unwrap().state == MissionState::Reviewing {
+            break;
+        }
+        assert!(Instant::now() < deadline, "mission never finished after restart");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let ev = atlas_core::sibling::missions::events(&a2.db, &m.id).unwrap();
+    assert_eq!(ev.iter().filter(|e| e.kind == "sent").count(), 1, "sent exactly once");
+    assert_eq!(ev.iter().filter(|e| e.kind == "result").count(), 1, "result recorded once");
+}
+
+#[tokio::test]
+async fn consulting_prometheus_needs_approval_and_shares_only_the_approved_text() {
+    let Some(ad) = start_adapter() else { return };
+    let mock = Arc::new(MockProvider::new(vec![
+        MockProvider::tool_call("c1", "sibling_consult", serde_json::json!({"question": "Is WAL mode safe with one writer?", "context": "ONLY-THIS-CONTEXT"})),
+        MockProvider::text("Prometheus answered."),
+        MockProvider::tool_call("c2", "sibling_consult", serde_json::json!({"question": "Second question", "context": ""})),
+        MockProvider::text("You declined."),
+    ]));
+    let a = atlas_with(None, Arc::new(MemorySecrets::default()), Some(mock.clone()));
+    let p = a.add_provider(atlas_core::ai::ProviderKind::Mock, "Mock", "http://mock.local", Some("mock-model")).unwrap();
+    let mut st = a.settings().unwrap();
+    st.default_provider_id = Some(p.id);
+    a.update_settings(st).unwrap();
+    a.create_memory(None, atlas_core::memory::MemoryKind::Fact, "PRIVATE-ATLAS-MEMORY: my bank PIN hint is the cat", true).unwrap();
+    a.sibling_pair(&format!("127.0.0.1:{}", ad.port), &ad.code).await.unwrap();
+    let conv = a.create_conversation(None, "").unwrap().id;
+
+    let run = |approve: bool, text: &'static str| {
+        let a = a.clone();
+        let conv = conv.clone();
+        async move {
+            let h = {
+                let a = a.clone();
+                let conv = conv.clone();
+                tokio::spawn(async move { a.send_message(TurnParams { conversation_id: conv, text: text.into(), ..Default::default() }, Box::new(|_| {})).await })
+            };
+            let mut preview = None;
+            for _ in 0..300 {
+                if let Some(ap) = a.pending_approvals().unwrap().first() {
+                    preview = Some(ap.preview.clone());
+                    a.decide_approval(&ap.id, approve).unwrap();
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            h.await.unwrap().unwrap();
+            preview.expect("sharing with Prometheus asked for approval first")
+        }
+    };
+
+    // Approved: exactly the question and context shown in the approval are sent; nothing else.
+    let preview = run(true, "ask prometheus").await;
+    assert!(preview.details.contains("Is WAL mode safe") && preview.details.contains("ONLY-THIS-CONTEXT"), "the approval shows exactly what is sent");
+    let missions = a.missions().unwrap();
+    assert_eq!(missions.len(), 1);
+    let d = a.mission_detail(&missions[0].id).unwrap();
+    assert_eq!(d["outgoing"]["objective"], "Is WAL mode safe with one writer?");
+    assert_eq!(d["outgoing"]["context"], "ONLY-THIS-CONTEXT");
+    assert!(!d.to_string().contains("PRIVATE-ATLAS-MEMORY"), "Atlas's private memory never enters a mission");
+    assert_eq!(d["mission"]["state"], "COMPLETED");
+    // The model saw its own memory (Atlas's private context) but the sibling did not.
+    let reqs = mock.requests.lock().unwrap();
+    assert!(serde_json::to_string(&reqs[0].messages).unwrap().contains("PRIVATE-ATLAS-MEMORY"));
+    let answer = serde_json::to_string(&reqs[1].messages.last().unwrap().parts).unwrap();
+    assert!(answer.contains("test backend") && answer.contains("untrusted"), "the answer comes back attributed and marked untrusted");
+    drop(reqs);
+
+    // Declined: nothing is sent and no mission is created.
+    run(false, "ask again").await;
+    assert_eq!(a.missions().unwrap().len(), 1, "a declined consultation sends nothing");
+}
+
+#[tokio::test]
+async fn repeated_pairing_consultations_and_cancellations_stay_stable() {
+    if python().is_none() {
+        return;
+    }
+    // Pair/unpair cycles: each needs a fresh adapter with a new one-time code.
+    let a = atlas();
+    for i in 0..5 {
+        let ad = start_adapter().unwrap();
+        let s = a.sibling_pair(&format!("127.0.0.1:{}", ad.port), &ad.code).await.unwrap();
+        assert!(s.connected, "cycle {i}");
+        a.sibling_revoke(&s.id).unwrap();
+        a.sibling_forget(&s.id).unwrap();
+    }
+    assert!(a.siblings().unwrap().is_empty(), "no stale siblings after 5 pair/unpair cycles");
+
+    let ad = start_adapter().unwrap();
+    let rss = |pid: u32| std::fs::read_to_string(format!("/proc/{pid}/status")).ok().and_then(|s| s.lines().find(|l| l.starts_with("VmRSS")).map(|l| l.split_whitespace().nth(1).unwrap_or("0").parse::<u64>().unwrap_or(0)));
+    let threads = |pid: u32| std::fs::read_to_string(format!("/proc/{pid}/status")).ok().and_then(|s| s.lines().find(|l| l.starts_with("Threads")).map(|l| l.split_whitespace().nth(1).unwrap_or("0").parse::<u64>().unwrap_or(0)));
+    let pid = ad.child.id();
+    let s = a.sibling_pair(&format!("127.0.0.1:{}", ad.port), &ad.code).await.unwrap();
+    let start = Instant::now();
+    for i in 0..25 {
+        let r = a.consult(&format!("question {i}"), "").await.unwrap();
+        assert!(r["answer"].as_str().unwrap().contains("test backend"));
+    }
+    let consult_ms = start.elapsed().as_millis() / 25;
+    let rss_mid = rss(pid);
+    for i in 0..25 {
+        let m = a
+            .mission_create(NewMission { title: "", mode: Mode::Delegated, objective: &format!("slow job {i}"), shared_context: "", sibling_id: Some(&s.id), forge_project_id: None, conversation_id: None })
+            .unwrap();
+        a.mission_transition(&m.id, MissionState::Planned).unwrap();
+        a.mission_transition(&m.id, MissionState::AwaitingApproval).unwrap();
+        a.mission_send(&m.id).await.unwrap();
+        assert_eq!(a.mission_cancel(&m.id).await.unwrap().state, MissionState::Cancelled);
+    }
+    tokio::time::sleep(Duration::from_millis(2500)).await; // let cancelled workers wind down
+    let all = a.missions().unwrap();
+    assert_eq!(all.iter().filter(|m| m.state == MissionState::Completed).count(), 25);
+    assert_eq!(all.iter().filter(|m| m.state == MissionState::Cancelled).count(), 25);
+    assert!(!all.iter().any(|m| m.state == MissionState::Running), "nothing left claiming to run");
+    let h = a.sibling_refresh(&s.id).await.unwrap();
+    assert_eq!(h.health.unwrap()["active_missions"], 0, "the sibling has no runaway work after cancellations");
+    println!(
+        "reliability: 5 pair/unpair cycles; 25 consultations (avg {consult_ms} ms); 25 send+cancel; adapter RSS {:?} kB → {:?} kB; adapter threads now {:?}",
+        rss_mid,
+        rss(pid),
+        threads(pid)
+    );
+    if let (Some(t), true) = (threads(pid), cfg!(target_os = "linux")) {
+        assert!(t < 20, "adapter threads must not pile up after cancelled missions ({t})");
+    }
+}
+
+#[tokio::test]
+async fn secrets_never_reach_the_database_exports_or_backups() {
+    let Some(ad) = start_adapter() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let secrets: SharedSecrets = Arc::new(MemorySecrets::default());
+    let a = atlas_with(Some(dir.path().join("atlas.db")), secrets.clone(), None);
+    let p = a.add_provider(atlas_core::ai::ProviderKind::Anthropic, "Claude", "https://api.anthropic.com", Some("claude-opus-5-5")).unwrap();
+    let api_key = "sk-ant-api03-PHASE7SECRETVALUE-0123456789abcdef";
+    a.set_provider_key(&p.id, api_key).unwrap();
+    let s = a.sibling_pair(&format!("127.0.0.1:{}", ad.port), &ad.code).await.unwrap();
+    a.consult("anything", "ctx").await.unwrap();
+    let sibling_secret = secrets.get(&atlas_core::sibling::secret_account(&s.id)).unwrap().expect("secret stored in the credential store");
+    // Everything Atlas writes for this profile: the database (+ WAL), a full export and a backup.
+    a.backup_to(&dir.path().join("backup.db")).unwrap();
+    std::fs::write(dir.path().join("export.json"), serde_json::to_string(&a.export_json().unwrap()).unwrap()).unwrap();
+    let diag = a.diagnostics_report().await;
+    std::fs::write(dir.path().join("diagnostics.json"), diag.to_string()).unwrap();
+    for e in std::fs::read_dir(dir.path()).unwrap().flatten() {
+        let bytes = std::fs::read(e.path()).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        for (what, needle) in [("provider API key", api_key), ("API key body", "PHASE7SECRETVALUE"), ("sibling secret", sibling_secret.as_str())] {
+            assert!(!text.contains(needle), "{what} found in {}", e.path().display());
+        }
+    }
+}

@@ -74,3 +74,48 @@ async fn live_provider_round_trips() {
     }
     assert!(failures.is_empty(), "live failures:\n{}", failures.join("\n"));
 }
+
+/// Live, key-free: each real provider API must reject a made-up key, and Atlas must classify it as an
+/// authentication failure with a plain-language message. Hosts this machine cannot reach are reported
+/// as BLOCKED (not passed).
+#[tokio::test]
+#[ignore = "calls real provider endpoints (no key needed, no cost)"]
+async fn live_invalid_keys_are_rejected_and_classified() {
+    use atlas_core::ai::ProviderErrorKind;
+    let http = reqwest::Client::new();
+    let t = Duration::from_secs(30);
+    let bogus = "sk-atlas-phase7-invalid-key-0000000000000000".to_string();
+    let cases: Vec<(&str, Arc<dyn ChatProvider>)> = vec![
+        ("Anthropic", Arc::new(AnthropicProvider::new(http.clone(), None, bogus.clone(), t))),
+        ("OpenAI", Arc::new(OpenAiProvider::new(http.clone(), ProviderKind::Openai, openai::OPENAI_BASE_URL, Some(bogus.clone()), t))),
+        ("OpenRouter", Arc::new(OpenAiProvider::new(http.clone(), ProviderKind::Openrouter, openai::OPENROUTER_BASE_URL, Some(bogus.clone()), t))),
+        ("Mistral", Arc::new(OpenAiProvider::new(http.clone(), ProviderKind::Mistral, openai::MISTRAL_BASE_URL, Some(bogus.clone()), t))),
+        ("Cerebras", Arc::new(OpenAiProvider::new(http.clone(), ProviderKind::Cerebras, openai::CEREBRAS_BASE_URL, Some(bogus.clone()), t))),
+    ];
+    let mut verified = 0;
+    for (name, p) in cases {
+        let req = ChatRequest {
+            model: "atlas-phase7-nonexistent-model".into(),
+            system: String::new(),
+            messages: vec![ChatMessage::user_text("hi")],
+            tools: vec![],
+            max_tokens: 5,
+            effort: None,
+            reasoning_summary: false,
+            refusal_fallback: false,
+        };
+        let mut sink = |_e| {};
+        match p.stream_chat(req, &mut sink, CancellationToken::new()).await {
+            Ok(_) => panic!("{name}: a made-up key was accepted"),
+            Err(e) if matches!(e.kind, ProviderErrorKind::Network | ProviderErrorKind::Timeout | ProviderErrorKind::Unavailable) && e.status.is_none() => println!("BLOCKED {name}: not reachable from this machine ({})", e.message),
+            Err(e) => {
+                let shown = atlas_core::app::describe_provider_error(&e);
+                println!("LIVE    {name}: HTTP {:?} → {:?} · shown to the user: {shown}", e.status, e.kind);
+                assert_eq!(e.kind, ProviderErrorKind::Auth, "{name} must be classified as an authentication failure");
+                assert!(!shown.contains(&bogus), "the key must never be echoed back");
+                verified += 1;
+            }
+        }
+    }
+    println!("{verified} provider(s) verified live");
+}

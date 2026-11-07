@@ -314,6 +314,9 @@ pub fn route_tiered(
         };
         let usable_now = usable(p).and_then(|_| {
             if settings.network.offline_mode && !p.local { Err(format!("offline mode is on and {} is a cloud service", p.label)) } else { Ok(()) }
+        }).and_then(|_| match crate::pricing::unavailable_reason(p.kind, &tm.model) {
+            Some(why) => Err(why),
+            None => Ok(()),
         });
         if let Err(problem) = usable_now {
             skipped.push(format!("{} tier unavailable: {problem}", t.label()));
@@ -396,6 +399,9 @@ pub fn route(settings: &Settings, providers: &[ProviderConfig], provider_overrid
         .or_else(|| if settings.default_provider_id.as_deref() == Some(&chosen.id) { settings.default_model.clone() } else { None })
         .or_else(|| chosen.models.first().map(|m| m.id.clone()))
         .ok_or_else(|| AtlasError::Validation(format!("choose a model for {} (test the connection to load its model list)", chosen.label)))?;
+    if let Some(why) = crate::pricing::unavailable_reason(chosen.kind, &model) {
+        return Err(AtlasError::Validation(format!("{why}. Choose another model for {} in Integrations.", chosen.label)));
+    }
     let model_info = chosen.models.iter().find(|m| m.id == model).cloned();
     if needs_tools && model_info.as_ref().and_then(|m| m.supports_tools) == Some(false) {
         return Ok(Route { reason: format!("{reason}; this model cannot use tools"), provider: chosen.clone(), model, model_info, fell_back, tier: None });
@@ -504,5 +510,23 @@ mod tests {
         s.routing.standard = None;
         let r = route_tiered(&s, &list(&db).unwrap(), None, None, &sig, true).unwrap();
         assert!(r.tier.is_none() && r.reason.contains("no tier model is usable"), "{}", r.reason);
+    }
+
+    #[test]
+    fn shut_down_models_are_never_routed_to() {
+        use crate::settings::TierModel;
+        let (db, secrets) = setup();
+        let o = create(&db, ProviderKind::Openai, "OpenAI", "https://api.openai.com/v1", Some("gpt-4.1-nano")).unwrap();
+        set_key(&db, &secrets, &o.id, "sk-proj-abcdefghijklmnopqrstu").unwrap();
+        let mut s = Settings::default();
+        s.default_provider_id = Some(o.id.clone());
+        let e = route(&s, &list(&db).unwrap(), None, None, true).unwrap_err();
+        assert!(e.to_string().contains("shut down") && e.to_string().contains("gpt-5.6-luna"), "{e}");
+        s.routing.mode = RoutingMode::Budget;
+        s.routing.fast = Some(TierModel { provider_id: o.id.clone(), model: "gpt-4.1-nano".into() });
+        s.routing.standard = Some(TierModel { provider_id: o.id.clone(), model: "gpt-6.1-sol".into() });
+        let r = route_tiered(&s, &list(&db).unwrap(), None, None, &RouteSignals::from_text("hi"), true).unwrap();
+        assert_eq!(r.model, "gpt-6.1-sol");
+        assert!(r.reason.contains("shut down"), "{}", r.reason);
     }
 }

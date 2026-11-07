@@ -370,7 +370,7 @@ function PricingTable({ s, save }: { s: Settings; save: (n: Settings) => Promise
         <table className="w-full min-w-[620px] text-sm">
           <thead>
             <tr className="text-left text-[0.6875rem] uppercase tracking-wider text-text-3">
-              {["Model", "Input / MTok", "Output / MTok", "Status", ""].map((h) => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}
+              {["Model", "Input / MTok", "Output / MTok", "Price source", "Availability"].map((h) => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -390,8 +390,10 @@ function PricingTable({ s, save }: { s: Settings; save: (n: Settings) => Promise
                 <td className="px-4 py-2"><span className="font-mono text-xs">{e.model}</span> <span className="text-[0.6875rem] text-text-3">{e.vendor}</span></td>
                 <td className="px-4 py-2">${e.input_per_mtok.toFixed(2)}</td>
                 <td className="px-4 py-2">${e.output_per_mtok.toFixed(2)}</td>
-                <td className="px-4 py-2"><Badge tone={tone[e.verification]}>{e.verification === "verified" ? `verified ${e.as_of ?? ""}` : e.verification === "unverified" ? "unverified seed" : "your price"}</Badge></td>
-                <td />
+                <td className="px-4 py-2"><Badge tone={tone[e.verification]}>{e.verification === "verified" ? `verified ${e.as_of ?? ""}` : e.verification === "unverified" ? "historical seed (unverified)" : "your price"}</Badge></td>
+                <td className="px-4 py-2" title={e.availability_note ?? undefined}>
+                  {e.availability === "unavailable" ? <Badge tone="err">shut down</Badge> : e.availability === "deprecated" ? <Badge tone="warn">deprecated</Badge> : e.availability === "current" ? <Badge tone="ok">current</Badge> : <Badge>unknown</Badge>}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -404,7 +406,7 @@ function PricingTable({ s, save }: { s: Settings; save: (n: Settings) => Promise
         <Input aria-label="Output price per million tokens" className="w-32" placeholder="output $/MTok" inputMode="decimal" value={out} onChange={(e) => setOut(e.target.value)} />
         <Button variant="secondary" onClick={add}>Add your price</Button>
       </div>
-      <p className="mt-2 text-xs text-text-3">Unverified seed rates came with the product brief and have not been checked against the vendor's pricing page; costs built on them are marked approximate. A price you enter takes precedence for that model id on any provider.</p>
+      <p className="mt-2 text-xs text-text-3">Historical seed rates came with the product brief and are kept exactly as given; they are not confirmed on the vendor's pricing page, so costs built on them are marked approximate. Atlas does not send requests to a model its vendor has shut down. A price you enter takes precedence for that model id on any provider. Hover a row for its source and dates.</p>
     </>
   );
 }

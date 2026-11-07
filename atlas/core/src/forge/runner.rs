@@ -300,6 +300,10 @@ pub async fn run(spec: RunSpec<'_>, cancel: &CancellationToken) -> Result<RunOut
         }
     }
     cmd.env("NO_COLOR", "1").env("CLICOLOR", "0").env("GIT_TERMINAL_PROMPT", "0").env("CI", "1");
+    // Python's bytecode cache keys on source mtime (whole seconds) and size, so a test run right after an
+    // edit that keeps the size can execute stale code. Not writing bytecode keeps results truthful and
+    // leaves no __pycache__ folders in the owner's project.
+    cmd.env("PYTHONDONTWRITEBYTECODE", "1");
     for (k, v) in spec.extra_env {
         cmd.env(k, v);
     }
@@ -415,12 +419,13 @@ mod tests {
     async fn runs_times_out_and_scrubs_env() {
         let dir = tempfile::tempdir().unwrap();
         let c = CancellationToken::new();
-        let argv = v(&["sh", "-c", "echo out; echo err 1>&2; echo \"k=${ATLAS_TEST_API_KEY:-none}\"; exit 3"]);
+        let argv = v(&["sh", "-c", "echo out; echo err 1>&2; echo \"k=${ATLAS_TEST_API_KEY:-none}\"; echo \"pyc=$PYTHONDONTWRITEBYTECODE\"; exit 3"]);
         // SAFETY: test-only; no other threads in this test read this variable.
         unsafe { std::env::set_var("ATLAS_TEST_API_KEY", "sk-should-not-leak") };
         let r = run(RunSpec { argv: &argv, cwd: dir.path(), timeout: Duration::from_secs(10), max_output: 10_000, extra_env: &[] }, &c).await.unwrap();
         assert_eq!((r.status.as_str(), r.exit_code), ("failed", Some(3)));
         assert!(r.output.contains("out") && r.output.contains("err") && r.output.contains("k=none"), "{}", r.output);
+        assert!(r.output.contains("pyc=1"), "Python bytecode writing is off for Forge commands: {}", r.output);
         let argv = v(&["sh", "-c", "sleep 30"]);
         let r = run(RunSpec { argv: &argv, cwd: dir.path(), timeout: Duration::from_millis(300), max_output: 1000, extra_env: &[] }, &c).await.unwrap();
         assert_eq!(r.status, "timed_out");

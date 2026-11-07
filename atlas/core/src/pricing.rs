@@ -43,6 +43,82 @@ pub struct PriceEntry {
     pub verification: Verification,
     pub source: String,
     pub as_of: Option<String>,
+    /// "current" | "deprecated" | "unavailable" | "unknown" (as of today, from the vendor's own pages).
+    pub availability: String,
+    pub availability_note: Option<String>,
+}
+
+/// Model lifecycle facts from the vendor's own deprecation pages, with the date they were checked.
+/// A model past its shutdown date is unavailable: Atlas does not route requests to it.
+struct Lifecycle {
+    vendor: &'static str,
+    model: &'static str,
+    announced: &'static str,
+    shutdown: &'static str,
+    replacement: &'static str,
+}
+
+const LIFECYCLE_SOURCE: &str = "OpenAI API deprecations page (developers.openai.com/api/docs/deprecations), checked 2026-11-07";
+
+const LIFECYCLE: &[Lifecycle] = &[
+    Lifecycle { vendor: "openai", model: "gpt-4.1-nano", announced: "2026-04-22", shutdown: "2026-10-23", replacement: "gpt-5.6-luna" },
+    Lifecycle { vendor: "openai", model: "gpt-5-nano", announced: "2026-06-11", shutdown: "2026-12-11", replacement: "gpt-5.6-luna" },
+    Lifecycle { vendor: "openai", model: "gpt-4.1", announced: "2026-10-14", shutdown: "2027-01-14", replacement: "gpt-6-luna" },
+];
+
+/// Seed models that appear on neither the vendor's pricing page nor its deprecation page.
+const NOT_FOUND: &[(&str, &str)] = &[("openai", "gpt-5.4"), ("openai", "gpt-5.5")];
+const NOT_FOUND_NOTE: &str = "not listed on OpenAI's pricing or deprecation pages (checked 2026-11-07); the id and price are unverified";
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ModelAvailability {
+    Current,
+    Deprecated { shutdown: String, replacement: String },
+    Unavailable { since: String, replacement: String },
+    Unknown,
+}
+
+fn today() -> String {
+    chrono::Utc::now().format("%Y-%m-%d").to_string()
+}
+
+fn lifecycle_for(vendor: &str, model: &str, on: &str) -> Option<ModelAvailability> {
+    LIFECYCLE.iter().find(|l| l.vendor == vendor && l.model == model).map(|l| {
+        if on >= l.shutdown {
+            ModelAvailability::Unavailable { since: l.shutdown.into(), replacement: l.replacement.into() }
+        } else {
+            ModelAvailability::Deprecated { shutdown: l.shutdown.into(), replacement: l.replacement.into() }
+        }
+    })
+}
+
+/// What the vendor says about a model today, for the vendors Atlas tracks.
+pub fn availability(kind: ProviderKind, model: &str) -> ModelAvailability {
+    availability_on(kind, model, &today())
+}
+
+pub fn availability_on(kind: ProviderKind, model: &str, on: &str) -> ModelAvailability {
+    let (prefix, base) = normalize_model(model);
+    for v in vendors_for(kind, prefix.as_deref()) {
+        if let Some(a) = lifecycle_for(v, &base, on) {
+            return a;
+        }
+        if VERIFIED.iter().any(|(vv, mm, _, _)| *vv == v && *mm == base) {
+            return ModelAvailability::Current;
+        }
+    }
+    ModelAvailability::Unknown
+}
+
+/// Refuse to route to a model the vendor has shut down. Returns a plain-language reason.
+pub fn unavailable_reason(kind: ProviderKind, model: &str) -> Option<String> {
+    match availability(kind, model) {
+        ModelAvailability::Unavailable { since, replacement } => Some(format!(
+            "{model} was shut down by its vendor on {since} (suggested replacement: {replacement})"
+        )),
+        _ => None,
+    }
 }
 
 /// A user-entered rate (Settings → Usage & budgets → Price overrides).
@@ -55,8 +131,18 @@ pub struct PriceOverride {
 
 const ANTHROPIC_SOURCE: &str = "Anthropic published list price";
 const ANTHROPIC_AS_OF: &str = "2026-10-06";
+const OPENAI_SOURCE: &str = "OpenAI API pricing page (developers.openai.com/api/docs/pricing), standard rates under 272K context";
+const OPENAI_AS_OF: &str = "2026-11-07";
 
-/// Anthropic list prices (USD / MTok), checked against Anthropic's pricing reference.
+fn source_for(vendor: &str) -> (&'static str, &'static str) {
+    match vendor {
+        "openai" => (OPENAI_SOURCE, OPENAI_AS_OF),
+        _ => (ANTHROPIC_SOURCE, ANTHROPIC_AS_OF),
+    }
+}
+
+/// Vendor list prices (USD / MTok), each checked against the vendor's own pricing reference on the
+/// date `source_for` gives.
 const VERIFIED: &[(&str, &str, f64, f64)] = &[
     ("anthropic", "claude-fable-5-1", 10.0, 50.0),
     ("anthropic", "claude-fable-5", 10.0, 50.0),
@@ -70,11 +156,17 @@ const VERIFIED: &[(&str, &str, f64, f64)] = &[
     ("anthropic", "claude-sonnet-4-6", 3.0, 15.0),
     ("anthropic", "claude-haiku-5-5", 0.10, 0.50),
     ("anthropic", "claude-haiku-4-5", 1.0, 5.0),
+    // OpenAI's current models, as listed on its pricing page on 2026-11-07.
+    ("openai", "gpt-6-astra", 10.0, 50.0),
+    ("openai", "gpt-6.1-sol", 2.0, 10.0),
+    ("openai", "gpt-6.1-terra", 1.0, 5.0),
+    ("openai", "gpt-6-luna", 0.10, 0.50),
 ];
 
-const SEED_SOURCE: &str = "Seed rate from the Atlas evolution brief; not yet checked against the vendor's pricing page";
+const SEED_SOURCE: &str = "Historical reference rate supplied with the Atlas evolution brief (kept as given); not confirmed on the vendor's pricing page";
 
-/// Seed rates as supplied (USD / MTok). Kept separate from `VERIFIED` on purpose.
+/// Seed rates exactly as supplied (USD / MTok). Historical reference data, never overwritten and kept
+/// separate from `VERIFIED` on purpose.
 const SEED: &[(&str, &str, f64, f64)] = &[
     ("anthropic", "claude-haiku-5-5", 0.10, 0.50),
     ("openai", "gpt-4.1-nano", 0.10, 0.40),
@@ -89,22 +181,39 @@ const SEED: &[(&str, &str, f64, f64)] = &[
 /// The full schedule as shown in Settings: verified rows, then seed rows not covered by a
 /// verified row (a seed row that duplicates a verified one adds nothing).
 pub fn schedule() -> Vec<PriceEntry> {
+    let on = today();
+    let avail = |v: &str, m: &str, verified: bool| -> (String, Option<String>) {
+        match lifecycle_for(v, m, &on) {
+            Some(ModelAvailability::Unavailable { since, replacement }) => ("unavailable".into(), Some(format!("shut down {since}; replacement {replacement}. {LIFECYCLE_SOURCE}"))),
+            Some(ModelAvailability::Deprecated { shutdown, replacement }) => ("deprecated".into(), Some(format!("shuts down {shutdown}; replacement {replacement}. {LIFECYCLE_SOURCE}"))),
+            _ if verified => ("current".into(), None),
+            _ if NOT_FOUND.iter().any(|(vv, mm)| *vv == v && *mm == m) => ("unknown".into(), Some(NOT_FOUND_NOTE.into())),
+            _ => ("unknown".into(), None),
+        }
+    };
     let mut out: Vec<PriceEntry> = VERIFIED
         .iter()
-        .map(|(v, m, i, o)| PriceEntry {
-            vendor: (*v).into(),
-            model: (*m).into(),
-            input_per_mtok: *i,
-            output_per_mtok: *o,
-            verification: Verification::Verified,
-            source: ANTHROPIC_SOURCE.into(),
-            as_of: Some(ANTHROPIC_AS_OF.into()),
+        .map(|(v, m, i, o)| {
+            let (source, as_of) = source_for(v);
+            let (availability, availability_note) = avail(v, m, true);
+            PriceEntry {
+                vendor: (*v).into(),
+                model: (*m).into(),
+                input_per_mtok: *i,
+                output_per_mtok: *o,
+                verification: Verification::Verified,
+                source: source.into(),
+                as_of: Some(as_of.into()),
+                availability,
+                availability_note,
+            }
         })
         .collect();
     for (v, m, i, o) in SEED {
         if VERIFIED.iter().any(|(vv, mm, _, _)| vv == v && mm == m) {
             continue;
         }
+        let (availability, availability_note) = avail(v, m, false);
         out.push(PriceEntry {
             vendor: (*v).into(),
             model: (*m).into(),
@@ -113,6 +222,8 @@ pub fn schedule() -> Vec<PriceEntry> {
             verification: Verification::Unverified,
             source: SEED_SOURCE.into(),
             as_of: None,
+            availability,
+            availability_note,
         });
     }
     out
@@ -259,6 +370,25 @@ mod tests {
         let q = quote(ProviderKind::Mistral, "mistral-large-latest", &o).unwrap();
         assert_eq!((q.output_per_mtok, q.verification), (4.5, Verification::User));
         assert_eq!(quote(ProviderKind::Ollama, "qwen3", &[]).unwrap().input_per_mtok, 0.0);
+    }
+
+    #[test]
+    fn audit_classification_as_of_2026_11_07() {
+        let on = "2026-11-07";
+        assert_eq!(availability_on(ProviderKind::Openai, "gpt-4.1-nano", on), ModelAvailability::Unavailable { since: "2026-10-23".into(), replacement: "gpt-5.6-luna".into() });
+        assert!(matches!(availability_on(ProviderKind::Openai, "gpt-5-nano", on), ModelAvailability::Deprecated { .. }));
+        assert!(matches!(availability_on(ProviderKind::Openai, "gpt-4.1", on), ModelAvailability::Deprecated { .. }));
+        assert_eq!(availability_on(ProviderKind::Openai, "gpt-5.5", on), ModelAvailability::Unknown);
+        assert_eq!(availability_on(ProviderKind::Openai, "gpt-6.1-sol", on), ModelAvailability::Current);
+        assert_eq!(availability_on(ProviderKind::Anthropic, "claude-opus-5-5", on), ModelAvailability::Current);
+        assert!(matches!(availability_on(ProviderKind::Openai, "gpt-5-nano", "2026-12-11"), ModelAvailability::Unavailable { .. }), "becomes unavailable on its shutdown date");
+        assert!(matches!(availability_on(ProviderKind::Openrouter, "openai/gpt-4.1-nano", on), ModelAvailability::Unavailable { .. }));
+        // The historical seed rates are still exactly as supplied.
+        let s = schedule();
+        let seed = s.iter().find(|r| r.model == "gpt-4.1-nano").unwrap();
+        assert_eq!((seed.input_per_mtok, seed.output_per_mtok, seed.verification), (0.10, 0.40, Verification::Unverified));
+        assert_eq!(s.iter().find(|r| r.model == "gpt-6-luna").unwrap().as_of.as_deref(), Some("2026-11-07"));
+        assert_eq!(s.iter().find(|r| r.model == "gpt-5.4").unwrap().availability, "unknown");
     }
 
     #[test]
