@@ -2,7 +2,7 @@
 name: atlas
 on:
   push:
-    paths: ["atlas/**", "sibling_adapter.py", "tests/test_sibling_adapter.py", ".github/workflows/atlas.yml"]
+    paths: ["atlas/**", "sibling_adapter.py", "tests/test_sibling_adapter.py", "prometheus.py", "*.py", ".github/workflows/atlas.yml"]
   pull_request:
     paths: ["atlas/**", "sibling_adapter.py", "tests/test_sibling_adapter.py", ".github/workflows/atlas.yml"]
   workflow_dispatch:
@@ -48,6 +48,11 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: cargo test --workspace
+      - name: Atlas with the real Prometheus runtime (scripted stand-in for the model only)
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install --quiet openai python-dotenv numpy
+          cargo test -p atlas-core --test real_prometheus_runtime -- --ignored --nocapture --test-threads=1
       - name: OS credential store round-trip (Windows Credential Manager)
         if: runner.os == 'Windows'
         run: cargo test -p atlas-core --lib os_keyring -- --ignored

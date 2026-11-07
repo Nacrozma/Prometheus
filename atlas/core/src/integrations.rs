@@ -59,9 +59,12 @@ fn entry(id: &str) -> Result<&'static CatalogEntry> {
     CATALOG.iter().find(|c| c.id == id).ok_or_else(|| AtlasError::NotFound(format!("integration '{id}'")))
 }
 
+/// enabled, status, status_detail, last_checked_at, key_hint, config
+type IntegrationRow = (i64, String, Option<String>, Option<String>, Option<String>, String);
+
 pub fn get(db: &Db, id: &str) -> Result<Integration> {
     let c = entry(id)?;
-    let row: Option<(i64, String, Option<String>, Option<String>, Option<String>, String)> = db
+    let row: Option<IntegrationRow> = db
         .conn()?
         .query_row(
             "SELECT enabled, status, status_detail, last_checked_at, key_hint, config FROM integrations WHERE id = ?1",

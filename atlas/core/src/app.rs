@@ -917,7 +917,7 @@ impl Atlas {
     pub fn recent_errors(&self, limit: u32) -> Result<Vec<audit::AuditEvent>> {
         let mut v = audit::recent(&self.db, limit, Some("error"))?;
         v.extend(audit::recent(&self.db, limit, Some("warn"))?);
-        v.sort_by(|a, b| b.id.cmp(&a.id));
+        v.sort_by_key(|e| std::cmp::Reverse(e.id));
         v.truncate(limit as usize);
         Ok(v)
     }

@@ -83,6 +83,11 @@ fn today() -> String {
     chrono::Utc::now().format("%Y-%m-%d").to_string()
 }
 
+/// When the vendor announced the deprecation, for display.
+pub fn deprecation_announced(vendor: &str, model: &str) -> Option<&'static str> {
+    LIFECYCLE.iter().find(|l| l.vendor == vendor && l.model == model).map(|l| l.announced)
+}
+
 fn lifecycle_for(vendor: &str, model: &str, on: &str) -> Option<ModelAvailability> {
     LIFECYCLE.iter().find(|l| l.vendor == vendor && l.model == model).map(|l| {
         if on >= l.shutdown {
@@ -184,8 +189,8 @@ pub fn schedule() -> Vec<PriceEntry> {
     let on = today();
     let avail = |v: &str, m: &str, verified: bool| -> (String, Option<String>) {
         match lifecycle_for(v, m, &on) {
-            Some(ModelAvailability::Unavailable { since, replacement }) => ("unavailable".into(), Some(format!("shut down {since}; replacement {replacement}. {LIFECYCLE_SOURCE}"))),
-            Some(ModelAvailability::Deprecated { shutdown, replacement }) => ("deprecated".into(), Some(format!("shuts down {shutdown}; replacement {replacement}. {LIFECYCLE_SOURCE}"))),
+            Some(ModelAvailability::Unavailable { since, replacement }) => ("unavailable".into(), Some(format!("deprecation announced {}; shut down {since}; replacement {replacement}. {LIFECYCLE_SOURCE}", deprecation_announced(v, m).unwrap_or("?")))),
+            Some(ModelAvailability::Deprecated { shutdown, replacement }) => ("deprecated".into(), Some(format!("deprecation announced {}; shuts down {shutdown}; replacement {replacement}. {LIFECYCLE_SOURCE}", deprecation_announced(v, m).unwrap_or("?")))),
             _ if verified => ("current".into(), None),
             _ if NOT_FOUND.iter().any(|(vv, mm)| *vv == v && *mm == m) => ("unknown".into(), Some(NOT_FOUND_NOTE.into())),
             _ => ("unknown".into(), None),

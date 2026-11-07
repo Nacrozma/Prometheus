@@ -25,40 +25,59 @@ impl Drop for Adapter {
 }
 
 fn python() -> Option<&'static str> {
-    ["python3", "python"].into_iter().find(|p| Command::new(p).arg("--version").output().map(|o| o.status.success()).unwrap_or(false))
+    let found = ["python3", "python"].into_iter().find(|p| Command::new(p).arg("--version").output().map(|o| o.status.success()).unwrap_or(false));
+    // CI always provides Python: there, a missing interpreter is a failure, never a silent skip.
+    assert!(found.is_some() || std::env::var_os("CI").is_none(), "python is required for the cross-language tests in CI");
+    found
 }
 
 fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
 }
 
+/// Starts the real adapter. Returns `None` only when Python is not installed; any other failure
+/// (crash, no pairing code, non-UTF-8 console output) fails the test instead of skipping it.
 fn start_adapter() -> Option<Adapter> {
     let py = python()?;
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sibling_adapter.py");
     let dir = tempfile::tempdir().unwrap();
     let port = free_port();
-    let mut child = Command::new(py)
+    let child = Command::new(py)
         .arg("-u")
         .arg(&script)
         .args(["--test-backend", "--memory-secrets", "--pair", "--port", &port.to_string()])
         .env("PROMETHEUS_SIBLING_DIR", dir.path())
+        // Windows pipes default to the ANSI code page (cp1252), not UTF-8. Reproduce that on every
+        // OS: the adapter must still write UTF-8 to a pipe.
+        .env("PYTHONIOENCODING", "cp1252")
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .ok()?;
-    let out = child.stdout.take().unwrap();
-    let mut lines = BufReader::new(out).lines();
-    let mut code = None;
-    for line in lines.by_ref() {
-        let line = line.ok()?;
+        .expect("python is installed, so the adapter must start");
+    let mut ad = Adapter { child, port, code: String::new(), _dir: dir };
+    let mut reader = BufReader::new(ad.child.stdout.take().unwrap());
+    let mut seen = String::new();
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        if reader.read_until(b'\n', &mut buf).unwrap_or(0) == 0 {
+            panic!("the adapter exited without showing a pairing code; its output was:\n{seen}");
+        }
+        let line = String::from_utf8(buf.clone()).unwrap_or_else(|_| panic!("the adapter's console output must be UTF-8, got {:?}", String::from_utf8_lossy(&buf)));
+        seen.push_str(&line);
         if let Some(rest) = line.split("pairing code: ").nth(1) {
-            code = Some(rest.split_whitespace().next()?.to_string());
+            ad.code = rest.split_whitespace().next().expect("a code after 'pairing code:'").to_string();
             break;
         }
     }
     // Keep reading so the adapter's later log lines never hit a closed pipe.
-    std::thread::spawn(move || for _ in lines {});
-    Some(Adapter { child, port, code: code?, _dir: dir })
+    std::thread::spawn(move || {
+        let mut sink = Vec::new();
+        while reader.read_until(b'\n', &mut sink).map(|n| n > 0).unwrap_or(false) {
+            sink.clear();
+        }
+    });
+    Some(ad)
 }
 
 fn atlas() -> Arc<Atlas> {
@@ -321,11 +340,12 @@ async fn consulting_prometheus_needs_approval_and_shares_only_the_approved_text(
     assert!(!d.to_string().contains("PRIVATE-ATLAS-MEMORY"), "Atlas's private memory never enters a mission");
     assert_eq!(d["mission"]["state"], "COMPLETED");
     // The model saw its own memory (Atlas's private context) but the sibling did not.
-    let reqs = mock.requests.lock().unwrap();
-    assert!(serde_json::to_string(&reqs[0].messages).unwrap().contains("PRIVATE-ATLAS-MEMORY"));
-    let answer = serde_json::to_string(&reqs[1].messages.last().unwrap().parts).unwrap();
-    assert!(answer.contains("test backend") && answer.contains("untrusted"), "the answer comes back attributed and marked untrusted");
-    drop(reqs);
+    {
+        let reqs = mock.requests.lock().unwrap();
+        assert!(serde_json::to_string(&reqs[0].messages).unwrap().contains("PRIVATE-ATLAS-MEMORY"));
+        let answer = serde_json::to_string(&reqs[1].messages.last().unwrap().parts).unwrap();
+        assert!(answer.contains("test backend") && answer.contains("untrusted"), "the answer comes back attributed and marked untrusted");
+    }
 
     // Declined: nothing is sent and no mission is created.
     run(false, "ask again").await;

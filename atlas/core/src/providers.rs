@@ -445,8 +445,7 @@ mod tests {
         let (db, secrets) = setup();
         let a = create(&db, ProviderKind::Anthropic, "Claude", "https://api.anthropic.com", Some("claude-opus-5-5")).unwrap();
         let o = create(&db, ProviderKind::Ollama, "Local", "http://127.0.0.1:11434/v1", Some("qwen3")).unwrap();
-        let mut s = Settings::default();
-        s.default_provider_id = Some(a.id.clone());
+        let mut s = Settings { default_provider_id: Some(a.id.clone()), ..Settings::default() };
         // No key → error, no fallback.
         let err = route(&s, &list(&db).unwrap(), None, None, true).unwrap_err();
         assert!(err.to_string().contains("will not switch"));
@@ -485,8 +484,7 @@ mod tests {
         let a = create(&db, ProviderKind::Anthropic, "Claude", "https://api.anthropic.com", Some("claude-opus-5-5")).unwrap();
         set_key(&db, &secrets, &a.id, "sk-ant-api03-abcdefghijklmnop").unwrap();
         let o = create(&db, ProviderKind::Openai, "OpenAI", "https://api.openai.com/v1", Some("gpt-4.1")).unwrap();
-        let mut s = Settings::default();
-        s.default_provider_id = Some(a.id.clone());
+        let mut s = Settings { default_provider_id: Some(a.id.clone()), ..Settings::default() };
         s.routing.mode = RoutingMode::Quality;
         s.routing.heavy = Some(TierModel { provider_id: o.id.clone(), model: "gpt-5.5".into() });
         s.routing.standard = Some(TierModel { provider_id: a.id.clone(), model: "claude-sonnet-5-5".into() });
@@ -518,8 +516,7 @@ mod tests {
         let (db, secrets) = setup();
         let o = create(&db, ProviderKind::Openai, "OpenAI", "https://api.openai.com/v1", Some("gpt-4.1-nano")).unwrap();
         set_key(&db, &secrets, &o.id, "sk-proj-abcdefghijklmnopqrstu").unwrap();
-        let mut s = Settings::default();
-        s.default_provider_id = Some(o.id.clone());
+        let mut s = Settings { default_provider_id: Some(o.id.clone()), ..Settings::default() };
         let e = route(&s, &list(&db).unwrap(), None, None, true).unwrap_err();
         assert!(e.to_string().contains("shut down") && e.to_string().contains("gpt-5.6-luna"), "{e}");
         s.routing.mode = RoutingMode::Budget;

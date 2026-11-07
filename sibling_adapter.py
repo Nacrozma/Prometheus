@@ -68,6 +68,18 @@ def log(msg: str) -> None:
         pass
 
 
+def console_utf8() -> None:
+    """Pipes and redirected files get UTF-8 whatever the Windows code page is. On Windows a pipe
+    defaults to the ANSI code page (cp1252), which cannot encode some status characters (→) and is
+    not what tools reading the pipe expect. An interactive console is left as it is."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if not stream.isatty():
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
 def now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -705,6 +717,7 @@ def serve(adapter: Adapter) -> ThreadingHTTPServer:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    console_utf8()
     ap = argparse.ArgumentParser(description="Prometheus sibling adapter (Sibling Protocol v1, loopback only)")
     ap.add_argument("--pair", action="store_true", help="show a one-time pairing code for ATLAS Co-Pilot")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
@@ -738,17 +751,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if a.test_backend:
-        print("[sibling] *** TEST BACKEND — deterministic replies for automated tests, not Prometheus ***", flush=True)
+        log("[sibling] *** TEST BACKEND — deterministic replies for automated tests, not Prometheus ***")
         backend: Backend = TestBackend()
     else:
         backend = PrometheusBackend(allow_dangerous=a.allow_dangerous)
     adapter = Adapter(backend, store, registry, a.port)
     httpd = serve(adapter)
-    print(f"[sibling] listening on 127.0.0.1:{a.port} (loopback only) · secrets: {store.kind}", flush=True)
+    log(f"[sibling] listening on 127.0.0.1:{a.port} (loopback only) · secrets: {store.kind}")
     if a.pair:
         code = adapter.start_pairing()
-        print(f"[sibling] pairing code: {code}  (valid {CODE_TTL_S // 60} minutes, single use)", flush=True)
-        print("[sibling] In ATLAS Co-Pilot open Siblings → Pair with Prometheus and enter this code.", flush=True)
+        log(f"[sibling] pairing code: {code}  (valid {CODE_TTL_S // 60} minutes, single use)")
+        log("[sibling] In ATLAS Co-Pilot open Siblings → Pair with Prometheus and enter this code.")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
