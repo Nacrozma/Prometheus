@@ -22,7 +22,8 @@ fn env(k: &str) -> Option<String> {
 async fn live_provider_round_trips() {
     let http = reqwest::Client::new();
     let t = Duration::from_secs(60);
-    let mut cases: Vec<(&str, Option<Arc<dyn ChatProvider>>, Option<String>)> = vec![];
+    type Case = (&'static str, Option<Arc<dyn ChatProvider>>, Option<String>);
+    let mut cases: Vec<Case> = vec![];
     let key = |k: &str| env(k);
     cases.push(("Anthropic", key("ANTHROPIC_API_KEY").map(|k| Arc::new(AnthropicProvider::new(http.clone(), None, k, t)) as _), env("ATLAS_LIVE_ANTHROPIC_MODEL").or(Some("claude-haiku-5-5".into()))));
     for (name, kind, var, base) in [

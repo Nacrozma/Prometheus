@@ -13,6 +13,7 @@ tools, and shows everything it can reach on a live **Atlas Map**.
 |---|---|
 | ![Welcome](docs/screenshots/01-welcome.png) | ![Approval](docs/screenshots/06-approval.png) |
 | ![Home](docs/screenshots/14-home.png) | ![Integrations](docs/screenshots/11-integrations.png) |
+| ![Atlas Forge](docs/screenshots/15-forge.png) | ![Pair with Prometheus](docs/screenshots/17-siblings-pair.png) |
 
 *All screenshots are captured from the real desktop app by the end-to-end test suite (with its scripted test provider).*
 
@@ -45,7 +46,7 @@ What works now, and what doesn't:
 | Anthropic and OpenAI-compatible streaming, tool calling | Tested against mock servers that replay each API's wire format. Not yet exercised with a live API key. |
 | Ollama (local) | Same adapter as OpenAI-compatible; tested against a mock server |
 | Web search (Tavily) | Tested against a mock server; needs your Tavily key |
-| Windows | CI on Windows: unit, core and frontend tests, Credential Manager round-trip, launch smoke test, and the 11-test desktop e2e suite (incl. accessibility audit) all pass; `.exe`/`.msi` installers built. Installers are **unsigned**. See [docs/WINDOWS.md](docs/WINDOWS.md) |
+| Windows | CI on Windows: unit, core and frontend tests, Credential Manager round-trip, launch smoke test, and the desktop e2e suite (incl. accessibility audit) all pass; `.exe`/`.msi` installers built. Installers are **unsigned**. See [docs/WINDOWS.md](docs/WINDOWS.md) |
 | macOS | CI builds and unit tests pass; not run interactively; unsigned |
 | PDF / Word / Excel reading | **Not supported** (UTF-8 text formats only) |
 | Voice | Speech-to-text **not implemented**; read-aloud uses OS voices only where the webview exposes them |
@@ -87,4 +88,6 @@ atlas/
 [Architecture](docs/ARCHITECTURE.md) · [Security](docs/SECURITY.md) · [Privacy](docs/PRIVACY.md) ·
 [Setup](docs/SETUP.md) · [Windows](docs/WINDOWS.md) · [Providers](docs/PROVIDERS.md) · [Tool development](docs/TOOL_DEVELOPMENT.md) ·
 [Integrations](docs/INTEGRATIONS.md) · [Memory](docs/MEMORY.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) ·
-[Release](docs/RELEASE.md) · [Testing](docs/TESTING.md) · [Decisions](docs/adr/) · [Changelog](CHANGELOG.md)
+[Release](docs/RELEASE.md) · [Testing](docs/TESTING.md) · [Test report](docs/TEST_REPORT.md) · [Decisions](docs/adr/) · [Changelog](CHANGELOG.md)
+
+**New in 0.2.0:** [Atlas Forge](docs/FORGE.md) · [Pairing with Prometheus](docs/PAIRING.md) · [Sibling Protocol v1](docs/SIBLING_PROTOCOL.md)

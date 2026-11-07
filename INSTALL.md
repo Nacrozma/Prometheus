@@ -2,16 +2,16 @@
 
 ATLAS Co-Pilot is a desktop AI companion. This page gets it running on a Windows PC in about 10 minutes.
 
-**You need:** Windows 10 or 11 (64-bit), an internet connection, and one AI service: either an API key from
-Anthropic or OpenAI, or the free Ollama app if you'd rather run AI on your own PC (see step 4).
+**You need:** Windows 10 or 11 (64-bit), an internet connection, and one AI service: an API key from Anthropic,
+OpenAI, OpenRouter, Mistral or Cerebras, or the free Ollama app if you'd rather run AI on your own PC (see step 4).
 
 ---
 
 ## 1. Download
 
-**[⬇ Download ATLAS-Co-Pilot-Setup-x64.exe](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.1.0/ATLAS-Co-Pilot-Setup-x64.exe)** (8.5 MB)
+**[⬇ Download ATLAS-Co-Pilot-Setup-x64.exe](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.2.0/ATLAS-Co-Pilot-Setup-x64.exe)**
 
-All files for this version are on the [release page](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.1.0):
+All files for this version are on the [release page](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.2.0):
 
 | File | What it is |
 |---|---|
@@ -42,7 +42,8 @@ Open **ATLAS Co-Pilot**. A short setup walks you through:
 5. **Workspace:** click **Use Documents/Atlas Workspace**. This is the only folder Atlas may create files in.
    You can add a small sample file to try things with.
 6. **The Atlas:** a quick look at the map of what Atlas can do.
-7. **Ready:** click **Start your first conversation**.
+7. **Forge & siblings:** what Atlas Forge (engineering) is, how costs work, and the optional Prometheus link.
+8. **Ready:** click **Start your first conversation**.
 
 ## 4. Connect an AI service (pick one)
 
@@ -62,7 +63,12 @@ Atlas needs an AI model to think with. Pick **one** of these:
    create a key.
 2. In Atlas choose **OpenAI**, paste the key, click **Save and test connection**, then pick a model from the list.
 
-### Option C: Ollama. Free, and runs entirely on your PC.
+### Option C: OpenRouter, Mistral or Cerebras
+Create a key on that service's website (openrouter.ai → Keys, console.mistral.ai → API Keys, or
+cloud.cerebras.ai → API Keys). In Atlas choose the service, paste the key into the field marked
+"Paste your … API key", click **Save and test connection**, then pick a model.
+
+### Option D: Ollama. Free, and runs entirely on your PC.
 1. Download and install Ollama from **[ollama.com](https://ollama.com)**.
 2. Open **Command Prompt** and run: `ollama pull qwen3`. This downloads a model, several GB.
 3. In Atlas choose **Ollama (on this computer)**, type `qwen3` as the model, and click **Save and test connection**.
@@ -79,6 +85,13 @@ Only the AI service you chose receives your messages.
   creates the file. Click **Approve** and the file appears in `Documents\Atlas Workspace\Drafts`.
 - Open **Atlas Map** (the orbit icon on the left) to see everything Atlas can use.
 - Press **Ctrl + K** at any time to search for any command.
+- **Atlas Forge** (hammer icon, Ctrl + 4): pick a code project folder and work on it with Atlas. Every edit,
+  command and commit waits for your approval and can be reverted. Guide:
+  [atlas/docs/FORGE.md](atlas/docs/FORGE.md).
+- **Costs:** Settings → Usage & budgets shows estimated spend and lets you set per-request, daily, monthly and
+  per-mission limits. Settings → Model routing picks cheaper or stronger models automatically.
+- **Prometheus (optional):** if Prometheus is on the same PC, open **Siblings** to pair them. Guide:
+  [atlas/docs/PAIRING.md](atlas/docs/PAIRING.md).
 
 ---
 
@@ -109,13 +122,7 @@ In PowerShell, in your Downloads folder:
 Get-FileHash .\ATLAS-Co-Pilot-Setup-x64.exe -Algorithm SHA256
 ```
 
-For version 0.1.0 it must be:
-
-```
-D136137A54F05D81E8E3B36B1D59427B55CA39BC002737AC7F47D1E4F6C70913
-```
-
-(The same values are in `SHA256SUMS.txt` on the release page.)
+Compare the result with the value for `ATLAS-Co-Pilot-Setup-x64.exe` in `SHA256SUMS.txt` on the release page.
 
 ---
 

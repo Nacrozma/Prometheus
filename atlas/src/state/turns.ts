@@ -52,7 +52,7 @@ export function reduce(s: TurnState, e: TurnEvent): TurnState {
     case "step_reset":
       return { ...s, text: "", reasoning: "" };
     case "tool_call_started":
-      return { ...s, tools: [...s.tools, { key: e.call_id || `${e.name}-${s.tools.length}`, toolId: e.name.replace(/_/g, "."), status: "preparing" }] };
+      return { ...s, tools: [...s.tools, { key: e.call_id || `${e.name}-${s.tools.length}`, toolId: e.name.replace("_", "."), status: "preparing" }] };
     case "tool": {
       const ev = e.event;
       if (ev.type === "step_started") {

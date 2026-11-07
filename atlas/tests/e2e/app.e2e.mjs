@@ -127,6 +127,8 @@ test("first-run onboarding completes and personalises Atlas", async () => {
   await click("Continue");
   await waitText("Meet the Atlas Map");
   await click("Continue");
+  await waitText("Prometheus (optional sibling)");
+  await click("Continue");
   await waitText("You're all set, Sam.");
   await shot("03-ready");
   await click("Start your first conversation");

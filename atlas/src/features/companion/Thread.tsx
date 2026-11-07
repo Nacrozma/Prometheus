@@ -11,7 +11,7 @@ type ToolResult = Extract<Part, { type: "tool_result" }>;
 
 function ToolRun({ call, result, live }: { call: ToolCall; result?: ToolResult; live?: boolean }) {
   const [open, setOpen] = useState(false);
-  const toolId = call.name.replace(/_/g, ".");
+  const toolId = call.name.replace("_", ".");
   const state = !result ? "pending" : result.is_error ? (/declined/.test(result.content) ? "declined" : "error") : "ok";
   const Icon = state === "ok" ? CircleCheck : state === "declined" ? CircleSlash : state === "error" ? XCircle : Wrench;
   const label = state === "ok" ? "Completed" : state === "declined" ? "Declined" : state === "error" ? "Did not complete" : live ? "In progress" : "No result";

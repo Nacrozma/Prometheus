@@ -2,9 +2,9 @@
 name: atlas
 on:
   push:
-    paths: ["atlas/**", ".github/workflows/atlas.yml"]
+    paths: ["atlas/**", "sibling_adapter.py", "tests/test_sibling_adapter.py", ".github/workflows/atlas.yml"]
   pull_request:
-    paths: ["atlas/**", ".github/workflows/atlas.yml"]
+    paths: ["atlas/**", "sibling_adapter.py", "tests/test_sibling_adapter.py", ".github/workflows/atlas.yml"]
   workflow_dispatch:
 
 jobs:
@@ -36,6 +36,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: atlas
+      # Python runs the Prometheus-side sibling adapter: its own tests, and the Rust cross-language test.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sibling adapter tests (Prometheus side, no provider keys)
+        working-directory: .
+        run: python -m unittest -v tests.test_sibling_adapter
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint

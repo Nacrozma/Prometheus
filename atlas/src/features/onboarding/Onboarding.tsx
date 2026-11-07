@@ -1,3 +1,5 @@
+import { Hammer, Wallet } from "lucide-react";
+import { PrometheusAvatar } from "@/features/siblings/avatar/PrometheusAvatar";
 import { ArrowLeft, ArrowRight, Check, Cloud, Cpu, FolderOpen, HardDrive, KeyRound, Orbit, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -12,7 +14,7 @@ import type { Settings } from "@/lib/schemas";
 import { useTurns } from "@/state/turns";
 import { useUi } from "@/state/ui";
 
-const STEPS = ["Welcome", "About you", "Your data", "AI model", "Workspace", "The Atlas", "Ready"] as const;
+const STEPS = ["Welcome", "About you", "Your data", "AI model", "Workspace", "The Atlas", "Forge & siblings", "Ready"] as const;
 
 export function Onboarding({ settings, onDone }: { settings: Settings; onDone: () => void }) {
   const [step, setStep] = useState(0);
@@ -260,6 +262,38 @@ export function Onboarding({ settings, onDone }: { settings: Settings; onDone: (
           )}
 
           {step === 6 && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="font-display text-xl font-semibold">Engineering, costs and siblings</h2>
+                <p className="mt-1 text-sm text-text-2">All optional — set them up whenever you like.</p>
+              </div>
+              <div className="space-y-3">
+                <div className="flex gap-3 rounded-md border border-line-1 bg-bg-2 px-4 py-3">
+                  <Hammer className="mt-0.5 size-5 shrink-0 text-accent" aria-hidden />
+                  <div className="text-sm">
+                    <p className="font-medium">Atlas Forge</p>
+                    <p className="text-text-2">Work on a code project folder you choose, as Architect, Builder, Debugger or Reconstructor. Every edit, command and commit shows you the exact change and waits for approval, and Atlas can revert its own edits.</p>
+                  </div>
+                </div>
+                <div className="flex gap-3 rounded-md border border-line-1 bg-bg-2 px-4 py-3">
+                  <Wallet className="mt-0.5 size-5 shrink-0 text-accent" aria-hidden />
+                  <div className="text-sm">
+                    <p className="font-medium">Costs and budgets</p>
+                    <p className="text-text-2">Cloud models are billed by the provider per token. Atlas estimates each request's cost from a price list that says which rates are verified, and you can set per-request, daily, monthly and per-mission limits in Settings → Usage & budgets.</p>
+                  </div>
+                </div>
+                <div className="flex gap-3 rounded-md border border-[#f5a524]/25 bg-bg-2 px-4 py-3">
+                  <PrometheusAvatar state="offline" size={22} birth={false} className="mt-0.5 shrink-0" />
+                  <div className="text-sm">
+                    <p className="font-medium">Prometheus (optional sibling)</p>
+                    <p className="text-text-2">If Prometheus runs on this computer, you can pair it from Siblings. Atlas then can consult it or share missions with it. Only what you put in a mission is shared — never your memory, files, settings or keys — and Atlas works fully without it.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 7 && (
             <div className="flex flex-col items-center pt-4 text-center">
               <Emblem size={88} glow />
               <h2 className="mt-6 font-display text-2xl font-semibold">{c.preferred_name ? `You're all set, ${c.preferred_name}.` : "You're all set."}</h2>

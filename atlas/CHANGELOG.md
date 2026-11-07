@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.2.0 — 2026-11-07
+
+### Added
+- **Atlas Forge:** engineering on a project folder you choose.
+  - Explorer, session, file, diff, terminal, tests, git and changes panels.
+  - Architect, Builder, Debugger and Reconstructor disciplines, each with its own tools.
+  - Edits, writes, commands and commits are approved one at a time and show the real diff or argv.
+  - Commands run without a shell, with a policy for model requests, time limits, process-tree kill and
+    scrubbed credentials.
+  - Every change is snapshotted and can be reverted while the file is unchanged.
+- **Providers:** OpenRouter, Mistral and Cerebras, each with its own key placeholder.
+- **Model routing:** Fast / Standard / Heavy tiers with Auto, Budget, Balanced, Quality and Manual modes.
+- **Pricing:** a schedule that keeps verified rates, unverified seed rates and your own prices apart.
+- **Budgets:** per request, mission, day and month, with a warning threshold and stop or ask-first.
+- **Prometheus sibling link (Sibling Protocol v1):**
+  - The minimal Prometheus-side adapter (`sibling_adapter.py`) listens on loopback only.
+  - Pairing uses a one-time code and authenticated, replay-protected messages.
+  - The secret is stored in the OS credential store.
+  - Capabilities are discovered, not assumed.
+  - Revocation and diagnostics are included.
+- **Mission Ledger:** consultation, collaborative (default) and delegated missions, with a state machine
+  enforced in the core, idempotent sending, honest restart recovery, and a visible collaboration timeline.
+  The `sibling.consult` tool lets Atlas consult Prometheus, with approval.
+- **Prometheus's solar avatar:** a WebGL2 port of his SolarSunWidget shader with unchanged shading code,
+  shown in Siblings, Companion, Home, Mission Control and the Map. Atlas's own emblem and theme are unchanged.
+- **Atlas Map:** Forge project, paired-sibling and mission nodes. The link edge is drawn only while a verified
+  connection exists.
+- Onboarding step for Forge, costs and siblings. Diagnostics for Forge, the sibling link and missions.
+  `.env.example`, and an opt-in live provider check.
+
+### Changed
+- Tools the model was not offered in a conversation are refused before execution.
+- Approval cards for Forge edits show a diff against the file as it is now.
+- The rail adds Atlas Forge (Ctrl+4) and Siblings. Mission Control is now Ctrl+5, Projects Ctrl+6, Memory
+  Ctrl+7, Files Ctrl+8 and Integrations Ctrl+9. Voice has no shortcut.
+- Database schema v3 (migrations from v1 are automatic, with a backup made first).
+
+### Fixed
+- Accessible name of the rail's approval badge, and contrast of approval badges on the tinted card header.
+- Tool names with underscores, such as `forge.edit_file`, now display correctly.
+
+### Known limitations
+- Live provider APIs were not called during development (no keys). Run the live check with your own keys.
+- The OpenAI seed prices and model ids are unverified and labelled so.
+- The sibling link is local only; remote transport is not implemented.
+- The Prometheus side was tested with the adapter's test backend, not with Prometheus's own models.
+- The avatar's star-birth intro is a short scale-in, not the original full intro.
+- Installers are unsigned.
+
+See `docs/TEST_REPORT.md` for exactly what was run.
+
 ## 0.1.0 — 2026-11-03
 
 First release of ATLAS Co-Pilot.

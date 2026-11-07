@@ -415,10 +415,9 @@ pub async fn cancel(link: &Link<'_>, id: &str) -> Result<Mission> {
         return Ok(m);
     }
     if m.sent_at.is_some()
-        && let Some(sid) = &m.sibling_id {
-            if let Err(e) = link.call(sid, "MISSION_CANCEL", json!({"mission_id": m.id}), Duration::from_secs(10)).await {
-                add_event(link.db, id, "system", "note", &format!("Could not tell the sibling to stop ({e}); it may still be working."), None)?;
-            }
+        && let Some(sid) = &m.sibling_id
+        && let Err(e) = link.call(sid, "MISSION_CANCEL", json!({"mission_id": m.id}), Duration::from_secs(10)).await {
+            add_event(link.db, id, "system", "note", &format!("Could not tell the sibling to stop ({e}); it may still be working."), None)?;
         }
     transition(link.db, id, MissionState::Cancelled, "cancelled by you")
 }
