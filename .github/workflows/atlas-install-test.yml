@@ -56,7 +56,7 @@ jobs:
             if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
             $i = Get-AtlasInstall
             if (-not $i) { throw 'no uninstall registry entry after install' }
-            "installed: $($i.DisplayName) $($i.DisplayVersion) at $($i.InstallLocation)"
+            Write-Host "installed: $($i.DisplayName) $($i.DisplayVersion) at $($i.InstallLocation)"
             return $i
           }
           function Get-AtlasExe($i) {
@@ -68,14 +68,16 @@ jobs:
             $p = Start-Process -FilePath $exe.FullName -PassThru
             Start-Sleep -Seconds $seconds
             if ($p.HasExited) { throw "Atlas exited early with code $($p.ExitCode)" }
-            "running after ${seconds}s: pid $($p.Id), working set $([math]::Round($p.WorkingSet64/1MB)) MB"
+            $p.Refresh()
+            Write-Host "running after ${seconds}s: $($exe.Name), pid $($p.Id), working set $([math]::Round($p.WorkingSet64/1MB)) MB"
             return $p
           }
           function Stop-Atlas($p) {
             # Close the window first (normal shutdown); force only if it does not exit.
             $null = $p.CloseMainWindow()
-            if (-not $p.WaitForExit(10000)) { Stop-Process -Id $p.Id -Force; 'had to force-stop' } else { 'closed normally' }
-            Get-Process | Where-Object { $_.Path -like "*ATLAS Co-Pilot*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+            if (-not $p.WaitForExit(10000)) { Stop-Process -Id $p.Id -Force; Write-Host 'did not exit after closing its window; force-stopped' } else { Write-Host "closed normally (exit code $($p.ExitCode))" }
+            Get-Process -Name 'atlas-desktop' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
           }
           function Sql($q) { python -c "import sqlite3,sys,json; c=sqlite3.connect(sys.argv[1]); print(json.dumps(c.execute(sys.argv[2]).fetchall()))" $Db $q }
           '@ | Set-Content helpers.ps1
