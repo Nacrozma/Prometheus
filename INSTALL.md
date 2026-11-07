@@ -9,7 +9,7 @@ OpenAI, OpenRouter, Mistral or Cerebras, or the free Ollama app if you'd rather 
 
 ## 1. Download
 
-**[⬇ Download ATLAS-Co-Pilot-Setup-x64.exe](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.2.0/ATLAS-Co-Pilot-Setup-x64.exe)**
+**[⬇ Download ATLAS-Co-Pilot-Setup-x64.exe](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.2.0/ATLAS-Co-Pilot-Setup-x64.exe)** (8.5 MB)
 
 All files for this version are on the [release page](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.2.0):
 
@@ -122,7 +122,13 @@ In PowerShell, in your Downloads folder:
 Get-FileHash .\ATLAS-Co-Pilot-Setup-x64.exe -Algorithm SHA256
 ```
 
-Compare the result with the value for `ATLAS-Co-Pilot-Setup-x64.exe` in `SHA256SUMS.txt` on the release page.
+For version 0.2.0 it must be:
+
+```
+85FBDA3BF819A9515C0693D7C86F858C3528F66A8E215287840C4579D0711108
+```
+
+(The same values are in `SHA256SUMS.txt` on the release page.)
 
 ---
 
