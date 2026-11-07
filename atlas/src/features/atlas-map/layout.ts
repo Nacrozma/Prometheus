@@ -52,11 +52,18 @@ export function layout(graph: Graph): Positioned[] {
   const groups = graph.nodes.filter((n) => n.kind === "group");
   const tasks = graph.nodes.filter((n) => n.kind === "task");
   const left = graph.nodes.filter((n) => ["memory", "storage", "project"].includes(n.kind));
+  const siblings = graph.nodes.filter((n) => n.kind === "sibling");
+  const missions = graph.nodes.filter((n) => n.kind === "mission");
+  const forge = graph.nodes.filter((n) => n.kind === "forge_project");
 
   placeRing(providers, 225, 315, 340, "model", 600);
   placeRing(groups, 40, 140, 420, "tool", 760);
   placeRing(tasks, -35, 35, 520);
   placeRing(left, 150, 210, 520);
+  // Siblings sit below the core, apart from Atlas's own parts; missions between them and the core.
+  placeRing(siblings, 80, 100, 700);
+  placeRing(missions, 60, 120, 380);
+  placeRing(forge, 215, 235, 560);
 
   // Integrations sit beyond the tools that require them.
   const placed = new Map(out.map((p) => [p.node.id, p]));

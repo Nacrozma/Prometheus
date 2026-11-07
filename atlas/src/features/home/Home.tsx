@@ -1,3 +1,4 @@
+import { PrometheusAvatar } from "@/features/siblings/avatar/PrometheusAvatar";
 import { Activity, ArrowRight, Brain, MessageSquarePlus, Orbit, Plug, ShieldAlert, Wrench } from "lucide-react";
 import { newConversation } from "@/app/CommandPalette";
 import { Emblem } from "@/components/Emblem";
@@ -36,6 +37,8 @@ export function HomePage() {
   const approvals = useAtlasQuery("approvals", api.pendingApprovals, ["approvals"]);
   const convs = useAtlasQuery("recent-convs", () => api.conversations({ limit: 6 }), ["conversations"]);
   const tasks = useAtlasQuery("recent-tasks", () => api.tasks(null, 6), ["tasks"]);
+  const siblings = useAtlasQuery("siblings", api.siblings, ["siblings"]);
+  const sibling = siblings.data?.find((s) => s.status === "paired");
 
   const name = settings.data?.companion.preferred_name.trim();
   const def = providers.data?.find((p) => p.id === settings.data?.default_provider_id) ?? providers.data?.[0];
@@ -70,6 +73,14 @@ export function HomePage() {
             <ShieldAlert className="size-5 text-warn" aria-hidden />
             <span className="font-medium">{pending === 1 ? "1 action is waiting for your approval" : `${pending} actions are waiting for your approval`}</span>
             <ArrowRight className="ml-auto size-4" aria-hidden />
+          </button>
+        )}
+
+        {sibling && (
+          <button onClick={() => ui.navigate("siblings")} className="mt-4 inline-flex items-center gap-2 rounded-full border border-line-2 bg-bg-2/70 px-3 py-1.5 text-xs text-text-2 hover:border-line-3 hover:text-text-1" aria-label={`Sibling: ${sibling.name}, ${sibling.connected ? "connected" : "not connected"}`}>
+            <PrometheusAvatar state={sibling.connected ? "idle" : "offline"} size={16} birth={false} />
+            <span>{sibling.name}</span>
+            <span className={sibling.connected ? "text-ok" : "text-text-3"}>· {sibling.connected ? "connected" : "not connected"}</span>
           </button>
         )}
 

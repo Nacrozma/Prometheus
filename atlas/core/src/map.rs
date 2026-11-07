@@ -327,6 +327,80 @@ impl Atlas {
             }
         }
 
+        // Forge projects Atlas can engineer in.
+        for fp in crate::forge::list_projects(&self.db).unwrap_or_default() {
+            let id = format!("forge:{}", fp.id);
+            nodes.push(Node {
+                id: id.clone(),
+                label: fp.name.clone(),
+                kind: "forge_project".into(),
+                status: if fp.exists { "idle".into() } else { "error".into() },
+                status_label: if fp.exists { fp.test_command.as_deref().map(|t| format!("tests: {t}")).unwrap_or_else(|| "Forge project".into()) } else { "folder missing".into() },
+                category: "forge".into(),
+                permission: None,
+                capabilities: vec![],
+                details: json!({"forge_project_id": fp.id, "root": fp.root_path}),
+                active: false,
+            });
+            edges.push(edge("core", &id, "engineers", false));
+        }
+
+        // Paired siblings only: an unpaired or revoked sibling is not part of Atlas's world.
+        let siblings = crate::sibling::list(&self.db).unwrap_or_default();
+        for sb in siblings.iter().filter(|s| s.status == "paired") {
+            let id = format!("sibling:{}", sb.id);
+            let tools = sb.capabilities.as_ref().and_then(|c| c["tools"].as_array()).map(|a| a.len()).unwrap_or(0);
+            nodes.push(Node {
+                id: id.clone(),
+                label: sb.name.clone(),
+                kind: "sibling".into(),
+                status: if sb.connected { "ok".into() } else { "error".into() },
+                status_label: if sb.connected { format!("connected · {tools} capabilities") } else { "not connected".into() },
+                category: "sibling".into(),
+                permission: None,
+                capabilities: sb.capabilities.as_ref().and_then(|c| c["modes"].as_array()).map(|a| a.iter().filter_map(|m| m.as_str().map(str::to_string)).collect()).unwrap_or_default(),
+                details: json!({"sibling_id": sb.id, "endpoint": sb.endpoint, "last_seen_at": sb.last_seen_at, "last_error": sb.last_error, "test_peer": sb.test_peer}),
+                active: false,
+            });
+            // The link edge exists only while a verified connection exists.
+            if sb.connected {
+                edges.push(edge("core", &id, "sibling_link", false));
+            }
+        }
+
+        // Missions that are open, or finished in the last day.
+        let cutoff = (chrono::Utc::now() - chrono::Duration::hours(24)).to_rfc3339();
+        for m in crate::sibling::missions::list(&self.db, 50).unwrap_or_default().into_iter().filter(|m| !m.state.is_terminal() || m.updated_at > cutoff).take(12) {
+            use crate::sibling::missions::MissionState as S;
+            let id = format!("mission:{}", m.id);
+            let running = m.state == S::Running;
+            nodes.push(Node {
+                id: id.clone(),
+                label: m.title.clone(),
+                kind: "mission".into(),
+                status: match m.state {
+                    S::Running => "active".into(),
+                    S::Failed => "error".into(),
+                    S::AwaitingApproval | S::NeedsUserInput | S::Reviewing => "warning".into(),
+                    S::Completed => "ok".into(),
+                    _ => "idle".into(),
+                },
+                status_label: format!("{} · {}", m.mode.as_str(), m.state.as_str().to_lowercase().replace('_', " ")),
+                category: "mission".into(),
+                permission: None,
+                capabilities: vec![],
+                details: json!({"mission_id": m.id, "mode": m.mode, "state": m.state, "remote_state": m.remote_state}),
+                active: running,
+            });
+            edges.push(edge("core", &id, "coordinates", running));
+            if let Some(sid) = &m.sibling_id && m.sent_at.is_some() {
+                edges.push(edge(&id, &format!("sibling:{sid}"), "delegated_to", running));
+            }
+            if let Some(fp) = &m.forge_project_id {
+                edges.push(edge(&id, &format!("forge:{fp}"), "works_in", false));
+            }
+        }
+
         // Drop edges whose endpoints are missing (e.g. a removed integration).
         let ids: BTreeSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
         let edges = edges.into_iter().filter(|e| ids.contains(e.source.as_str()) && ids.contains(e.target.as_str())).collect();

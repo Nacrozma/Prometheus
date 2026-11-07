@@ -40,6 +40,9 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         forge_session_create, forge_sessions, forge_set_discipline, forge_run, forge_run_cancel, forge_runs,
         forge_git_status, forge_git_diff, forge_git_log, forge_git_commit, forge_git_branch,
         forge_changes, forge_change_diff, forge_revert,
+        siblings_list, sibling_pair, sibling_refresh, sibling_revoke, sibling_forget,
+        missions_list, mission_detail, mission_create, mission_update, mission_transition, mission_send,
+        mission_message, mission_accept, mission_cancel, mission_sync, mission_note,
     ]
 }
 
@@ -789,4 +792,109 @@ fn forge_change_diff(state: State<'_, AppState>, change_id: String) -> R<String>
 #[tauri::command]
 fn forge_revert(state: State<'_, AppState>, change_id: String) -> R<atlas_core::forge::Change> {
     state.atlas.forge_revert(&change_id)
+}
+
+// ---------------- sibling link & mission ledger ----------------
+// The shell only passes typed requests through; pairing, authentication and the mission state
+// machine live in the core. Sibling secrets never reach the frontend.
+
+#[tauri::command]
+fn siblings_list(state: State<'_, AppState>) -> R<Vec<atlas_core::sibling::Sibling>> {
+    state.atlas.siblings()
+}
+
+#[tauri::command]
+async fn sibling_pair(state: State<'_, AppState>, endpoint: String, code: String) -> R<atlas_core::sibling::Sibling> {
+    state.atlas.clone().sibling_pair(&endpoint, &code).await
+}
+
+#[tauri::command]
+async fn sibling_refresh(state: State<'_, AppState>, id: String) -> R<atlas_core::sibling::Sibling> {
+    state.atlas.clone().sibling_refresh(&id).await
+}
+
+#[tauri::command]
+fn sibling_revoke(state: State<'_, AppState>, id: String) -> R<atlas_core::sibling::Sibling> {
+    state.atlas.sibling_revoke(&id)
+}
+
+#[tauri::command]
+fn sibling_forget(state: State<'_, AppState>, id: String) -> R<()> {
+    state.atlas.sibling_forget(&id)
+}
+
+#[tauri::command]
+fn missions_list(state: State<'_, AppState>) -> R<Vec<atlas_core::sibling::missions::Mission>> {
+    state.atlas.missions()
+}
+
+#[tauri::command]
+fn mission_detail(state: State<'_, AppState>, id: String) -> R<Value> {
+    state.atlas.mission_detail(&id)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissionIn {
+    title: String,
+    mode: atlas_core::sibling::missions::Mode,
+    objective: String,
+    shared_context: String,
+    sibling_id: Option<String>,
+    forge_project_id: Option<String>,
+    conversation_id: Option<String>,
+}
+
+#[tauri::command]
+fn mission_create(state: State<'_, AppState>, mission: MissionIn) -> R<atlas_core::sibling::missions::Mission> {
+    state.atlas.mission_create(atlas_core::sibling::missions::NewMission {
+        title: &mission.title,
+        mode: mission.mode,
+        objective: &mission.objective,
+        shared_context: &mission.shared_context,
+        sibling_id: mission.sibling_id.as_deref(),
+        forge_project_id: mission.forge_project_id.as_deref(),
+        conversation_id: mission.conversation_id.as_deref(),
+    })
+}
+
+#[tauri::command]
+fn mission_update(state: State<'_, AppState>, id: String, title: String, objective: String, shared_context: String, sibling_id: Option<String>) -> R<atlas_core::sibling::missions::Mission> {
+    state.atlas.mission_update_draft(&id, &title, &objective, &shared_context, sibling_id.as_deref())
+}
+
+#[tauri::command]
+fn mission_transition(state: State<'_, AppState>, id: String, to: atlas_core::sibling::missions::MissionState) -> R<atlas_core::sibling::missions::Mission> {
+    state.atlas.mission_transition(&id, to)
+}
+
+/// The owner approved sending the mission's shown payload to the sibling.
+#[tauri::command]
+async fn mission_send(state: State<'_, AppState>, id: String) -> R<atlas_core::sibling::missions::Mission> {
+    state.atlas.clone().mission_send(&id).await
+}
+
+#[tauri::command]
+async fn mission_message(state: State<'_, AppState>, id: String, text: String) -> R<atlas_core::sibling::missions::Mission> {
+    state.atlas.clone().mission_message(&id, &text).await
+}
+
+#[tauri::command]
+async fn mission_accept(state: State<'_, AppState>, id: String, note: String) -> R<atlas_core::sibling::missions::Mission> {
+    state.atlas.clone().mission_accept(&id, &note).await
+}
+
+#[tauri::command]
+async fn mission_cancel(state: State<'_, AppState>, id: String) -> R<atlas_core::sibling::missions::Mission> {
+    state.atlas.clone().mission_cancel(&id).await
+}
+
+#[tauri::command]
+async fn mission_sync(state: State<'_, AppState>, id: String) -> R<atlas_core::sibling::missions::Mission> {
+    state.atlas.clone().mission_sync(&id).await
+}
+
+#[tauri::command]
+fn mission_note(state: State<'_, AppState>, id: String, text: String) -> R<()> {
+    state.atlas.mission_note(&id, &text)
 }

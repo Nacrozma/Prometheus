@@ -13,7 +13,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Activity, Boxes, Brain, Cloud, Cpu, Database, FolderKanban, FolderOpen, Globe, Locate, Search, Wrench, X } from "lucide-react";
+import { Activity, Hammer, Target, Boxes, Brain, Cloud, Cpu, Database, FolderKanban, FolderOpen, Globe, Locate, Search, Wrench, X } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Emblem } from "@/components/Emblem";
@@ -23,6 +23,7 @@ import { cn, permissionLabel, relativeTime, titleCase } from "@/lib/format";
 import { useAtlasQuery } from "@/lib/query";
 import type { Graph, GraphNode } from "@/lib/schemas";
 import { useUi } from "@/state/ui";
+import { PrometheusAvatar } from "../siblings/avatar/PrometheusAvatar";
 import { layout } from "./layout";
 
 const statusTone: Record<string, Tone> = { ok: "ok", warning: "warn", error: "err", idle: "neutral", disabled: "neutral", active: "accent" };
@@ -37,6 +38,8 @@ const kindIcon: Record<string, typeof Cloud> = {
   storage: Database,
   project: FolderKanban,
   task: Activity,
+  mission: Target,
+  forge_project: Hammer,
 };
 
 type AtlasNodeData = { g: GraphNode; dimmed: boolean; matched: boolean };
@@ -62,6 +65,7 @@ const AtlasNode = memo(function AtlasNode({ data, selected }: NodeProps<Node<Atl
     <div
       className={cn(
         "w-[188px] rounded-md border bg-bg-2 px-3 py-2 shadow-2 transition-[opacity,box-shadow,border-color] duration-[var(--dur-med)]",
+        g.kind === "sibling" && "border-[#f5a524]/40",
         selected ? "border-accent shadow-[var(--glow-accent)]" : "border-line-2",
         g.active && "border-accent shadow-[var(--glow-accent)]",
         g.status === "disabled" && "opacity-60",
@@ -72,7 +76,11 @@ const AtlasNode = memo(function AtlasNode({ data, selected }: NodeProps<Node<Atl
       <Handle type="target" position={Position.Top} className="!opacity-0" />
       <Handle type="source" position={Position.Bottom} className="!opacity-0" />
       <div className="flex items-center gap-2">
-        <Icon className={cn("size-4 shrink-0", g.kind === "tool" || g.kind === "group" ? "text-accent" : g.kind === "provider" ? "text-info" : "text-accent-teal")} aria-hidden />
+        {g.kind === "sibling" ? (
+          <PrometheusAvatar state={g.status === "ok" ? "idle" : "offline"} size={18} birth={false} />
+        ) : (
+          <Icon className={cn("size-4 shrink-0", g.kind === "mission" ? "text-[#f5b14c]" : g.kind === "tool" || g.kind === "group" ? "text-accent" : g.kind === "provider" ? "text-info" : "text-accent-teal")} aria-hidden />
+        )}
         <p className="truncate text-xs font-semibold text-text-1">{g.label}</p>
       </div>
       <div className="mt-1 flex items-center gap-1.5">
@@ -94,8 +102,8 @@ const KIND_GROUPS: Record<KindFilter, string[] | null> = {
   all: null,
   ai: ["core", "provider", "model"],
   tools: ["core", "group", "tool", "integration"],
-  data: ["core", "memory", "storage", "project"],
-  tasks: ["core", "task", "tool", "group"],
+  data: ["core", "memory", "storage", "project", "forge_project"],
+  tasks: ["core", "task", "tool", "group", "mission", "sibling"],
 };
 type StatusFilter = "all" | "attention" | "active";
 
@@ -163,6 +171,8 @@ function Inspector({ g, graph, onClose }: { g: GraphNode; graph: Graph; onClose:
           {g.kind === "task" && typeof d.task_id === "string" && <Button size="sm" variant="subtle" onClick={() => ui.openTask(d.task_id as string)}>Open in Mission Control</Button>}
           {g.kind === "memory" && <Button size="sm" variant="subtle" onClick={() => ui.navigate("memory")}>Browse memory</Button>}
           {g.kind === "project" && <Button size="sm" variant="subtle" onClick={() => ui.navigate("projects")}>Open projects</Button>}
+          {(g.kind === "sibling" || g.kind === "mission") && <Button size="sm" variant="subtle" onClick={() => ui.navigate("siblings")}>Open Siblings</Button>}
+          {g.kind === "forge_project" && typeof d.forge_project_id === "string" && <Button size="sm" variant="subtle" onClick={() => { ui.setForgeProject(d.forge_project_id as string); ui.navigate("forge"); }}>Open in Forge</Button>}
           {g.id === "workspace" && <Button size="sm" variant="subtle" onClick={() => ui.navigate("files")}>Open files</Button>}
         </div>
         {neighbors.length > 0 && (
@@ -186,7 +196,7 @@ function Inspector({ g, graph, onClose }: { g: GraphNode; graph: Graph; onClose:
 }
 
 function MapCanvas() {
-  const graph = useAtlasQuery("graph", api.graph, ["registry", "providers", "tasks", "memory", "projects", "settings", "approvals"]);
+  const graph = useAtlasQuery("graph", api.graph, ["registry", "providers", "tasks", "memory", "projects", "settings", "approvals", "forge", "siblings", "missions"]);
   const focus = useUi((s) => s.focusMapNode);
   const [selected, setSelected] = useState<string | null>(focus);
   const [kind, setKind] = useState<KindFilter>("all");

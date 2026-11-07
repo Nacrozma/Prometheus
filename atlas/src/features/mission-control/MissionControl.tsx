@@ -1,3 +1,4 @@
+import { PrometheusAvatar } from "@/features/siblings/avatar/PrometheusAvatar";
 import { ChevronRight, MessageSquareText, Octagon, RotateCcw, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -155,6 +156,9 @@ export function MissionControlPage() {
   const [selected, setSelected] = useState<string | null>(focus);
   const tasks = useAtlasQuery(`tasks:${filter}`, () => api.tasks(filter === "all" || filter === "active" ? null : filter, 300), ["tasks"]);
   const list = (tasks.data ?? []).filter((t) => (filter === "active" ? ["created", "planning", "ready", "running", "verifying", "awaiting_approval"].includes(t.status) : true));
+  const missions = useAtlasQuery("missions", api.missions, ["missions"]);
+  const openMissions = (missions.data ?? []).filter((m) => !["COMPLETED", "FAILED", "CANCELLED"].includes(m.state));
+  const navigate = useUi((s) => s.navigate);
   useEffect(() => {
     if (focus) setSelected(focus);
   }, [focus]);
@@ -175,6 +179,22 @@ export function MissionControlPage() {
           <div className="overflow-x-auto border-b border-line-1 p-3">
             <Segmented label="Filter tasks" value={filter} onChange={setFilter} options={FILTERS} />
           </div>
+          {openMissions.length > 0 && (
+            <div className="border-b border-line-1 p-2">
+              <p className="px-2 pb-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-text-3">Shared missions</p>
+              <ul className="space-y-0.5">
+                {openMissions.slice(0, 5).map((m) => (
+                  <li key={m.id}>
+                    <button onClick={() => navigate("siblings")} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-bg-3">
+                      <PrometheusAvatar state={m.state === "RUNNING" ? "thinking" : "idle"} size={18} birth={false} />
+                      <span className="min-w-0 flex-1 truncate text-sm">{m.title}</span>
+                      <Badge tone="neutral">{m.mode === "delegated" ? "Prometheus" : m.mode === "consultation" ? "Prometheus advises" : "Atlas + Prometheus"}</Badge>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="flex-1 overflow-y-auto p-2">
             {tasks.loading && !tasks.data ? (
               <div className="space-y-2 p-1">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-14" />)}</div>
@@ -192,6 +212,7 @@ export function MissionControlPage() {
                       <span className="line-clamp-2 text-sm text-text-1">{t.request}</span>
                       <span className="flex items-center gap-2 text-xs text-text-3">
                         <TaskStatusPill status={t.status} />
+                        <span className="text-accent-strong">Atlas</span>
                         <span className="ml-auto">{t.step_count} steps · {relativeTime(t.created_at)}</span>
                       </span>
                     </button>

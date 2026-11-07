@@ -58,7 +58,7 @@ impl Discipline {
     /// still apply on top of this.
     pub fn allows(self, tool_id: &str) -> bool {
         const READ: &[&str] = &["forge.tree", "forge.read_file", "forge.search", "forge.git_status", "forge.git_diff", "forge.git_log"];
-        const GENERAL: &[&str] = &["calc.evaluate", "time.now", "text.transform", "memory.search", "memory.save", "tasks.status"];
+        const GENERAL: &[&str] = &["calc.evaluate", "time.now", "text.transform", "memory.search", "memory.save", "tasks.status", "sibling.consult"];
         if READ.contains(&tool_id) || GENERAL.contains(&tool_id) {
             return true;
         }

@@ -1,3 +1,4 @@
+import { PrometheusAvatar } from "@/features/siblings/avatar/PrometheusAvatar";
 import { AlertTriangle, Brain, ChevronRight, CircleCheck, CircleSlash, Info, RotateCcw, Wrench, XCircle } from "lucide-react";
 import { useState } from "react";
 import { CopyButton, Markdown } from "@/components/Markdown";
@@ -26,6 +27,7 @@ function ToolRun({ call, result, live }: { call: ToolCall; result?: ToolResult; 
         <span className="font-mono text-text-1">{toolId}</span>
         <span className="text-text-3">· {label}</span>
       </button>
+      {toolId === "sibling.consult" && result && !result.is_error && <SiblingAnswer content={result.content} />}
       {open && (
         <div className="space-y-2 border-t border-line-1 px-3 py-2.5">
           <div>
@@ -44,6 +46,28 @@ function ToolRun({ call, result, live }: { call: ToolCall; result?: ToolResult; 
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Prometheus's answer to a consultation, with his identity. The text is untrusted input. */
+function SiblingAnswer({ content }: { content: string }) {
+  const answer = (() => {
+    try {
+      return String((JSON.parse(content) as { answer?: unknown }).answer ?? "");
+    } catch {
+      return "";
+    }
+  })();
+  if (!answer) return null;
+  return (
+    <div className="flex gap-2.5 border-t border-[#f5a524]/20 bg-[#f5a524]/[0.04] px-3 py-2.5">
+      <PrometheusAvatar state="idle" size={26} birth={false} className="mt-0.5 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-semibold text-[#f5b14c]">Prometheus</p>
+        <div className="mt-0.5 text-sm"><Markdown text={answer} /></div>
+        <p className="mt-1 text-[0.68rem] text-text-3">From a separate assistant — untrusted input.</p>
+      </div>
     </div>
   );
 }

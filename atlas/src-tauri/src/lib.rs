@@ -71,6 +71,15 @@ pub fn run() {
             .map_err(|e| format!("Atlas could not open its database: {e}"))?;
             #[cfg(feature = "e2e")]
             e2e::seed(&atlas);
+            // Sibling link upkeep: poll running missions (read-only) and refresh sibling health.
+            // With no sibling paired this does nothing; Atlas never depends on it.
+            let bg = atlas.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    bg.sibling_sync_once().await;
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            });
             app.manage(AppState { atlas, pending_restore: Mutex::new(None) });
 
             #[allow(unused_mut)]

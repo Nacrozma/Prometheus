@@ -258,6 +258,57 @@ pub const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_forge_runs_project ON forge_runs(project_id, created_at);
     "#,
+    // v3 — sibling link (paired peers; secrets live in the OS credential store) and the mission ledger.
+    r#"
+    CREATE TABLE siblings (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('paired','revoked')),
+        remote_version TEXT,
+        adapter_version TEXT,
+        capabilities TEXT,
+        health TEXT,
+        last_seen_at TEXT,
+        last_error TEXT,
+        paired_at TEXT NOT NULL,
+        revoked_at TEXT
+    );
+
+    CREATE TABLE missions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        mode TEXT NOT NULL CHECK (mode IN ('consultation','collaborative','delegated')),
+        objective TEXT NOT NULL,
+        shared_context TEXT NOT NULL DEFAULT '',
+        state TEXT NOT NULL,
+        sibling_id TEXT,
+        forge_project_id TEXT,
+        conversation_id TEXT,
+        idempotency_key TEXT NOT NULL,
+        sent_at TEXT,
+        remote_state TEXT,
+        remote_seq INTEGER NOT NULL DEFAULT 0,
+        result_summary TEXT,
+        last_error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_missions_state ON missions(state);
+
+    -- Every message and state change is a row; remote events are de-duplicated by their sequence.
+    CREATE TABLE mission_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+        source TEXT NOT NULL CHECK (source IN ('atlas','prometheus','user','system')),
+        kind TEXT NOT NULL,
+        content TEXT NOT NULL,
+        remote_seq INTEGER,
+        created_at TEXT NOT NULL,
+        UNIQUE (mission_id, source, remote_seq)
+    );
+    CREATE INDEX idx_mission_events ON mission_events(mission_id, id);
+    "#,
 ];
 
 pub const CURRENT_SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

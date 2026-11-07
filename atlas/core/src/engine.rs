@@ -181,6 +181,18 @@ impl Atlas {
             Some(fp) => Some(crate::forge::scope(&self.db, fp, conv.discipline.unwrap_or(crate::forge::Discipline::Builder))?),
             None => None,
         };
+        // A Forge session linked to an open mission counts toward that mission's budget.
+        let mission_id: Option<String> = p.mission_id.clone().or_else(|| {
+            self.db.conn().ok().and_then(|c| {
+                c.query_row(
+                    "SELECT id FROM missions WHERE conversation_id = ?1 AND state NOT IN ('COMPLETED','FAILED','CANCELLED') ORDER BY updated_at DESC LIMIT 1",
+                    [&conv.id],
+                    |r| r.get(0),
+                )
+                .ok()
+            })
+        });
+        let p = &TurnParams { mission_id, ..p.clone() };
         let all_providers = providers::list(&self.db)?;
         let mut signals = providers::RouteSignals::from_text(text);
         if let Some(fs) = &forge_scope {

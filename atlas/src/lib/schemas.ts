@@ -540,3 +540,71 @@ export const ForgeChangeSchema = z.object({
   revert_blocker: z.string().nullable(),
 });
 export type ForgeChange = z.infer<typeof ForgeChangeSchema>;
+
+// ---------- sibling link & mission ledger ----------
+export const SiblingSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  endpoint: z.string(),
+  status: z.enum(["paired", "revoked"]),
+  remote_version: z.string().nullable(),
+  adapter_version: z.string().nullable(),
+  capabilities: z
+    .object({
+      modes: z.array(z.string()).optional(),
+      providers: z.array(z.string()).optional(),
+      tools: z.array(z.object({ name: z.string(), description: z.string().optional(), dangerous: z.boolean(), available_to_siblings: z.boolean() })).optional(),
+      dangerous_tools_policy: z.string().optional(),
+    })
+    .passthrough()
+    .nullable(),
+  health: z.object({ status: z.string().optional(), providers: z.array(z.string()).optional(), uptime_s: z.number().optional(), active_missions: z.number().optional() }).passthrough().nullable(),
+  last_seen_at: z.string().nullable(),
+  last_error: z.string().nullable(),
+  paired_at: z.string(),
+  revoked_at: z.string().nullable(),
+  connected: z.boolean(),
+  test_peer: z.boolean(),
+});
+export type Sibling = z.infer<typeof SiblingSchema>;
+
+export const MissionStateSchema = z.enum(["DRAFT", "PLANNED", "AWAITING_APPROVAL", "RUNNING", "REVIEWING", "COMPLETED", "PAUSED", "FAILED", "CANCELLED", "NEEDS_USER_INPUT"]);
+export type MissionState = z.infer<typeof MissionStateSchema>;
+export const MissionModeSchema = z.enum(["consultation", "collaborative", "delegated"]);
+export type MissionMode = z.infer<typeof MissionModeSchema>;
+export const MissionSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  mode: MissionModeSchema,
+  objective: z.string(),
+  shared_context: z.string(),
+  state: MissionStateSchema,
+  sibling_id: z.string().nullable(),
+  forge_project_id: z.string().nullable(),
+  conversation_id: z.string().nullable(),
+  sent_at: z.string().nullable(),
+  remote_state: z.string().nullable(),
+  remote_seq: z.number(),
+  result_summary: z.string().nullable(),
+  last_error: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type Mission = z.infer<typeof MissionSchema>;
+export const MissionEventSchema = z.object({
+  id: z.number(),
+  mission_id: z.string(),
+  source: z.enum(["atlas", "prometheus", "user", "system"]),
+  kind: z.string(),
+  content: z.string(),
+  remote_seq: z.number().nullable(),
+  created_at: z.string(),
+});
+export type MissionEvent = z.infer<typeof MissionEventSchema>;
+export const MissionDetailSchema = z.object({
+  mission: MissionSchema,
+  events: z.array(MissionEventSchema),
+  outgoing: z.object({ mission_id: z.string(), mode: z.string(), objective: z.string(), context: z.string() }),
+  atlas_spend_usd: z.number(),
+});
+export type MissionDetail = z.infer<typeof MissionDetailSchema>;

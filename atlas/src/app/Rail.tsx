@@ -1,4 +1,4 @@
-import { Activity, Brain, Hammer, FolderKanban, FolderOpen, Home, MessageSquareText, Mic, Octagon, Orbit, Plug, Settings2 } from "lucide-react";
+import { Activity, Brain, Cable, Hammer, FolderKanban, FolderOpen, Home, MessageSquareText, Mic, Octagon, Orbit, Plug, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { Emblem } from "@/components/Emblem";
 import { Tooltip } from "@/components/ui/primitives";
@@ -13,6 +13,7 @@ export const NAV: { route: Route; label: string; icon: typeof Home; shortcut: st
   { route: "companion", label: "Companion", icon: MessageSquareText, shortcut: "2" },
   { route: "map", label: "Atlas Map", icon: Orbit, shortcut: "3" },
   { route: "forge", label: "Atlas Forge", icon: Hammer, shortcut: "4" },
+  { route: "siblings", label: "Siblings", icon: Cable, shortcut: "" },
   { route: "mission", label: "Mission Control", icon: Activity, shortcut: "5" },
   { route: "projects", label: "Projects", icon: FolderKanban, shortcut: "6" },
   { route: "memory", label: "Memory", icon: Brain, shortcut: "7" },

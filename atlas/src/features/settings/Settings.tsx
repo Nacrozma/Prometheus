@@ -638,7 +638,7 @@ function DataSection({ s, save }: { s: Settings; save: (n: Settings) => Promise<
 }
 
 function DiagnosticsSection() {
-  const diag = useAtlasQuery("diag", api.diagnostics, ["providers", "registry", "tasks", "settings"]);
+  const diag = useAtlasQuery("diag", api.diagnostics, ["providers", "registry", "tasks", "settings", "forge", "siblings", "missions"]);
   const errors = useAtlasQuery("errors", () => api.recentErrors(40), ["tasks", "providers"]);
   const text = diag.data ? JSON.stringify({ diagnostics: diag.data, recent_events: errors.data ?? [] }, null, 2) : "";
   const d = diag.data as Record<string, Record<string, unknown>> | undefined;
@@ -651,6 +651,24 @@ function DiagnosticsSection() {
           <Panel className="p-4 text-sm"><p className="text-xs text-text-3">Credential store</p><StatusPill tone={d.credential_store?.ok ? "ok" : "err"} label={String(d.credential_store?.backend)} />{typeof d.credential_store?.detail === "string" && <p className="mt-1 text-xs text-err">{d.credential_store.detail}</p>}</Panel>
           <Panel className="p-4 text-sm"><p className="text-xs text-text-3">Tools</p><p>{String(d.tools?.available)} available of {String(d.tools?.registered)} registered</p></Panel>
           <Panel className="p-4 text-sm"><p className="text-xs text-text-3">Task engine</p><p>{String(d.task_engine?.active_turns)} active · {String(d.task_engine?.waiting_approvals)} waiting</p></Panel>
+          <Panel className="p-4 text-sm">
+            <p className="text-xs text-text-3">Atlas Forge</p>
+            <p>{String(d.forge?.projects)} project(s){Number(d.forge?.missing_folders) > 0 && <span className="text-err"> · {String(d.forge?.missing_folders)} folder(s) missing</span>}</p>
+            <StatusPill tone={d.forge?.git_available ? "ok" : "warn"} label={d.forge?.git_available ? "git found" : "git not found (history and commits unavailable)"} />
+          </Panel>
+          <Panel className="p-4 text-sm">
+            <p className="text-xs text-text-3">Sibling link</p>
+            {Number(d.sibling_link?.paired) === 0 ? (
+              <p className="text-text-2">No sibling paired (Atlas works on its own)</p>
+            ) : (
+              ((d.sibling_link?.siblings as { name: string; connected: boolean; last_error: string | null }[]) ?? []).map((x) => (
+                <div key={x.name}>
+                  <StatusPill tone={x.connected ? "ok" : "err"} label={`${x.name} · ${x.connected ? "connected" : "not connected"}`} />
+                  {x.last_error && <p className="mt-1 text-xs text-err">{x.last_error}</p>}
+                </div>
+              ))
+            )}
+          </Panel>
         </div>
       )}
       <div className="mt-6 flex flex-wrap items-center gap-2">

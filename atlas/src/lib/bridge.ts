@@ -214,6 +214,25 @@ export const api = {
   forgeChanges: (projectId: string) => call("forge_changes", { projectId }, z.array(S.ForgeChangeSchema)),
   forgeChangeDiff: (changeId: string) => call("forge_change_diff", { changeId }, z.string()),
   forgeRevert: (changeId: string) => call("forge_revert", { changeId }, S.ForgeChangeSchema),
+
+  siblings: () => call("siblings_list", {}, z.array(S.SiblingSchema)),
+  pairSibling: (endpoint: string, code: string) => call("sibling_pair", { endpoint, code }, S.SiblingSchema),
+  refreshSibling: (id: string) => call("sibling_refresh", { id }, S.SiblingSchema),
+  revokeSibling: (id: string) => call("sibling_revoke", { id }, S.SiblingSchema),
+  forgetSibling: (id: string) => call("sibling_forget", { id }, Void),
+  missions: () => call("missions_list", {}, z.array(S.MissionSchema)),
+  missionDetail: (id: string) => call("mission_detail", { id }, S.MissionDetailSchema),
+  createMission: (m: { title: string; mode: S.MissionMode; objective: string; sharedContext: string; siblingId: string | null; forgeProjectId: string | null; conversationId: string | null }) =>
+    call("mission_create", { mission: m }, S.MissionSchema),
+  updateMission: (id: string, title: string, objective: string, sharedContext: string, siblingId: string | null) =>
+    call("mission_update", { id, title, objective, sharedContext, siblingId }, S.MissionSchema),
+  missionTransition: (id: string, to: S.MissionState) => call("mission_transition", { id, to }, S.MissionSchema),
+  sendMission: (id: string) => call("mission_send", { id }, S.MissionSchema),
+  missionMessage: (id: string, text: string) => call("mission_message", { id, text }, S.MissionSchema),
+  acceptMission: (id: string, note: string) => call("mission_accept", { id, note }, S.MissionSchema),
+  cancelMission: (id: string) => call("mission_cancel", { id }, S.MissionSchema),
+  syncMission: (id: string) => call("mission_sync", { id }, S.MissionSchema),
+  missionNote: (id: string, text: string) => call("mission_note", { id, text }, Void),
 };
 
 export type Api = typeof api;

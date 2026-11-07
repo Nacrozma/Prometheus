@@ -1,3 +1,4 @@
+import { SiblingsPage } from "@/features/siblings/Siblings";
 import { ForgePage } from "@/features/forge/Forge";
 import { lazy, Suspense, useEffect } from "react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -66,6 +67,7 @@ export function Shell() {
             </Suspense>
           )}
           {route === "forge" && <ForgePage />}
+          {route === "siblings" && <SiblingsPage />}
           {route === "mission" && <MissionControlPage />}
           {route === "projects" && <ProjectsPage />}
           {route === "memory" && <MemoryPage />}

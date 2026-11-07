@@ -262,6 +262,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "hex",
+ "hmac",
  "jsonschema",
  "keyring",
  "regex",

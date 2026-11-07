@@ -97,6 +97,14 @@ pub trait ToolServices: Send + Sync {
     async fn diagnostics(&self) -> Value;
     async fn provider_health(&self) -> Value;
     fn task_status(&self, task_id: Option<&str>) -> Value;
+    /// Whether a paired sibling is reachable for consultation (None = available).
+    fn sibling_unavailable(&self) -> Option<String> {
+        Some("no sibling is paired".into())
+    }
+    /// Ask a paired sibling a question as a consultation mission and wait for its answer.
+    async fn sibling_consult(&self, _question: &str, _context: &str) -> Result<Value, String> {
+        Err("no sibling is paired".into())
+    }
 }
 
 pub struct ToolContext {

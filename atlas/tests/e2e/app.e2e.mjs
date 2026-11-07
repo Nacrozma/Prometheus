@@ -249,6 +249,17 @@ test("Atlas Forge: explorer, approved edit with revertible snapshot, terminal", 
   await shot("16-forge-terminal");
 });
 
+test("Siblings: honest unpaired state, nothing shown as connected", async () => {
+  await (await find(By.css('nav[aria-label="Main"] button[aria-label="Siblings"]'))).click();
+  await waitText("No sibling paired");
+  const state = await driver.executeScript("return document.querySelector('[data-avatar-state]')?.dataset.avatarState");
+  assert.equal(state, "offline");
+  await click("Pair with Prometheus");
+  await waitText("python sibling_adapter.py --pair");
+  await shot("17-siblings-pair");
+  await driver.actions().sendKeys(Key.ESCAPE).perform();
+});
+
 test("home dashboard reflects state", async () => {
   await go("1");
   await waitText("Recent conversations");
@@ -272,8 +283,9 @@ async function audit(page) {
 
 test("accessibility audit (axe-core) finds no serious or critical issues", async () => {
   const failures = {};
-  for (const [key, page] of [["1", "home"], ["2", "companion"], ["4", "forge"], ["5", "mission-control"], ["7", "memory"], ["9", "integrations"], [",", "settings"]]) {
-    await go(key);
+  for (const [key, page] of [["1", "home"], ["2", "companion"], ["4", "forge"], ["siblings", "siblings"], ["5", "mission-control"], ["7", "memory"], ["9", "integrations"], [",", "settings"]]) {
+    if (key === "siblings") await (await find(By.css('nav[aria-label="Main"] button[aria-label="Siblings"]'))).click();
+    else await go(key);
     await driver.sleep(500);
     const blocking = await audit(page);
     if (blocking.length) failures[page] = blocking;
