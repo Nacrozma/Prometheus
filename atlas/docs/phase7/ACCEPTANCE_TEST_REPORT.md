@@ -343,7 +343,16 @@ Each fix has a regression test, listed in PHASE_7_CHANGELOG.md.
 **CI:**
 * Run 15 (commit `3a75816`): green on Linux and macOS. **Failed on Windows** in `sibling_bridge`. That
   failure exposed S7.
-* The CI result for the S7 fix commit is in the final report.
+* Run 16 (run id 42373736417, commit `0429366`): **all 5 jobs green.**
+  * build on ubuntu-24.04, windows-latest and macos-latest;
+  * e2e on ubuntu-24.04 and windows-latest.
+* What run 16 shows:
+  * Windows `sibling_bridge`: 6 passed in 4.6 s with no adapter traceback, so these are real runs, not
+    skips.
+  * Windows Rust lib: 81 passed, 1 ignored. Linux has 83; the two extra tests are Unix-only.
+  * Windows Credential Manager round-trip: passed.
+  * Linux "Atlas with the real Prometheus runtime": passed.
+  * Installers built on all three OSes.
 
 ## 7. Manual steps for the owner
 
