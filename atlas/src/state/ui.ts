@@ -46,6 +46,9 @@ interface UiState {
   openTask: (id: string) => void;
   openMapNode: (id: string) => void;
   setPalette: (open: boolean) => void;
+  /** Play the introduction again (from Settings → About). Not persisted. */
+  introReplay: boolean;
+  setIntroReplay: (on: boolean) => void;
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -56,6 +59,8 @@ export const useUi = create<UiState>((set) => ({
   focusTaskId: null,
   focusMapNode: null,
   forgeProjectId: null,
+  introReplay: false,
+  setIntroReplay: (introReplay) => set({ introReplay }),
   setForgeProject: (forgeProjectId) => set({ forgeProjectId }),
   navigate: (route) => set({ route, paletteOpen: false }),
   openSettings: (settingsSection) => set({ route: "settings", settingsSection, paletteOpen: false }),

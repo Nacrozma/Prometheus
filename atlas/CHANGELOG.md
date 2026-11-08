@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.3.0 — 2026-11-08
+
+### Added
+- **First-launch introduction:**
+  - A deep-navy universe, ambient stars and the Atlas globe, then the creator's dedication and Atlas's
+    first words.
+  - Plays once, including once after upgrading from 0.2.x.
+  - Skip or Esc at any moment; replay from Settings → About.
+  - A still version under reduced motion.
+  - Works offline and never blocks startup.
+  - Details: `docs/ATLAS_FIRST_LAUNCH_EXPERIENCE.md`.
+- **Personality presets:**
+  - Professional, Friendly, Analytical, Concise, Detailed, Creative and Custom, in Settings → Companion
+    and onboarding.
+  - Presets set tone, length and initiative; adjusting those by hand makes the personality Custom.
+- **Custom instructions:**
+  - Up to 2000 characters, refused if they look like a key.
+  - Only Atlas's own model receives them, below its safety rules. They are never sent to Prometheus.
+- **Regenerate:**
+  - Replaces the last text reply in place (Ctrl/⌘+Shift+Enter), or tries again after a failed request.
+  - A reply that used tools is never regenerated, so no action can repeat; "Ask again" is offered instead.
+- **Copy conversation** as Markdown from the conversation menu.
+- **Esc stops** a running reply.
+
+### Fixed (Phase 7 acceptance testing; see `docs/phase7/`)
+- **Critical:** sibling missions could read or change Prometheus's private files and memory.
+  * The fix is in `sibling_adapter.py`: an allowlist of tools plus a per-mission workspace.
+  * Update the adapter on the Prometheus side.
+- A mission whose sibling became unreachable stayed "running". It is now paused with a reason, and its
+  status is checked read-only on reconnect.
+- Forge test runs could report stale results right after an edit (Python bytecode cache).
+- Routing could pick a model its vendor has shut down. Prices now show each model's availability.
+- On Windows, the adapter crashed with `--pair` when its output was redirected (code-page encoding).
+
 ## 0.2.0 — 2026-11-07
 
 ### Added

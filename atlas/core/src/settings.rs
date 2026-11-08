@@ -25,6 +25,15 @@ pub struct Settings {
     pub voice: VoiceSettings,
     pub default_project_id: Option<String>,
     pub forge: ForgeSettings,
+    /// The one-time introduction. Owned by the core: `settings_update` cannot change it.
+    pub first_launch: FirstLaunchState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct FirstLaunchState {
+    /// When the introduction finished or was skipped. `None` means it plays on the next launch.
+    pub completed_at: Option<String>,
 }
 
 
@@ -60,6 +69,62 @@ pub enum Effort {
     High,
 }
 
+/// Named personality presets. Each preset (except Custom) is a fixed combination of tone, length
+/// and initiative plus one style line. Personality never overrides honesty, privacy or safety.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Personality {
+    Professional,
+    Friendly,
+    Analytical,
+    Concise,
+    Detailed,
+    Creative,
+    /// The owner's own combination of tone, length and initiative.
+    Custom,
+}
+
+impl Personality {
+    pub const ALL: [Personality; 7] = [
+        Personality::Professional,
+        Personality::Friendly,
+        Personality::Analytical,
+        Personality::Concise,
+        Personality::Detailed,
+        Personality::Creative,
+        Personality::Custom,
+    ];
+
+    /// The tone, length and initiative a preset stands for. `None` for Custom.
+    pub fn axes(self) -> Option<(Tone, Verbosity, Proactivity)> {
+        Some(match self {
+            Personality::Professional => (Tone::Balanced, Verbosity::Balanced, Proactivity::Balanced),
+            Personality::Friendly => (Tone::Warm, Verbosity::Balanced, Proactivity::Proactive),
+            Personality::Analytical => (Tone::Precise, Verbosity::Detailed, Proactivity::Balanced),
+            Personality::Concise => (Tone::Precise, Verbosity::Concise, Proactivity::Reserved),
+            Personality::Detailed => (Tone::Balanced, Verbosity::Detailed, Proactivity::Proactive),
+            Personality::Creative => (Tone::Warm, Verbosity::Balanced, Proactivity::Proactive),
+            Personality::Custom => return None,
+        })
+    }
+
+    /// One line added to the system prompt. `None` for Custom.
+    pub fn style(self) -> Option<&'static str> {
+        Some(match self {
+            Personality::Professional => "Style: clear, courteous and businesslike.",
+            Personality::Friendly => "Style: friendly and conversational; plain words over jargon.",
+            Personality::Analytical => "Style: structured; state assumptions, weigh options, quantify where you can, and keep facts apart from inferences.",
+            Personality::Concise => "Style: minimal; answer first and skip preamble and pleasantries.",
+            Personality::Detailed => "Style: thorough; explain the reasoning and include examples and edge cases.",
+            Personality::Creative => "Style: imaginative; offer alternatives and fresh angles, and label speculation as speculation.",
+            Personality::Custom => return None,
+        })
+    }
+}
+
+/// Longest accepted custom-instructions text, in characters.
+pub const MAX_CUSTOM_INSTRUCTIONS: usize = 2000;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CompanionSettings {
@@ -72,6 +137,37 @@ pub struct CompanionSettings {
     pub effort: Effort,
     /// Show the provider's reasoning summary (where available) in a collapsed panel.
     pub show_reasoning_summary: bool,
+    /// The named preset. Kept consistent with tone/verbosity/proactivity (see `apply_personality`).
+    pub personality: Personality,
+    /// The owner's own instructions for Atlas's style and focus. Sent only to Atlas's own model,
+    /// never to a sibling; they cannot change honesty, safety or permission rules.
+    pub custom_instructions: String,
+}
+
+impl CompanionSettings {
+    /// A preset whose tone, length or initiative no longer match becomes Custom, so the label
+    /// never claims a preset the settings don't actually use.
+    pub fn reconcile(&mut self) {
+        if let Some(axes) = self.personality.axes()
+            && axes != (self.tone, self.verbosity, self.proactivity)
+        {
+            self.personality = Personality::Custom;
+        }
+    }
+
+    /// Merge an update from the UI. Choosing a different preset applies its tone, length and
+    /// initiative; changing one of those by hand turns the preset into Custom.
+    pub fn apply_personality(mut self, previous: &CompanionSettings) -> CompanionSettings {
+        if self.personality != previous.personality
+            && let Some((tone, verbosity, proactivity)) = self.personality.axes()
+        {
+            self.tone = tone;
+            self.verbosity = verbosity;
+            self.proactivity = proactivity;
+        }
+        self.reconcile();
+        self
+    }
 }
 
 impl Default for CompanionSettings {
@@ -83,6 +179,8 @@ impl Default for CompanionSettings {
             proactivity: Proactivity::Balanced,
             effort: Effort::Medium,
             show_reasoning_summary: true,
+            personality: Personality::Professional,
+            custom_instructions: String::new(),
         }
     }
 }
@@ -372,6 +470,13 @@ impl Settings {
         if self.companion.preferred_name.chars().count() > 60 {
             return Err(AtlasError::Validation("preferred name is too long".into()));
         }
+        let ci = &self.companion.custom_instructions;
+        if ci.chars().count() > MAX_CUSTOM_INSTRUCTIONS {
+            return Err(AtlasError::Validation(format!("custom instructions are limited to {MAX_CUSTOM_INSTRUCTIONS} characters")));
+        }
+        if crate::redact::contains_secret(ci) {
+            return Err(AtlasError::Validation("custom instructions look like they contain a key or password; remove it (keys belong in Integrations)".into()));
+        }
         let u = &self.usage;
         for (name, v) in [
             ("monthly budget", u.monthly_budget_usd),
@@ -402,10 +507,14 @@ impl Settings {
             .query_row("SELECT value FROM settings WHERE key = 'app'", [], |r| r.get(0))
             .map(Some)
             .or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })?;
-        match raw {
-            None => Ok(Settings::default()),
-            Some(s) => Ok(serde_json::from_str(&s).unwrap_or_default()),
-        }
+        let mut s: Settings = match raw {
+            None => Settings::default(),
+            Some(s) => serde_json::from_str(&s).unwrap_or_default(),
+        };
+        // Documents written before presets existed carry the default preset; if their tone,
+        // length or initiative differ from it, they are shown as Custom.
+        s.companion.reconcile();
+        Ok(s)
     }
 
     pub fn save(&self, db: &Db) -> Result<()> {
@@ -423,6 +532,51 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presets_apply_their_axes_and_hand_edits_become_custom() {
+        use super::Personality as P;
+        let base = CompanionSettings::default();
+        assert_eq!(base.personality, P::Professional);
+        assert_eq!(P::Professional.axes(), Some((base.tone, base.verbosity, base.proactivity)), "the default preset matches the old defaults");
+        // Choosing a preset applies it.
+        let next = CompanionSettings { personality: P::Concise, ..base.clone() }.apply_personality(&base);
+        assert_eq!((next.tone, next.verbosity, next.proactivity), P::Concise.axes().unwrap());
+        // Changing an axis by hand turns it into Custom; the axis is kept.
+        let edited = CompanionSettings { tone: Tone::Warm, ..next.clone() }.apply_personality(&next);
+        assert_eq!(edited.personality, P::Custom);
+        assert_eq!(edited.tone, Tone::Warm);
+        // Every preset except Custom has axes and a style line.
+        for p in P::ALL {
+            assert_eq!(p.axes().is_some(), p != P::Custom);
+            assert_eq!(p.style().is_some(), p != P::Custom);
+        }
+    }
+
+    #[test]
+    fn older_documents_with_changed_axes_load_as_custom() {
+        let db = Db::open_in_memory().unwrap();
+        // A pre-preset document: no `personality` field, tone changed from the default.
+        db.conn().unwrap().execute(
+            "INSERT INTO settings(key, value, updated_at) VALUES ('app', ?1, '')",
+            [r#"{"onboarding_completed":true,"companion":{"preferred_name":"","tone":"warm","verbosity":"balanced","proactivity":"balanced","effort":"medium","show_reasoning_summary":true}}"#],
+        ).unwrap();
+        let s = Settings::load(&db).unwrap();
+        assert_eq!(s.companion.personality, Personality::Custom);
+        assert_eq!(s.companion.tone, Tone::Warm, "the owner's choice is kept");
+        assert!(s.first_launch.completed_at.is_none(), "the introduction plays once after an upgrade");
+    }
+
+    #[test]
+    fn custom_instructions_are_bounded_and_never_hold_secrets() {
+        let mut s = Settings::default();
+        s.companion.custom_instructions = "x".repeat(MAX_CUSTOM_INSTRUCTIONS);
+        assert!(s.validate().is_ok());
+        s.companion.custom_instructions.push('x');
+        assert!(s.validate().is_err());
+        s.companion.custom_instructions = "My key is sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123".into();
+        assert!(s.validate().unwrap_err().to_string().contains("key or password"));
+    }
 
     #[test]
     fn defaults_roundtrip_and_partial_documents_fill_defaults() {

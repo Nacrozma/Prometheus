@@ -85,6 +85,17 @@ async function send(text) {
   }
 }
 
+/** The core's own command, called from the page (read-only checks). */
+const invoke = (cmd, args = {}) =>
+  driver.executeAsyncScript(
+    "const [c, a, done] = arguments; window.__TAURI_INTERNALS__.invoke(c, a).then(done, (e) => done({ __error: e }));",
+    cmd,
+    args,
+  );
+const exactButton = (text) => By.xpath(`//button[normalize-space()=${JSON.stringify(text)}]`);
+const isVisible = (sel) => driver.executeScript(`return document.querySelector(${JSON.stringify(sel)})?.style.visibility === "visible"`);
+const introGone = async () => (await driver.findElements(By.css("[data-first-launch]"))).length === 0;
+
 before(async () => {
   driver = await new Builder()
     .usingServer("http://127.0.0.1:4444/")
@@ -99,6 +110,25 @@ before(async () => {
 
 after(async () => {
   await driver?.quit();
+});
+
+test("the introduction plays once on first launch, with the dedication exactly as written", async () => {
+  await find(By.css("[data-first-launch='first']"), 30000);
+  await driver.wait(() => isVisible("[data-dedication]"), 15000, "dedication shown");
+  assert.equal(await (await find(By.css("[data-dedication]"))).getText(), "Created with love.");
+  await shot("00-introduction-dedication");
+  await driver.wait(() => isVisible("[data-welcome]"), 10000, "welcome shown");
+  assert.equal(await (await find(By.css("[data-welcome]"))).getText(), "Welcome. I'm Atlas. It's good to finally meet you.");
+  assert.equal(await isVisible("[data-dedication]"), false, "one line at a time");
+  // It ends by itself and the core records it.
+  await driver.wait(introGone, 15000, "introduction ended");
+  const s = await invoke("settings_get");
+  assert.ok(s.first_launch.completed_at, "completion recorded by the core");
+  // Reloading the window (as on the next launch) does not play it again.
+  await driver.navigate().refresh();
+  await waitText("Hello. I'm Atlas.", 30000);
+  await driver.sleep(1500);
+  assert.ok(await introGone(), "the introduction does not repeat");
 });
 
 test("first-run onboarding completes and personalises Atlas", async () => {
@@ -176,6 +206,35 @@ test("a running response can be stopped", async () => {
   await waitText("Stopped by you.", 15000);
 });
 
+test("Esc stops a running reply, and a text reply can be regenerated in place", async () => {
+  await send("wait for me");
+  await find(xpText("button", "Stop"));
+  await driver.sleep(300);
+  const stopped = await countText("Stopped by you.");
+  await driver.actions().sendKeys(Key.ESCAPE).perform();
+  await waitForMore("Stopped by you.", stopped, 15000);
+  await waitIdle();
+
+  await driver.actions().keyDown(Key.CONTROL).sendKeys("n").keyUp(Key.CONTROL).perform();
+  await driver.sleep(300);
+  await send("regenerate me");
+  await waitText("Echo: regenerate me", 20000);
+  await waitIdle();
+  const conv = (await invoke("conversations_list", { projectId: null, includeArchived: false, limit: 1, offset: 0 }))[0];
+  const before = (await invoke("conversation_messages", { id: conv.id })).filter((m) => m.role !== "notice");
+  assert.deepEqual(before.map((m) => m.role), ["user", "assistant"]);
+  // The action row appears on hover; click it directly.
+  await driver.executeScript("arguments[0].click()", await find(exactButton("Regenerate")));
+  await driver.wait(async () => {
+    const now = (await invoke("conversation_messages", { id: conv.id })).filter((m) => m.role !== "notice");
+    return now.length === 2 && now[1].role === "assistant" && now[1].id !== before[1].id;
+  }, 20000, "reply replaced");
+  const after = (await invoke("conversation_messages", { id: conv.id })).filter((m) => m.role !== "notice");
+  assert.equal(after[0].id, before[0].id, "the question is kept, not duplicated");
+  await waitIdle();
+  assert.equal(await countText("Echo: regenerate me"), 1, "one reply on screen");
+});
+
 test("Mission Control shows the real execution history", async () => {
   await go("5");
   await waitText("Execution timeline");
@@ -226,6 +285,32 @@ test("integrations show honest states and settings persist", async () => {
   await shot("13-settings-light");
   await click("Appearance");
   await click("Deep Orbit");
+});
+
+test("personality presets apply their settings, and the introduction replays as a still scene under reduced motion", async () => {
+  await go(",");
+  await click("Companion", "button");
+  await driver.findElement(By.xpath("//button[@role='radio'][.//span[normalize-space()='Concise']]")).click();
+  await driver.wait(async () => (await invoke("settings_get")).companion.personality === "concise", 5000, "preset saved");
+  const c = (await invoke("settings_get")).companion;
+  assert.deepEqual([c.tone, c.verbosity, c.proactivity], ["precise", "concise", "reserved"]);
+  await driver.findElement(By.xpath("//button[@role='radio'][.//span[normalize-space()='Professional']]")).click();
+  await driver.wait(async () => (await invoke("settings_get")).companion.personality === "professional", 5000);
+
+  await click("Appearance");
+  await driver.findElement(exactButton("Reduced")).click();
+  await driver.wait(async () => (await driver.executeScript("return document.documentElement.dataset.motion")) === "reduced", 5000);
+  await driver.findElement(exactButton("About")).click();
+  await click("Replay");
+  const intro = await find(By.css("[data-first-launch='replay']"));
+  assert.equal(await intro.getAttribute("data-reduced"), "true");
+  await driver.wait(() => isVisible("[data-dedication]"), 5000, "dedication shown");
+  assert.equal(await (await find(By.css("[data-dedication]"))).getText(), "Created with love.");
+  await shot("14-introduction-replay-reduced");
+  await driver.actions().sendKeys(Key.ESCAPE).perform();
+  await driver.wait(introGone, 5000, "skipped with Esc");
+  await click("Appearance");
+  await driver.findElement(exactButton("System")).click();
 });
 
 test("Atlas Forge: explorer, approved edit with revertible snapshot, terminal", async () => {

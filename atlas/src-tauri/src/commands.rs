@@ -21,7 +21,7 @@ type R<T> = Result<T, AtlasError>;
 pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         app_info, diagnostics, recent_errors, open_external, save_text_via_dialog,
-        settings_get, settings_update, workspace_pick, workspace_use_default, workspace_add_sample, workspace_browse, workspace_preview, workspace_reveal,
+        settings_get, settings_update, first_launch_complete, workspace_pick, workspace_use_default, workspace_add_sample, workspace_browse, workspace_preview, workspace_reveal,
         provider_templates, providers_list, provider_add, provider_update, provider_delete, provider_set_key, provider_clear_key, provider_test,
         integrations_list, integration_set_key, integration_clear_key, integration_set_enabled, integration_test,
         tools_list, tool_set_enabled,
@@ -175,6 +175,11 @@ fn settings_update(state: State<'_, AppState>, settings: Settings) -> R<Settings
         return Err(AtlasError::PermissionDenied("change the workspace folder with the folder picker".into()));
     }
     state.atlas.update_settings(settings)
+}
+
+#[tauri::command]
+fn first_launch_complete(state: State<'_, AppState>) -> R<Settings> {
+    state.atlas.complete_first_launch()
 }
 
 #[tauri::command]
@@ -408,7 +413,7 @@ async fn conversation_export(app: AppHandle, state: State<'_, AppState>, id: Str
 #[tauri::command]
 async fn chat_send(state: State<'_, AppState>, params: TurnParamsIn, on_event: Channel<TurnEvent>) -> R<TurnSummary> {
     let atlas = state.atlas.clone();
-    let p = TurnParams { conversation_id: params.conversation_id, text: params.text, provider_id: params.provider_id, model: params.model, budget_override: params.budget_override, mission_id: None };
+    let p = TurnParams { conversation_id: params.conversation_id, text: params.text, provider_id: params.provider_id, model: params.model, budget_override: params.budget_override, mission_id: None, regenerate: params.regenerate };
     atlas
         .send_message(p, Box::new(move |e| {
             let _ = on_event.send(e);
@@ -425,6 +430,8 @@ pub struct TurnParamsIn {
     model: Option<String>,
     #[serde(default)]
     budget_override: bool,
+    #[serde(default)]
+    regenerate: bool,
 }
 
 #[tauri::command]

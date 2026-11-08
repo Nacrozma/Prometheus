@@ -36,6 +36,11 @@ pub struct TurnParams {
     /// Mission this turn belongs to (for mission budgets and the ledger).
     #[serde(default)]
     pub mission_id: Option<String>,
+    /// Answer the conversation's last message again, replacing the reply that followed it.
+    /// `text` is ignored: the stored message is used. Refused when that reply used tools, so a
+    /// regenerate can never repeat an action.
+    #[serde(default)]
+    pub regenerate: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -123,11 +128,13 @@ impl Atlas {
 
     pub async fn send_message(&self, p: TurnParams, mut sink: TurnSink) -> Result<TurnSummary> {
         let text = p.text.trim().to_string();
-        if text.is_empty() {
-            return Err(AtlasError::Validation("message is empty".into()));
-        }
-        if text.chars().count() > MAX_USER_MESSAGE_CHARS {
-            return Err(AtlasError::Validation(format!("message is longer than {MAX_USER_MESSAGE_CHARS} characters")));
+        if !p.regenerate {
+            if text.is_empty() {
+                return Err(AtlasError::Validation("message is empty".into()));
+            }
+            if text.chars().count() > MAX_USER_MESSAGE_CHARS {
+                return Err(AtlasError::Validation(format!("message is longer than {MAX_USER_MESSAGE_CHARS} characters")));
+            }
         }
         let conv = conversations::get(&self.db, &p.conversation_id)?;
         let turn_id = new_id();
@@ -144,7 +151,16 @@ impl Atlas {
             );
         }
         let _guard = TurnGuard { atlas: self.arc(), turn_id: turn_id.clone() };
-        let result = self.run_turn(&turn_id, &conv, &text, &p, &cancel, &task_slot, &mut sink).await;
+        // Regenerate: done while this conversation's turn slot is held, so nothing else can
+        // append in between.
+        let (text, reuse) = if p.regenerate {
+            let (t, id) = conversations::take_last_reply(&self.db, &conv.id)?;
+            notify(&self.bus, Topic::Conversations, Some(&conv.id));
+            (t, Some(id))
+        } else {
+            (text, None)
+        };
+        let result = self.run_turn(&turn_id, &conv, &text, &p, reuse, &cancel, &task_slot, &mut sink).await;
         match result {
             Ok(s) => Ok(s),
             Err(e @ AtlasError::BudgetConfirmation(_)) => {
@@ -171,6 +187,7 @@ impl Atlas {
         conv: &conversations::Conversation,
         text: &str,
         p: &TurnParams,
+        reuse_user_message: Option<String>,
         cancel: &CancellationToken,
         task_slot: &Arc<Mutex<Option<String>>>,
         sink: &mut TurnSink,
@@ -281,19 +298,23 @@ impl Atlas {
         let local_time = chrono::Local::now().format("%A %Y-%m-%d %H:%M (UTC%:z)").to_string();
         let block = context::context_block(&local_time, &retrieved, &pinned);
         let sent_text = format!("{block}{text}");
-        let user_message_id = conversations::append(
-            &self.db,
-            &conv.id,
-            "user",
-            text,
-            Some(&[Part::Text { text: sent_text }]),
-            None,
-            None,
-            None,
-            "complete",
-            None,
-            None,
-        )?;
+        let user_message_id = match reuse_user_message {
+            // Regenerate: the stored message (with the context it was first sent with) is answered again.
+            Some(id) => id,
+            None => conversations::append(
+                &self.db,
+                &conv.id,
+                "user",
+                text,
+                Some(&[Part::Text { text: sent_text }]),
+                None,
+                None,
+                None,
+                "complete",
+                None,
+                None,
+            )?,
+        };
         if conv.message_count == 0 && conv.title == "New conversation" {
             let title: String = text.lines().next().unwrap_or(text).chars().take(60).collect();
             let _ = conversations::rename(&self.db, &conv.id, &title);

@@ -26,6 +26,8 @@ export const SettingsSchema = z.object({
     proactivity: z.enum(["reserved", "balanced", "proactive"]),
     effort: z.enum(["low", "medium", "high"]),
     show_reasoning_summary: z.boolean(),
+    personality: z.enum(["professional", "friendly", "analytical", "concise", "detailed", "creative", "custom"]),
+    custom_instructions: z.string(),
   }),
   default_provider_id: z.string().nullable(),
   default_model: z.string().nullable(),
@@ -68,8 +70,10 @@ export const SettingsSchema = z.object({
   voice: z.object({ enabled: z.boolean(), speak_responses: z.boolean(), language: z.string() }),
   default_project_id: z.string().nullable(),
   forge: z.object({ command_timeout_secs: z.number(), max_output_kb: z.number() }),
+  first_launch: z.object({ completed_at: z.string().nullable() }),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
+export type Personality = Settings["companion"]["personality"];
 
 // ---------- providers ----------
 export const ProviderKindSchema = z.enum(["anthropic", "openai", "openai_compatible", "ollama", "openrouter", "mistral", "cerebras", "mock"]);

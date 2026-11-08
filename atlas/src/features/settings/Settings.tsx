@@ -3,12 +3,13 @@ import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { applyAppearance } from "@/app/App";
 import { ConfirmDialog } from "@/components/ui/dialog";
-import { Badge, Button, ErrorNote, Input, Kbd, Panel, Segmented, Select, Skeleton, StatusPill, Switch } from "@/components/ui/primitives";
+import { Badge, Button, ErrorNote, Input, Kbd, Panel, Segmented, Select, Skeleton, StatusPill, Switch, Textarea } from "@/components/ui/primitives";
 import { api, AtlasError } from "@/lib/bridge";
 import { cn, formatTokens, formatUsd, permissionLabel, relativeTime } from "@/lib/format";
 import { useAtlasQuery } from "@/lib/query";
 import type { RoutingMode, Settings, Tier, TierModel } from "@/lib/schemas";
 import { SiblingSettingsSection } from "@/features/siblings/SiblingSettings";
+import { PersonalityPicker } from "@/features/companion/PersonalityPicker";
 import { useUi, type SettingsSection } from "@/state/ui";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
@@ -200,6 +201,8 @@ function Section({ id, s, save }: { id: SettingsSection; s: Settings; save: (n: 
             ["New conversation", ["Ctrl", "N"]],
             ["Go to section 1–9", ["Ctrl", "1…9"]],
             ["Settings", ["Ctrl", ","]],
+            ["Stop a running reply", ["Esc"]],
+            ["Regenerate the last reply", ["Ctrl", "Shift", "Enter"]],
             ["Send message", ["Enter"]],
             ["New line in message", ["Shift", "Enter"]],
             ["Search the map", ["Enter in map search"]],
@@ -218,6 +221,7 @@ function Section({ id, s, save }: { id: SettingsSection; s: Settings; save: (n: 
 
 function CompanionSection({ s, save }: { s: Settings; save: (n: Settings) => Promise<void> }) {
   const [name, setName] = useState(s.companion.preferred_name);
+  const [instructions, setInstructions] = useState(s.companion.custom_instructions);
   const projects = useAtlasQuery("projects", () => api.projects(false), ["projects"]);
   const c = s.companion;
   const set = (patch: Partial<Settings["companion"]>) => save({ ...s, companion: { ...c, ...patch } });
@@ -226,6 +230,27 @@ function CompanionSection({ s, save }: { s: Settings; save: (n: Settings) => Pro
       <Row title="Your name" desc="How Atlas addresses you. Leave empty to skip.">
         <Input aria-label="Your name" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} onBlur={() => name !== c.preferred_name && set({ preferred_name: name })} className="w-56" />
       </Row>
+      <div className="border-b border-line-1 py-4">
+        <p className="text-sm font-medium text-text-1">Personality</p>
+        <p className="mb-3 mt-0.5 text-xs text-text-3">A starting point for how Atlas talks. Adjusting tone, length or initiative below makes it Custom. Personality never overrides accuracy, privacy or safety.</p>
+        <PersonalityPicker value={c.personality} onChange={(personality) => set({ personality })} />
+      </div>
+      <div className="border-b border-line-1 py-4">
+        <label htmlFor="custom-instructions" className="text-sm font-medium text-text-1">Custom instructions</label>
+        <p className="mb-2 mt-0.5 text-xs text-text-3">
+          Anything Atlas should keep in mind, such as units, formats or focus areas. Only Atlas's own AI model sees these: they are never shared with Prometheus, and they cannot change Atlas's safety rules or permissions.
+        </p>
+        <Textarea
+          id="custom-instructions"
+          value={instructions}
+          maxLength={2000}
+          rows={4}
+          placeholder="For example: use metric units and British spelling."
+          onChange={(e) => setInstructions(e.target.value)}
+          onBlur={() => instructions !== c.custom_instructions && void set({ custom_instructions: instructions })}
+        />
+        <p className="mt-1 text-right text-[0.6875rem] text-text-3">{instructions.length} / 2000</p>
+      </div>
       <Row title="Tone">
         <Segmented label="Tone" value={c.tone} onChange={(tone) => set({ tone })} options={[{ value: "warm", label: "Warm" }, { value: "balanced", label: "Balanced" }, { value: "precise", label: "Precise" }]} />
       </Row>
@@ -708,6 +733,9 @@ function AboutSection() {
       <Row title="Data folder" desc={<span className="break-all font-mono">{i?.data_dir ?? "…"}</span>}><span /></Row>
       <Row title="Credential store"><span className="text-sm text-text-2">{i?.credential_backend}</span></Row>
       {i?.e2e_build && <Row title="Build" desc="Automated-test build with a scripted provider and in-memory keys. Not for real use."><Badge tone="warn">E2E test build</Badge></Row>}
+      <Row title="Introduction" desc="Play the introduction from Atlas's first launch again.">
+        <Button size="sm" onClick={() => useUi.getState().setIntroReplay(true)}>Replay</Button>
+      </Row>
       <Row title="Updates" desc="This version does not update itself. New versions are installed from a release package; your data folder is kept."><span /></Row>
     </Panel>
   );

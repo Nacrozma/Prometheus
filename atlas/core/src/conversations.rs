@@ -182,6 +182,32 @@ pub fn append(
     Ok(id)
 }
 
+/// For "regenerate": remove the reply that followed the conversation's last user message and
+/// return that message's text and id. Refused when the reply made tool calls (answering again
+/// could repeat an action) or when there is nothing to answer.
+pub fn take_last_reply(db: &Db, conversation_id: &str) -> Result<(String, String)> {
+    let rows = messages(db, conversation_id)?;
+    let Some(idx) = rows.iter().rposition(|m| m.role == "user") else {
+        return Err(AtlasError::Validation("there is no message to answer again".into()));
+    };
+    let after = &rows[idx + 1..];
+    let used_tools = after.iter().any(|m| {
+        m.role == "tool" || m.parts.as_ref().is_some_and(|ps| ps.iter().any(|p| matches!(p, Part::ToolCall { .. })))
+    });
+    if used_tools {
+        return Err(AtlasError::Conflict(
+            "the last reply used tools, so answering again could repeat those actions; use Ask again instead".into(),
+        ));
+    }
+    db.tx(|tx| {
+        for m in after {
+            tx.execute("DELETE FROM messages WHERE id = ?1 AND conversation_id = ?2", rusqlite::params![m.id, conversation_id])?;
+        }
+        Ok(())
+    })?;
+    Ok((rows[idx].content.clone(), rows[idx].id.clone()))
+}
+
 pub fn set_status(db: &Db, message_id: &str, status: &str) -> Result<()> {
     db.conn()?.execute("UPDATE messages SET status = ?1 WHERE id = ?2", rusqlite::params![status, message_id])?;
     Ok(())

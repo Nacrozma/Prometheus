@@ -142,7 +142,24 @@ impl Atlas {
         Settings::load(&self.db)
     }
 
-    pub fn update_settings(&self, new: Settings) -> Result<Settings> {
+    /// Record that the one-time introduction finished or was skipped. Idempotent: the first
+    /// completion time is kept.
+    pub fn complete_first_launch(&self) -> Result<Settings> {
+        let mut s = self.settings()?;
+        if s.first_launch.completed_at.is_none() {
+            s.first_launch.completed_at = Some(crate::storage::now());
+            s.save(&self.db)?;
+            audit::record(&self.db, "intro.completed", "info", None, None, json!({}));
+            notify(&self.bus, Topic::Settings, None);
+        }
+        Ok(s)
+    }
+
+    pub fn update_settings(&self, mut new: Settings) -> Result<Settings> {
+        let current = self.settings()?;
+        // The introduction's state belongs to the core; the UI cannot reset or forge it.
+        new.first_launch = current.first_launch.clone();
+        new.companion = new.companion.apply_personality(&current.companion);
         if let Some(ws) = &new.workspace_dir {
             let p = Path::new(ws);
             if !p.is_absolute() || !p.is_dir() {

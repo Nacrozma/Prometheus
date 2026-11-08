@@ -301,6 +301,7 @@ async fn consulting_prometheus_needs_approval_and_shares_only_the_approved_text(
     let p = a.add_provider(atlas_core::ai::ProviderKind::Mock, "Mock", "http://mock.local", Some("mock-model")).unwrap();
     let mut st = a.settings().unwrap();
     st.default_provider_id = Some(p.id);
+    st.companion.custom_instructions = "PRIVATE-CUSTOM-INSTRUCTIONS: call me captain".into();
     a.update_settings(st).unwrap();
     a.create_memory(None, atlas_core::memory::MemoryKind::Fact, "PRIVATE-ATLAS-MEMORY: my bank PIN hint is the cat", true).unwrap();
     a.sibling_pair(&format!("127.0.0.1:{}", ad.port), &ad.code).await.unwrap();
@@ -338,11 +339,13 @@ async fn consulting_prometheus_needs_approval_and_shares_only_the_approved_text(
     assert_eq!(d["outgoing"]["objective"], "Is WAL mode safe with one writer?");
     assert_eq!(d["outgoing"]["context"], "ONLY-THIS-CONTEXT");
     assert!(!d.to_string().contains("PRIVATE-ATLAS-MEMORY"), "Atlas's private memory never enters a mission");
+    assert!(!d.to_string().contains("PRIVATE-CUSTOM-INSTRUCTIONS"), "the owner's custom instructions never enter a mission");
     assert_eq!(d["mission"]["state"], "COMPLETED");
     // The model saw its own memory (Atlas's private context) but the sibling did not.
     {
         let reqs = mock.requests.lock().unwrap();
         assert!(serde_json::to_string(&reqs[0].messages).unwrap().contains("PRIVATE-ATLAS-MEMORY"));
+        assert!(reqs[0].system.contains("PRIVATE-CUSTOM-INSTRUCTIONS"), "Atlas's own model does get them");
         let answer = serde_json::to_string(&reqs[1].messages.last().unwrap().parts).unwrap();
         assert!(answer.contains("test backend") && answer.contains("untrusted"), "the answer comes back attributed and marked untrusted");
     }

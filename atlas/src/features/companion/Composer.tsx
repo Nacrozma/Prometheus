@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button, IconButton } from "@/components/ui/primitives";
 import { api, AtlasError } from "@/lib/bridge";
+import { modKey } from "./conversation";
 
 export function Composer({
   running,
@@ -66,7 +67,7 @@ export function Composer({
           disabled={disabled}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               submit();
             }
@@ -78,10 +79,12 @@ export function Composer({
           <IconButton label="Share a text file with Atlas" size="sm" onClick={attach} disabled={disabled}>
             <Paperclip className="size-4" aria-hidden />
           </IconButton>
-          <span className="ml-1 hidden text-[0.6875rem] text-text-3 sm:inline">Enter to send · Shift+Enter for a new line</span>
+          <span className="ml-1 hidden text-[0.6875rem] text-text-3 sm:inline">
+            {running ? "Esc to stop" : `Enter to send · Shift+Enter for a new line · ${modKey()}+Shift+Enter to regenerate`}
+          </span>
           <div className="ml-auto">
             {running ? (
-              <Button size="sm" variant="danger" onClick={onStop} icon={<Square className="size-3.5" aria-hidden />}>
+              <Button size="sm" variant="danger" onClick={onStop} icon={<Square className="size-3.5" aria-hidden />} title="Stop (Esc)" aria-keyshortcuts="Escape">
                 Stop
               </Button>
             ) : (

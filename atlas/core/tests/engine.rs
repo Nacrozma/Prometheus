@@ -681,3 +681,66 @@ async fn forge_reconstructor_adds_files_but_cannot_edit_or_overwrite() {
     let overwrite = serde_json::to_string(&reqs[3].messages.last().unwrap().parts).unwrap();
     assert!(overwrite.contains("may add files but not replace"), "{overwrite}");
 }
+
+#[tokio::test]
+async fn regenerate_replaces_a_text_reply_but_never_one_that_used_tools() {
+    let h = harness(vec![
+        MockProvider::text("First answer."),
+        MockProvider::text("Second answer."),
+        MockProvider::tool_call("c1", "calc_evaluate", json!({"expression": "6*7"})),
+        MockProvider::text("It is 42."),
+    ]);
+    async fn regenerate(h: &Harness) -> atlas_core::error::Result<atlas_core::engine::TurnSummary> {
+        h.atlas.send_message(TurnParams { conversation_id: h.conv.clone(), regenerate: true, ..Default::default() }, Box::new(|_| {})).await
+    }
+    assert_eq!(send(&h, "Say something").await.0.unwrap().outcome, "completed");
+
+    // Regenerate: the reply is replaced, the question is not duplicated, and the old reply is
+    // not sent back to the model.
+    assert_eq!(regenerate(&h).await.unwrap().outcome, "completed");
+    let msgs = h.atlas.messages(&h.conv).unwrap();
+    let said: Vec<(&str, &str)> = msgs.iter().filter(|m| m.role != "notice").map(|m| (m.role.as_str(), m.content.as_str())).collect();
+    assert_eq!(said, vec![("user", "Say something"), ("assistant", "Second answer.")]);
+    {
+        let reqs = h.mock.requests.lock().unwrap();
+        let second = serde_json::to_string(&reqs[1].messages).unwrap();
+        assert!(second.contains("Say something") && !second.contains("First answer."));
+    }
+
+    // A reply that ran a tool is never regenerated: answering again could repeat the action.
+    assert_eq!(send(&h, "What is 6 times 7?").await.0.unwrap().outcome, "completed");
+    let before = h.atlas.messages(&h.conv).unwrap().len();
+    let e = regenerate(&h).await.unwrap_err();
+    assert_eq!(e.code(), "conflict");
+    assert!(e.to_string().contains("used tools"), "{e}");
+    assert_eq!(h.atlas.messages(&h.conv).unwrap().len(), before, "nothing was removed");
+    assert_eq!(h.mock.requests.lock().unwrap().len(), 4, "no model request was made");
+}
+
+#[test]
+fn the_introduction_is_recorded_once_and_settings_updates_cannot_reset_it() {
+    let h = harness(vec![]);
+    assert!(h.atlas.settings().unwrap().first_launch.completed_at.is_none(), "a fresh profile plays the introduction");
+    let first = h.atlas.complete_first_launch().unwrap().first_launch.completed_at.unwrap();
+    let again = h.atlas.complete_first_launch().unwrap().first_launch.completed_at.unwrap();
+    assert_eq!(first, again, "completing twice keeps the first time");
+    // The UI sends whole settings documents; it cannot clear or forge the introduction state.
+    let mut s = h.atlas.settings().unwrap();
+    s.first_launch.completed_at = None;
+    assert_eq!(h.atlas.update_settings(s).unwrap().first_launch.completed_at.as_deref(), Some(first.as_str()));
+}
+
+#[test]
+fn choosing_a_personality_through_settings_applies_its_tone_length_and_initiative() {
+    use atlas_core::settings::{Personality, Proactivity, Tone, Verbosity};
+    let h = harness(vec![]);
+    let mut s = h.atlas.settings().unwrap();
+    s.companion.personality = Personality::Concise;
+    let saved = h.atlas.update_settings(s).unwrap();
+    assert_eq!((saved.companion.tone, saved.companion.verbosity, saved.companion.proactivity), (Tone::Precise, Verbosity::Concise, Proactivity::Reserved));
+    let mut s = saved.clone();
+    s.companion.verbosity = Verbosity::Detailed;
+    let saved = h.atlas.update_settings(s).unwrap();
+    assert_eq!(saved.companion.personality, Personality::Custom, "a hand edit is shown as Custom");
+    assert_eq!(h.atlas.settings().unwrap().companion.personality, Personality::Custom);
+}

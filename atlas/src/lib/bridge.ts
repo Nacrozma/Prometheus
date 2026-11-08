@@ -55,6 +55,8 @@ export const api = {
 
   settings: () => call("settings_get", {}, S.SettingsSchema),
   updateSettings: (settings: S.Settings) => call("settings_update", { settings }, S.SettingsSchema),
+  /** Record that the one-time introduction finished or was skipped (idempotent). */
+  completeFirstLaunch: () => call("first_launch_complete", {}, S.SettingsSchema),
   pickWorkspace: () => call("workspace_pick", {}, Opt(S.SettingsSchema)),
   useDefaultWorkspace: () => call("workspace_use_default", {}, S.SettingsSchema),
   addSampleFile: () => call("workspace_add_sample", {}, z.string()),
@@ -117,7 +119,7 @@ export const api = {
 
   /** Stream a turn. `onEvent` receives validated events; malformed events are dropped and logged. */
   send: (
-    params: { conversationId: string; text: string; providerId?: string | null; model?: string | null; budgetOverride?: boolean },
+    params: { conversationId: string; text: string; providerId?: string | null; model?: string | null; budgetOverride?: boolean; regenerate?: boolean },
     onEvent: (e: S.TurnEvent) => void,
   ) => {
     const channel = new Channel<unknown>();
@@ -135,6 +137,7 @@ export const api = {
           providerId: params.providerId ?? null,
           model: params.model ?? null,
           budgetOverride: params.budgetOverride ?? false,
+          regenerate: params.regenerate ?? false,
         },
         onEvent: channel,
       },

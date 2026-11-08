@@ -27,7 +27,7 @@ export interface TurnState {
   budgetPrompt?: { text: string; message: string; opts?: SendOpts };
 }
 
-type SendOpts = { providerId?: string | null; model?: string | null };
+type SendOpts = { providerId?: string | null; model?: string | null; regenerate?: boolean };
 
 export const empty = (): TurnState => ({ running: false, text: "", reasoning: "", tools: [], notices: [], revision: 0 });
 
@@ -100,12 +100,12 @@ export const useTurns = create<TurnsStore>((set, get) => ({
     patch((s) => ({ ...empty(), revision: s.revision + 1, running: true }));
     try {
       await api.send(
-        { conversationId, text, providerId: opts?.providerId, model: opts?.model, budgetOverride: opts?.budgetOverride },
+        { conversationId, text, providerId: opts?.providerId, model: opts?.model, budgetOverride: opts?.budgetOverride, regenerate: opts?.regenerate },
         (e) => patch((s) => reduce(s, e)),
       );
     } catch (e) {
       if (e instanceof AtlasError && e.code === "budget_confirmation_required") {
-        const held = { text, message: e.message, opts: { providerId: opts?.providerId, model: opts?.model } };
+        const held = { text, message: e.message, opts: { providerId: opts?.providerId, model: opts?.model, regenerate: opts?.regenerate } };
         patch((s) => ({ ...s, running: false, outcome: undefined, error: undefined, budgetPrompt: held }));
         return;
       }

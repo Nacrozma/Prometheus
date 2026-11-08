@@ -5,10 +5,13 @@ import { Toaster } from "sonner";
 import { Emblem } from "@/components/Emblem";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Button } from "@/components/ui/primitives";
+import { FirstLaunch } from "@/features/first-launch/FirstLaunch";
+import { shouldPlayAtStartup } from "@/features/first-launch/sequence";
 import { Onboarding } from "@/features/onboarding/Onboarding";
 import { api, isTauri } from "@/lib/bridge";
 import { useAtlasQuery } from "@/lib/query";
 import type { Settings } from "@/lib/schemas";
+import { useUi } from "@/state/ui";
 import { Shell } from "./Shell";
 
 /** Apply appearance settings to the document root (theme, motion, font scale). */
@@ -62,6 +65,10 @@ export function App() {
   const [minDelayDone, setMinDelayDone] = useState(false);
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
   const [splashGone, setSplashGone] = useState(false);
+  // The introduction: decided once from the stored state, so finishing it doesn't re-trigger it.
+  const [introAtStartup, setIntroAtStartup] = useState<boolean | null>(null);
+  const introReplay = useUi((s) => s.introReplay);
+  const setIntroReplay = useUi((s) => s.setIntroReplay);
 
   useEffect(() => {
     const motionReduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -72,7 +79,8 @@ export function App() {
   useEffect(() => {
     applyAppearance(settings.data);
     if (settings.data && onboardingDone === null) setOnboardingDone(settings.data.onboarding_completed);
-  }, [settings.data, onboardingDone]);
+    if (settings.data && introAtStartup === null) setIntroAtStartup(shouldPlayAtStartup(settings.data.first_launch.completed_at));
+  }, [settings.data, onboardingDone, introAtStartup]);
 
   useEffect(() => {
     const mq = window.matchMedia?.("(prefers-color-scheme: light)");
@@ -91,8 +99,11 @@ export function App() {
 
   if (!isTauri()) return <NotInDesktop />;
 
+  const intro = settings.data ? (introAtStartup ? "first" : introReplay ? "replay" : null) : null;
+
   return (
     <RadixTooltip.Provider>
+      <div className="h-full" inert={intro !== null}>
       {settings.error && !settings.data ? (
         <div className="grid h-full place-items-center p-8">
           <div className="max-w-md text-center">
@@ -110,6 +121,14 @@ export function App() {
           <Shell />
         </ErrorBoundary>
       ) : null}
+      </div>
+      {intro && (
+        <FirstLaunch
+          key={intro}
+          mode={intro}
+          onDone={() => (intro === "first" ? setIntroAtStartup(false) : setIntroReplay(false))}
+        />
+      )}
       {!splashGone && <Splash leaving={ready} />}
       <Toaster
         position="bottom-center"

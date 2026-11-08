@@ -1,10 +1,11 @@
 import { PrometheusAvatar } from "@/features/siblings/avatar/PrometheusAvatar";
-import { AlertTriangle, Brain, ChevronRight, CircleCheck, CircleSlash, Info, RotateCcw, Wrench, XCircle } from "lucide-react";
+import { AlertTriangle, Brain, ChevronRight, CircleCheck, CircleSlash, Info, RefreshCw, RotateCcw, Wrench, XCircle } from "lucide-react";
 import { useState } from "react";
 import { CopyButton, Markdown } from "@/components/Markdown";
 import { Badge } from "@/components/ui/primitives";
 import { cn, relativeTime } from "@/lib/format";
 import type { Message, Part } from "@/lib/schemas";
+import { canRegenerate, lastQuestionUnanswered, modKey } from "./conversation";
 
 type ToolCall = Extract<Part, { type: "tool_call" }>;
 type ToolResult = Extract<Part, { type: "tool_result" }>;
@@ -96,7 +97,19 @@ function Notice({ m }: { m: Message }) {
   );
 }
 
-export function Thread({ messages, onAskAgain, canAskAgain, running = false }: { messages: Message[]; onAskAgain: (text: string) => void; canAskAgain: boolean; running?: boolean }) {
+export function Thread({
+  messages,
+  onAskAgain,
+  onRegenerate,
+  canAskAgain,
+  running = false,
+}: {
+  messages: Message[];
+  onAskAgain: (text: string) => void;
+  onRegenerate?: () => void;
+  canAskAgain: boolean;
+  running?: boolean;
+}) {
   // Pair each assistant message's tool calls with the results in the tool message that follows it
   // (call ids are only unique within one exchange).
   const resultsFor = new Map<string, Map<string, ToolResult>>();
@@ -108,6 +121,8 @@ export function Thread({ messages, onAskAgain, canAskAgain, running = false }: {
     resultsFor.set(m.id, map);
   });
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  const regen = canAskAgain && onRegenerate && canRegenerate(messages);
+  const actionCls = "inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 hover:bg-bg-4 hover:text-text-1";
 
   return (
     <ol className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 py-6" aria-label="Conversation">
@@ -151,19 +166,28 @@ export function Thread({ messages, onAskAgain, canAskAgain, running = false }: {
                 {m.status === "truncated" && <Badge tone="warn">cut off at length limit</Badge>}
                 {m.status === "refused" && <Badge tone="warn">declined by model</Badge>}
                 <CopyButton text={m.content} />
-                {canAskAgain && lastUser && m === messages.filter((x) => x.role === "assistant").at(-1) && (
-                  <button
-                    onClick={() => onAskAgain(lastUser.content)}
-                    className="inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 hover:bg-bg-4 hover:text-text-1"
-                  >
-                    <RotateCcw className="size-3.5" aria-hidden /> Ask again
-                  </button>
-                )}
+                {canAskAgain && lastUser && m === messages.filter((x) => x.role === "assistant").at(-1) &&
+                  (regen ? (
+                    <button onClick={onRegenerate} className={actionCls} title={`Replace this reply with a new one (${modKey()}+Shift+Enter)`} aria-keyshortcuts="Control+Shift+Enter">
+                      <RefreshCw className="size-3.5" aria-hidden /> Regenerate
+                    </button>
+                  ) : (
+                    <button onClick={() => onAskAgain(lastUser.content)} className={actionCls} title="This reply used tools, so it is kept; the question is asked again below">
+                      <RotateCcw className="size-3.5" aria-hidden /> Ask again
+                    </button>
+                  ))}
               </div>
             )}
           </li>
         );
       })}
+      {regen && lastQuestionUnanswered(messages) && (
+        <li className="flex justify-end">
+          <button onClick={onRegenerate} className={cn(actionCls, "text-xs text-text-3")} aria-keyshortcuts="Control+Shift+Enter">
+            <RefreshCw className="size-3.5" aria-hidden /> Try again
+          </button>
+        </li>
+      )}
     </ol>
   );
 }

@@ -7,6 +7,7 @@ import { applyAppearance } from "@/app/App";
 import { Emblem } from "@/components/Emblem";
 import { Badge, Button, Field, Input, Segmented, StatusPill } from "@/components/ui/primitives";
 import { AddProviderForm } from "@/features/integrations/providerUi";
+import { PersonalityPicker } from "@/features/companion/PersonalityPicker";
 import { api, AtlasError } from "@/lib/bridge";
 import { cn } from "@/lib/format";
 import { useAtlasQuery } from "@/lib/query";
@@ -110,17 +111,9 @@ export function Onboarding({ settings, onDone }: { settings: Settings; onDone: (
               <Field label="What should Atlas call you?" htmlFor="ob-name" hint="Leave empty if you'd rather not say.">
                 <Input id="ob-name" value={c.preferred_name} maxLength={60} onChange={(e) => setDraft({ ...draft, companion: { ...c, preferred_name: e.target.value } })} />
               </Field>
-              <div className="grid gap-5 sm:grid-cols-3">
-                <Field label="Tone">
-                  <Segmented label="Tone" value={c.tone} onChange={(tone) => setDraft({ ...draft, companion: { ...c, tone } })} options={[{ value: "warm", label: "Warm" }, { value: "balanced", label: "Balanced" }, { value: "precise", label: "Precise" }]} />
-                </Field>
-                <Field label="Answers">
-                  <Segmented label="Answer length" value={c.verbosity} onChange={(verbosity) => setDraft({ ...draft, companion: { ...c, verbosity } })} options={[{ value: "concise", label: "Concise" }, { value: "balanced", label: "Balanced" }, { value: "detailed", label: "Detailed" }]} />
-                </Field>
-                <Field label="Initiative">
-                  <Segmented label="Initiative" value={c.proactivity} onChange={(proactivity) => setDraft({ ...draft, companion: { ...c, proactivity } })} options={[{ value: "reserved", label: "Reserved" }, { value: "balanced", label: "Balanced" }, { value: "proactive", label: "Proactive" }]} />
-                </Field>
-              </div>
+              <Field label="Personality" hint="A starting point. Fine-tune tone, length and initiative later in Settings → Companion.">
+                <PersonalityPicker value={c.personality} includeCustom={false} onChange={(personality) => setDraft({ ...draft, companion: { ...c, personality } })} />
+              </Field>
               <Field label="Theme">
                 <Segmented
                   label="Theme"

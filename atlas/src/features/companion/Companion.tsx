@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Download, FolderInput, MessageSquarePlus, MoreHorizontal, Pencil, Plug, Search, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Copy, Download, FolderInput, MessageSquarePlus, MoreHorizontal, Pencil, Plug, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { newConversation } from "@/app/CommandPalette";
@@ -16,6 +16,7 @@ import { BudgetPrompt } from "@/components/BudgetPrompt";
 import { LiveTurn } from "./LiveTurn";
 import { ModelPicker, type ModelChoice } from "./ModelPicker";
 import { Thread } from "./Thread";
+import { canRegenerate, conversationToMarkdown } from "./conversation";
 
 const SUGGESTIONS = [
   "Help me plan my week — ask me what's on it first.",
@@ -157,6 +158,19 @@ function ConversationActions({ conv }: { conv: Conversation }) {
           >
             <Download className="size-4" aria-hidden /> Export as Markdown
           </button>
+          <button
+            role="menuitem"
+            className={itemCls}
+            onClick={() =>
+              (setMenu(false),
+              act(async () => {
+                const msgs = await api.messages(conv.id);
+                await navigator.clipboard.writeText(conversationToMarkdown(conv.title, msgs));
+              }, "Conversation copied as Markdown"))
+            }
+          >
+            <Copy className="size-4" aria-hidden /> Copy conversation
+          </button>
           <button role="menuitem" className={itemCls} onClick={() => (setMenu(false), act(() => api.archiveConversation(conv.id, !conv.archived), conv.archived ? "Restored" : "Archived"))}>
             {conv.archived ? <ArchiveRestore className="size-4" aria-hidden /> : <Archive className="size-4" aria-hidden />} {conv.archived ? "Unarchive" : "Archive"}
           </button>
@@ -246,6 +260,30 @@ export function CompanionPage() {
     void send(id, text, choice);
   };
 
+  const msgs = messages.data ?? [];
+  const regenerateOk = Boolean(activeId) && !running && canRegenerate(msgs);
+  const regenerate = () => {
+    if (activeId && regenerateOk) void send(activeId, "", { ...choice, regenerate: true });
+  };
+
+  // Shortcuts: Esc stops a running reply; Ctrl/⌘+Shift+Enter regenerates the last one.
+  const keys = useRef({ running, regenerate, stop: () => activeId && void cancel(activeId) });
+  keys.current = { running, regenerate, stop: () => activeId && void cancel(activeId) };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || document.querySelector("[role=dialog]")) return;
+      if (e.key === "Escape" && keys.current.running) {
+        e.preventDefault();
+        keys.current.stop();
+      } else if (e.key === "Enter" && e.shiftKey && (e.ctrlKey || e.metaKey) && !keys.current.running) {
+        e.preventDefault();
+        keys.current.regenerate();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const transient = useMemo(() => (turn?.running ? turn.notices.filter((n) => n.level === "warn") : []), [turn]);
 
   return (
@@ -284,7 +322,7 @@ export function CompanionPage() {
             </div>
           ) : (
             <>
-              <Thread messages={messages.data ?? []} canAskAgain={!running} running={running} onAskAgain={(t) => onSend(t)} />
+              <Thread messages={msgs} canAskAgain={!running} running={running} onAskAgain={(t) => onSend(t)} onRegenerate={regenerate} />
               {transient.map((n, i) => (
                 <p key={i} className="mx-auto mb-2 max-w-3xl px-6 text-xs text-warn">{n.text}</p>
               ))}

@@ -25,7 +25,7 @@ from earlier reports.
 | Prometheus solar avatar (WebGL2 port, states, reduced motion, fallback) | Implemented | `features/siblings/avatar/*`; shader matches the original line for line |
 | Avatar states beyond idle/thinking/speaking/adapting/offline (connecting, receiving, engineering, running tests, awaiting approval, reporting, error, paused) | Partial | 5 render states are mapped from real link and mission state; finer states need a richer mapping, not new shaders |
 | Splash / first-run onboarding | Implemented | `features/onboarding`, `App.tsx` splash |
-| **Cinematic first-launch with "Created with love."** | Missing | New. Must run once, be replayable, skippable and reduced-motion aware, and work offline |
+| **Cinematic first-launch with "Created with love."** | Implemented (0.3.0) | `features/first-launch/*`; runs once (core-owned state), Skip/Esc, replay in Settings → About, still scene under reduced motion; the voice ring joins it in Stage 2 |
 | **Electric-blue audio-reactive voice ring** | Missing | New renderer; depends on real voice output (below) |
 
 ### Companion and conversation
@@ -34,11 +34,11 @@ from earlier reports.
 |---|---|---|
 | Streaming chat, Markdown, code blocks, tables | Implemented | `features/companion/*`, `components/Markdown.tsx` |
 | History, search, rename, archive, export | Implemented | `conversations.rs`, Companion list, command palette |
-| Retry / ask again | Partial | "Ask again" exists; no regenerate-in-place or response branching |
+| Retry / regenerate | Implemented (0.3.0) | Regenerate in place for text replies (never for replies that used tools); Try again after a failure; Ctrl/⌘+Shift+Enter; Esc stops. No response branching |
 | Per-conversation model / provider switch | Implemented | Companion model picker; routing tiers |
 | Long-context management | Implemented | `context::fit_history`, with a notice when old turns are dropped |
 | Attachments | Partial | File share via native dialog (grants); no drag-and-drop, no PDF/Office parsing |
-| Personality (tone, verbosity, proactivity, name) | Partial | Settings → Companion has 3 axes plus a name; no named presets (Professional/Creative…) and no custom-instructions box |
+| Personality (presets, axes, name, custom instructions) | Implemented (0.3.0) | Seven presets owned by the core; custom instructions (2000 chars, secret-checked, never sent to Prometheus) |
 
 ### Voice and desktop presence
 
@@ -154,7 +154,7 @@ from earlier reports.
 introduces the ring) → Companion home polish. Notifications and the Trust Center depend only on existing
 events.
 
-## 4. Proposed Stage 1: Companion foundation and the first-launch dedication
+## 4. Stage 1: Companion foundation and the first-launch dedication (approved 2026-11-08, built for 0.3.0)
 
 **Goal:** the experience the owner meets first, without new risky subsystems.
 
@@ -175,12 +175,26 @@ events.
 * The voice ring and voice I/O (Stage 2, after a decision on speech-to-text: local download vs cloud).
 * Tray, notifications, workflows, Knowledge Vault, multi-agent and remote.
 
-**Decisions needed from the owner before Stage 1:**
-1. Approve Stage 1 scope as above.
-2. Should the welcome line use the owner's preferred name when known ("Welcome, Sam…"), or stay exactly as
-   written?
-3. Speech-to-text direction for Stage 2: on-device (a large model download) or a cloud provider the owner
-   already has a key for.
+**Owner's decisions (2026-11-08):**
+1. Stage 1 scope approved as above.
+2. The welcome line stays exactly as written ("Welcome. I'm Atlas. It's good to finally meet you."). It
+   never uses the owner's name.
+3. Speech recognition for Stage 2 runs **on the PC** (Whisper via whisper.cpp; no audio leaves the
+   computer). Model sizes, from the whisper.cpp model list:
+
+   | Model | Download | Note |
+   |---|---|---|
+   | tiny | 75 MiB | fastest, least accurate |
+   | base | 142 MiB | proposed default: multilingual, fast on any recent PC |
+   | small | 466 MiB | noticeably more accurate |
+   | large-v3-turbo (q5_0) | 547 MiB | near-best accuracy for its size; slower on older CPUs |
+   | medium | 1.5 GiB | |
+   | large-v3 | 2.9 GiB | best accuracy, slowest |
+
+   The model is downloaded on first use of voice input, with its size shown first. It is not bundled, so
+   the installer stays small.
+
+What was built is described in ATLAS_EXPERIENCE_SPECIFICATION.md and ATLAS_FIRST_LAUNCH_EXPERIENCE.md.
 
 ## 5. Later stages (summary)
 

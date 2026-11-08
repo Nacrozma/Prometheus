@@ -33,10 +33,12 @@ ATLAS Co-Pilot is now in the **Start menu**, with a shortcut on the desktop.
 
 ## 3. First launch
 
-Open **ATLAS Co-Pilot**. A short setup walks you through:
+Open **ATLAS Co-Pilot**. A brief introduction plays the first time (about 14 seconds; press **Esc** to skip,
+and replay it any time from Settings → About). Then a short setup walks you through:
 
 1. **Welcome:** click *Get started*.
-2. **About you:** what Atlas should call you and how it should talk (all optional).
+2. **About you:** what Atlas should call you and its personality: Professional, Friendly, Analytical, Concise,
+   Detailed or Creative (all optional, and changeable later in Settings → Companion).
 3. **Your data:** where things are stored. Just read and continue.
 4. **AI model:** connect the AI service (step 4 below).
 5. **Workspace:** click **Use Documents/Atlas Workspace**. This is the only folder Atlas may create files in.
