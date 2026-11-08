@@ -26,6 +26,7 @@ pub mod storage;
 pub mod tasks;
 pub mod tools;
 pub mod usage;
+pub mod voice;
 pub mod workspace;
 
 pub use app::{Atlas, AtlasConfig};

@@ -43,6 +43,8 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         siblings_list, sibling_pair, sibling_refresh, sibling_revoke, sibling_forget,
         missions_list, mission_detail, mission_create, mission_update, mission_transition, mission_send,
         mission_message, mission_accept, mission_cancel, mission_sync, mission_note,
+        voice_status, voice_install, voice_install_cancel, voice_remove, voice_verify,
+        voice_synthesize, voice_stop_speech, voice_transcribe, voice_cancel_transcription, voice_benchmark,
     ]
 }
 
@@ -904,4 +906,78 @@ async fn mission_sync(state: State<'_, AppState>, id: String) -> R<atlas_core::s
 #[tauri::command]
 fn mission_note(state: State<'_, AppState>, id: String, text: String) -> R<()> {
     state.atlas.mission_note(&id, &text)
+}
+
+// ---------------- voice (local speech; no audio is stored or logged) ----------------
+
+#[tauri::command]
+fn voice_status(state: State<'_, AppState>) -> R<atlas_core::voice::VoiceStatus> {
+    state.atlas.voice_status()
+}
+
+#[tauri::command]
+async fn voice_install(state: State<'_, AppState>, id: String, on_progress: Channel<atlas_core::voice::download::Progress>) -> R<atlas_core::voice::VoiceStatus> {
+    let atlas = state.atlas.clone();
+    atlas
+        .voice_install(&id, &mut |p| {
+            let _ = on_progress.send(p);
+        })
+        .await
+}
+
+#[tauri::command]
+fn voice_install_cancel(state: State<'_, AppState>, id: String) -> bool {
+    state.atlas.voice_cancel_install(&id)
+}
+
+#[tauri::command]
+fn voice_remove(state: State<'_, AppState>, id: String) -> R<atlas_core::voice::VoiceStatus> {
+    state.atlas.voice_remove(&id)
+}
+
+#[tauri::command]
+fn voice_verify(state: State<'_, AppState>, id: String) -> R<Vec<String>> {
+    state.atlas.voice_verify(&id)
+}
+
+/// Returns a WAV file's bytes (binary response, not JSON).
+#[tauri::command]
+async fn voice_synthesize(state: State<'_, AppState>, text: String, speed: Option<f32>) -> R<tauri::ipc::Response> {
+    let atlas = state.atlas.clone();
+    let wav = atlas.voice_synthesize(&text, speed).await?;
+    Ok(tauri::ipc::Response::new(wav))
+}
+
+#[tauri::command]
+fn voice_stop_speech(state: State<'_, AppState>) {
+    state.atlas.voice_stop_speech();
+}
+
+/// The body is the raw recording (16-bit little-endian samples); the `x-sample-rate` header gives
+/// its rate. It is transcribed in memory and discarded.
+#[tauri::command]
+async fn voice_transcribe(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> R<atlas_core::voice::stt::Transcript> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(AtlasError::Validation("the recording must be sent as raw audio".into()));
+    };
+    let rate = request
+        .headers()
+        .get("x-sample-rate")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u32>().ok())
+        .ok_or_else(|| AtlasError::Validation("the recording's sample rate is missing".into()))?;
+    let atlas = state.atlas.clone();
+    let bytes = bytes.clone();
+    atlas.voice_transcribe(&bytes, rate).await
+}
+
+#[tauri::command]
+fn voice_cancel_transcription(state: State<'_, AppState>) -> bool {
+    state.atlas.voice_cancel_transcription()
+}
+
+#[tauri::command]
+async fn voice_benchmark(state: State<'_, AppState>) -> R<atlas_core::voice::BenchmarkReport> {
+    let atlas = state.atlas.clone();
+    atlas.voice_benchmark().await
 }

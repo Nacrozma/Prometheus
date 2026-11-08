@@ -112,6 +112,19 @@ pub fn services() -> (SharedSecrets, Option<Arc<dyn ProviderFactory>>) {
 }
 
 pub fn seed(atlas: &Atlas) {
+    // Voice in the automated-test build: labelled stand-in engines (no real speech), and voice
+    // downloads served by the test harness from 127.0.0.1 (see tests/e2e/voice-fixtures.mjs).
+    atlas.voice.use_fixtures(true);
+    if let Ok(path) = std::env::var("ATLAS_E2E_VOICE_FIXTURES")
+        && let Ok(raw) = std::fs::read_to_string(&path)
+        && let Ok(list) = serde_json::from_str::<Vec<serde_json::Value>>(&raw)
+    {
+        for o in list {
+            if let (Some(id), Some(url), Some(sha256), Some(bytes)) = (o["id"].as_str(), o["url"].as_str(), o["sha256"].as_str(), o["bytes"].as_u64()) {
+                atlas.voice.set_override(id, atlas_core::voice::Override { url: url.into(), sha256: sha256.into(), bytes });
+            }
+        }
+    }
     // A small sample project for Atlas Forge (the native folder dialog cannot be driven by WebDriver).
     if atlas.forge_projects().map(|p| p.is_empty()).unwrap_or(false) {
         let root = std::env::temp_dir().join(format!("atlas-e2e-forge-{}", std::process::id())).join("e2e-sample");
@@ -141,7 +154,7 @@ pub fn webview2_automation<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
     }
     if let Ok(extra) = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
         // Tauri's own defaults, plus everything msedgedriver asked for.
-        let mut args = String::from("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
+        let mut args = String::from("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required");
         for a in extra.split_whitespace() {
             if let Some(dir) = a.strip_prefix("--user-data-dir=") {
                 builder = builder.data_directory(std::path::PathBuf::from(dir.trim_matches('"')));

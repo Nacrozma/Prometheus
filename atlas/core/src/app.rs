@@ -55,6 +55,10 @@ pub struct Atlas {
     pub(crate) forge_cancels: Mutex<HashMap<String, CancellationToken>>,
     pub(crate) sibling_http: reqwest::Client,
     pub(crate) sibling_health_at: Mutex<Option<std::time::Instant>>,
+    /// Local speech output and recognition (engines, models, downloads).
+    pub voice: crate::voice::VoiceService,
+    /// Downloads of voice files: no overall time limit (large models), but a stall limit per chunk.
+    pub(crate) voice_http: reqwest::Client,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -95,6 +99,7 @@ impl Atlas {
         let http = providers::http_client();
         let factory = cfg.factory.unwrap_or_else(|| Arc::new(DefaultFactory { http: http.clone() }));
         audit::record(&db, "app.start", "info", None, None, json!({"version": cfg.version}));
+        let voice = crate::voice::VoiceService::new(cfg.data_dir.as_deref());
         Ok(Arc::new_cyclic(|me| Atlas {
             db,
             secrets: cfg.secrets,
@@ -109,6 +114,12 @@ impl Atlas {
             forge_cancels: Mutex::new(HashMap::new()),
             sibling_http: crate::sibling::client(),
             sibling_health_at: Mutex::new(None),
+            voice,
+            voice_http: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(20))
+                .https_only(false)
+                .build()
+                .unwrap_or_default(),
             me: me.clone(),
             recovered_tasks: recovered,
         }))

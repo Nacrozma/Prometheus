@@ -438,14 +438,39 @@ impl Default for ForgeSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct VoiceSettings {
+    /// Voice features on or off. Off by default; Atlas works fully without voice.
     pub enabled: bool,
+    /// Read Atlas's replies aloud (needs a downloaded voice).
     pub speak_responses: bool,
+    /// Speech-recognition language: "auto" or a code like "en", "en-US", "ar".
     pub language: String,
+    /// Catalog id of the selected voice; `None` = the default voice.
+    pub tts_voice: Option<String>,
+    /// Catalog id of the selected Whisper model; `None` = the default model.
+    pub stt_model: Option<String>,
+    /// Speaking speed, 0.5–2.0.
+    pub speed: f32,
+    /// Playback volume, 0–100.
+    pub volume: u8,
+    /// Send a recognised request immediately instead of leaving it in the box to review.
+    pub auto_send: bool,
+    /// The microphone to use (an id the system gives the app; not a secret). `None` = default.
+    pub input_device: Option<String>,
 }
 
 impl Default for VoiceSettings {
     fn default() -> Self {
-        Self { enabled: false, speak_responses: false, language: "en-US".into() }
+        Self {
+            enabled: false,
+            speak_responses: false,
+            language: "en-US".into(),
+            tts_voice: None,
+            stt_model: None,
+            speed: 1.0,
+            volume: 90,
+            auto_send: false,
+            input_device: None,
+        }
     }
 }
 
@@ -469,6 +494,27 @@ impl Settings {
         check("memory.max_retrieved", self.memory.max_retrieved, 0, 20)?;
         if self.companion.preferred_name.chars().count() > 60 {
             return Err(AtlasError::Validation("preferred name is too long".into()));
+        }
+        let v = &self.voice;
+        if !v.speed.is_finite() || !(0.5..=2.0).contains(&v.speed) {
+            return Err(AtlasError::Validation("speaking speed must be between 0.5 and 2".into()));
+        }
+        check("voice.volume", v.volume as u32, 0, 100)?;
+        if v.language.len() > 12 || !v.language.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            return Err(AtlasError::Validation("speech language must be a code such as en, en-US or auto".into()));
+        }
+        for (what, id, kind) in [
+            ("voice", &v.tts_voice, crate::voice::catalog::ArtifactKind::Voice),
+            ("speech model", &v.stt_model, crate::voice::catalog::ArtifactKind::SttModel),
+        ] {
+            if let Some(id) = id
+                && crate::voice::catalog::get(id).is_none_or(|a| a.kind != kind)
+            {
+                return Err(AtlasError::Validation(format!("unknown {what} '{id}'")));
+            }
+        }
+        if v.input_device.as_ref().is_some_and(|d| d.len() > 512) {
+            return Err(AtlasError::Validation("microphone id is too long".into()));
         }
         let ci = &self.companion.custom_instructions;
         if ci.chars().count() > MAX_CUSTOM_INSTRUCTIONS {

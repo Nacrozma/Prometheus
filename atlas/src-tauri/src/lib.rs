@@ -88,6 +88,12 @@ pub fn run() {
             {
                 window = e2e::webview2_automation(window);
             }
+            // Atlas speaks replies that arrive after the click that asked for them; allow its own
+            // audio to start without a fresh gesture (Tauri's default arguments are kept).
+            #[cfg(all(windows, not(feature = "e2e")))]
+            {
+                window = window.additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required");
+            }
             window
                 .title("ATLAS Co-Pilot")
                 .inner_size(1320.0, 860.0)
