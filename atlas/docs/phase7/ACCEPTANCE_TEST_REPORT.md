@@ -353,6 +353,11 @@ Each fix has a regression test, listed in PHASE_7_CHANGELOG.md.
   * Windows Credential Manager round-trip: passed.
   * Linux "Atlas with the real Prometheus runtime": passed.
   * Installers built on all three OSes.
+* Run 17 (docs-only commit `32b98f1`): **failed** in Linux e2e.
+  * Cause: a test-harness race, not a product defect. The splash wait asked WebDriver for an element
+    while the app was removing it, and got a stale-element error. The first test failed and the rest
+    cascaded.
+  * Fixed in `b741229`: waits for disappearing elements now check inside the page.
 
 ## 7. Manual steps for the owner
 
