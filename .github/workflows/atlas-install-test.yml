@@ -162,8 +162,15 @@ jobs:
           if ($v2 -ne '[[3]]') { throw "expected v3 after upgrade, got $v2" }
           $m = Sql "SELECT name FROM projects WHERE id='upgrade-marker'"; "marker after upgrade: $m"
           if ($m -notmatch 'Upgrade marker') { throw 'user data lost during upgrade' }
-          $bak = Get-ChildItem $DataDir -Filter 'atlas.pre-v3.bak' -ErrorAction SilentlyContinue
-          if (-not $bak) { Get-ChildItem $DataDir; throw 'no pre-upgrade backup of the database' }
-          $bv = SqlAt $bak.FullName 'PRAGMA user_version' 
-          "pre-upgrade backup: $($bak.Name), schema v$bv, $($bak.Length) bytes"
+          if ($v -ne '[[3]]') {
+            # A schema migration ran: the old database must have been backed up first.
+            $bak = Get-ChildItem $DataDir -Filter 'atlas.pre-v3.bak' -ErrorAction SilentlyContinue
+            if (-not $bak) { Get-ChildItem $DataDir; throw 'no pre-upgrade backup of the database' }
+            $bv = SqlAt $bak.FullName 'PRAGMA user_version'
+            "pre-upgrade backup: $($bak.Name), schema v$bv, $($bak.Length) bytes"
+          } else {
+            'same schema version before and after: no migration ran, so no backup was needed'
+          }
           $i3 = Get-AtlasInstall; "registry version after upgrade: $($i3.DisplayVersion)"
+          $want = $env:TAG -replace '^atlas-v', ''
+          if ($i3.DisplayVersion -ne $want) { throw "expected installed version $want, got $($i3.DisplayVersion)" }
