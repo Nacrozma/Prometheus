@@ -53,6 +53,11 @@ async function shot(name) {
   fs.writeFileSync(path.join(SHOTS, `${name}.png`), await driver.takeScreenshot(), "base64");
 }
 const pageText = () => driver.executeScript("return document.body.innerText");
+/**
+ * True when nothing matches `selector`. Checked inside the page: asking WebDriver for elements that
+ * are being removed at that moment can fail with a stale-element error (seen with the splash).
+ */
+const gone = (selector) => driver.executeScript(`return document.querySelector(${JSON.stringify(selector)}) === null`);
 /** Navigate with the app's own keyboard shortcuts (Ctrl+1…9, Ctrl+,). */
 async function go(key) {
   await driver.actions().keyDown(Key.CONTROL).sendKeys(key).keyUp(Key.CONTROL).perform();
@@ -67,7 +72,11 @@ async function waitForMore(text, before, ms = 20000) {
 }
 /** Atlas ignores Enter while it is responding (the composer shows Stop), so wait until it is idle. */
 async function waitIdle(ms = 20000) {
-  await driver.wait(async () => (await driver.findElements(xpText("button", "Stop"))).length === 0, ms, "Atlas idle");
+  await driver.wait(
+    () => driver.executeScript(`return ![...document.querySelectorAll("button")].some((b) => b.textContent.replace(/\\s+/g, " ").includes("Stop"))`),
+    ms,
+    "Atlas idle",
+  );
 }
 async function send(text) {
   await waitIdle();
@@ -94,7 +103,7 @@ const invoke = (cmd, args = {}) =>
   );
 const exactButton = (text) => By.xpath(`//button[normalize-space()=${JSON.stringify(text)}]`);
 const isVisible = (sel) => driver.executeScript(`return document.querySelector(${JSON.stringify(sel)})?.style.visibility === "visible"`);
-const introGone = async () => (await driver.findElements(By.css("[data-first-launch]"))).length === 0;
+const introGone = () => gone("[data-first-launch]");
 
 before(async () => {
   driver = await new Builder()
@@ -134,7 +143,7 @@ test("the introduction plays once on first launch, with the dedication exactly a
 test("first-run onboarding completes and personalises Atlas", async () => {
   await waitText("Hello. I'm Atlas.", 30000);
   // The startup splash fades out over the first screen; wait until it has been removed.
-  await driver.wait(async () => (await driver.findElements(By.css("[data-splash]"))).length === 0, 15000, "splash removed");
+  await driver.wait(() => gone("[data-splash]"), 15000, "splash removed");
   await shot("01-welcome");
   await click("Get started");
   const name = await find(By.id("ob-name"));
