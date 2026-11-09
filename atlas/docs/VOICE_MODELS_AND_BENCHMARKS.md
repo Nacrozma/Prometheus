@@ -74,4 +74,36 @@ real engines and models downloaded from their public sources.
 * **No microphone or speaker:** the "speech" is the Piper voice's own output fed to Whisper. That
   measures engine speed and round-trip intelligibility, not microphone quality.
 
-*Results are filled in from the CI run below.*
+**Run:** atlas-voice-engines run 42626613303 (2026-11-09), commit 7a9d4a9. Raw JSON is in the
+`voice-benchmark-*` artifacts of that run.
+
+**Phrase:** "Hello Atlas, please remind me to call my sister tomorrow at nine in the morning."
+(15 words), spoken by the Alba voice at speed 1.0.
+
+### Speech output (sherpa-onnx 1.12.40, Alba voice)
+
+| Machine | Audio produced | First call | Second call | Real-time factor¹ |
+|---|---|---|---|---|
+| Windows Server VM, AMD EPYC 7763, 4 vCPU, 16 GB | 4.31 s | 1.88 s | 1.84 s | 0.43 |
+| Ubuntu 24.04 VM, Intel Xeon 8370C, 4 vCPU, 16 GB | 4.32 s | 1.54 s | 1.57 s | 0.36 |
+
+¹ Processing time ÷ audio length; below 1 is faster than real time. Atlas speaks sentence by sentence,
+so the first sentence starts after roughly one short sentence's synthesis time, not the whole reply's.
+Each call starts the engine and loads the voice; that start-up is most of the time for short text.
+
+### Speech recognition (whisper.cpp 1.8.2, Windows VM above)
+
+| Model | Time for 4.3 s of speech | Real-time factor | Words recognised | Transcript |
+|---|---|---|---|---|
+| tiny | 1.73 s | 0.40 | 87% | "I know Atlas, please remind me to call my sister tomorrow at 9 in the morning." |
+| **base** | 3.26 s | 0.75 | 87% | "Alo atlas, please remind me to call my sister tomorrow at 9 in the morning." |
+| small | 10.30 s | 2.36 | 100% | "Hello Atlas, please remind me to call my sister tomorrow at nine in the morning." |
+| large-v3 turbo | not measured | | | Not downloaded in CI, to save time |
+
+**Notes:**
+* The word score is strict: "9" for "nine" counts as a miss. For tiny and base, the only real error is
+  "Hello" → "I know" / "Alo".
+* On this 4-core VM, base transcribes faster than real time and small takes about 2.4× the speech
+  length. A typical desktop CPU with more cores is faster; **Run benchmark** measures the owner's PC.
+* Linux: speech output measured; recognition is not available (whisper.cpp publishes no Linux binary).
+* Downloads in CI: engine 26 MB in about 13 s, voice 67 MB in about 20 s, base model 148 MB in about 15 s.
