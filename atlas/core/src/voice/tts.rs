@@ -128,8 +128,11 @@ impl TextToSpeech for SherpaTts {
     }
 }
 
+/// The engine's last few non-empty lines (the useful part of its error output).
 fn last_line(s: &str) -> String {
-    s.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").chars().take(300).collect()
+    let lines: Vec<&str> = s.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let tail = lines[lines.len().saturating_sub(4)..].join(" | ");
+    tail.chars().rev().take(600).collect::<Vec<_>>().into_iter().rev().collect()
 }
 
 /// Deterministic speech-like audio for tests: syllables at about 4 per second with pauses between

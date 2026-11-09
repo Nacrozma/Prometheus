@@ -24,7 +24,7 @@ Stage 2 (0.4.0). This page covers what exists.
 | Part | Where | What it does |
 |---|---|---|
 | A. Speech recognition (STT) | `core/src/voice/stt.rs` | `SpeechToText` trait; `WhisperCli` (whisper.cpp 1.8.2); single-flight; 0.3–120 s recordings |
-| B. Text-to-speech (TTS) | `core/src/voice/tts.rs` | `TextToSpeech` trait; `SherpaTts` (sherpa-onnx 2.0.1 running Piper voices); text sanitised and length-capped |
+| B. Text-to-speech (TTS) | `core/src/voice/tts.rs` | `TextToSpeech` trait; `SherpaTts` (sherpa-onnx 1.12.40 running Piper voices); text sanitised and length-capped |
 | C. Playback and streaming | `src/features/voice/audioEngine.ts` | Sentence queue, synthesised one ahead of playback; volume; pause, resume and stop |
 | D. Microphone | `src/features/voice/audioEngine.ts` | Push-to-talk capture via `getUserMedia`, downsampled to 16 kHz in memory; released on stop |
 | E. Visualisation | `src/features/voice/VoiceRing.tsx`, `ringShader.ts` | WebGL2 ring driven by a 64-band spectrum from the live analyser; 8 states |
@@ -43,7 +43,7 @@ Stage 2 (0.4.0). This page covers what exists.
 
 | | Chosen | Why | Rejected |
 |---|---|---|---|
-| TTS runtime | **sherpa-onnx 2.0.1** (Apache-2.0, released Oct 2026) | Maintained, CPU-only, prebuilt Windows binaries. Runs Piper voices, which are packaged on GitHub with published checksums. Also supports Kokoro, so higher-quality voices can come later without changing engines. | The Piper binary (`rhasspy/piper` 2023.11.14-2): archived Oct 2025, no fixes. piper1-gpl: GPL-3.0 Python/C library with no standalone Windows binary. OS speech (Web Speech API): its audio can't be analysed, so the ring could not be real. |
+| TTS runtime | **sherpa-onnx 1.12.40** (Apache-2.0; the last 1.x release) | Maintained project, CPU-only, prebuilt Windows binaries. Pinned to 1.x because sherpa-onnx 2.0 removed the built-in espeak-ng phonemizer, so Piper voices produce no audio there without a separate phonemizer (found by the real-engine CI run, which failed on 2.0.1 on Windows and Linux). Runs Piper voices, which are packaged on GitHub with published checksums. Also supports Kokoro, so higher-quality voices can come later without changing engines. | The Piper binary (`rhasspy/piper` 2023.11.14-2): archived Oct 2025, no fixes. piper1-gpl: GPL-3.0 Python/C library with no standalone Windows binary. OS speech (Web Speech API): its audio can't be analysed, so the ring could not be real. |
 | Voices | **Piper VITS**, medium quality, 22 kHz, about 67 MB each (an 8-bit variant is 21 MB) | Natural enough, fast on CPUs, wide language coverage, including Arabic. | Kokoro (126–348 MB, slower): a candidate for a later "high quality" option. |
 | STT runtime | **whisper.cpp 1.8.2** (MIT) | The newest release with Windows binaries (the 1.9.x releases are source-only). CPU, no GPU. | — |
 | STT models | **Whisper** tiny / base / small / large-v3-turbo-q5 (ggml) | Multilingual, MIT. Base is the starting recommendation; the benchmark decides. | large-v3 (2.9 GB): too large for a default. |

@@ -45,7 +45,7 @@ from earlier reports.
 | Capability | Status | Where / notes |
 |---|---|---|
 | Voice input (push-to-talk, transcription) | Implemented (0.4.0); hardware MANUAL | whisper.cpp 1.8.2 + Whisper models, on-device. Push-to-talk, transcript review/edit, cancel, single-flight, mic-loss handling. Real engines verified in CI; a real microphone only on the owner's PC |
-| Voice output (TTS for responses) | Implemented (0.4.0); hardware MANUAL | sherpa-onnx 2.0.1 + Piper voices, on-device. Progressive sentence playback, Markdown-aware, stop/pause/replay/mute. Real engines verified in CI; real speakers only on the owner's PC |
+| Voice output (TTS for responses) | Implemented (0.4.0); hardware MANUAL | sherpa-onnx 1.12.40 + Piper voices, on-device. Progressive sentence playback, Markdown-aware, stop/pause/replay/mute. Real engines verified in CI; real speakers only on the owner's PC |
 | Compact window, tray, global shortcut, always-on-top | Missing | Tauri plugins exist (tray, global-shortcut); not used |
 | Desktop notifications | Missing | In-app toasts only |
 

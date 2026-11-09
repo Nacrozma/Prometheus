@@ -5,7 +5,7 @@
 ### Added
 - **Voice, entirely on this computer:** no speech service, no API key; works offline once the files
   are downloaded.
-  - **Speech output:** sherpa-onnx 2.0.1 running Piper voices.
+  - **Speech output:** sherpa-onnx 1.12.40 running Piper voices (pinned to 1.x: 2.0 removed the espeak-ng phonemizer Piper voices need).
     - Alba (UK English, CC BY 4.0) is the default. Lessac (also a light version), Ryan and Kareem
       (Arabic) are optional.
     - Replies are read aloud as they stream, a sentence at a time; code and tables are announced, not

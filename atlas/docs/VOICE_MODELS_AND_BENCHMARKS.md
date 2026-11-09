@@ -7,7 +7,7 @@ All sizes are the published download sizes. Every file is verified against the S
 
 | Engine | Version | Download | Platform | Licence | Source |
 |---|---|---|---|---|---|
-| sherpa-onnx (speech output) | 2.0.1, Oct 2026 | 25.4 MiB (Windows), 26.7 MiB (Linux) | Windows x64, Linux x64 | Apache-2.0; bundles onnxruntime (MIT). Voices include espeak-ng data (GPL-3.0), used by the separate engine program | github.com/k2-fsa/sherpa-onnx |
+| sherpa-onnx (speech output) | 1.12.40 (last 1.x) | 22.2 MiB (Windows), 25.5 MiB (Linux) | Windows x64, Linux x64 | Apache-2.0; bundles onnxruntime (MIT). Voices include espeak-ng data (GPL-3.0), used by the separate engine program | github.com/k2-fsa/sherpa-onnx |
 | whisper.cpp (speech recognition) | 1.8.2 | 3.65 MiB | Windows x64 | MIT | github.com/ggml-org/whisper.cpp |
 
 **Why these:**
@@ -17,6 +17,10 @@ All sizes are the published download sizes. Every file is verified against the S
   * sherpa-onnx is maintained, runs the same Piper voices on CPU, and publishes voice packages with
     checksums on GitHub.
   * It also runs Kokoro, a likely future "higher quality" option.
+  * **Pinned to 1.12.40, not 2.x:** sherpa-onnx 2.0 removed its built-in espeak-ng phonemizer.
+    Piper voices then generate no audio unless a separate phonemizer is supplied. The first
+    real-engine CI run used 2.0.1 and failed on Windows and Linux with "Error in generating audio";
+    1.12.40 still bundles espeak-ng.
 * **whisper.cpp 1.8.2:** the newest release that ships Windows binaries (1.9.x are source-only).
 
 ## Voices (Piper, VITS)

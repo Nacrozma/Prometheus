@@ -43,8 +43,8 @@ def main():
     stt_engine = zip_bytes({"Release/README-fixture.txt": b"stand-in engine (never executed)\n", "Release/blob": filler})
     model = filler + b"stand-in whisper model"
     items = {
-        "tts-engine-sherpa-onnx-2.0.1-windows": ("tts-win.tar.bz2", engine),
-        "tts-engine-sherpa-onnx-2.0.1-linux": ("tts-linux.tar.bz2", engine),
+        "tts-engine-sherpa-onnx-1.12.40-windows": ("tts-win.tar.bz2", engine),
+        "tts-engine-sherpa-onnx-1.12.40-linux": ("tts-linux.tar.bz2", engine),
         "stt-engine-whisper-cpp-1.8.2-windows": ("stt-win.zip", stt_engine),
         "voice-en_GB-alba-medium": ("alba.tar.bz2", voice),
         "stt-whisper-base": ("ggml-base.bin", model),
