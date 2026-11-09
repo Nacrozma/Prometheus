@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 — 2026-11-09
+## 0.4.0 — 2026-11-09 (released: atlas-v0.4.0)
 
 ### Added
 - **Voice, entirely on this computer:** no speech service, no API key; works offline once the files

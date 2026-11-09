@@ -9,9 +9,9 @@ OpenAI, OpenRouter, Mistral or Cerebras, or the free Ollama app if you'd rather 
 
 ## 1. Download
 
-**[⬇ Download ATLAS-Co-Pilot-Setup-x64.exe](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.3.0/ATLAS-Co-Pilot-Setup-x64.exe)** (8.6 MB, version 0.3.0)
+**[⬇ Download ATLAS-Co-Pilot-Setup-x64.exe](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.4.0/ATLAS-Co-Pilot-Setup-x64.exe)** (9.2 MB, version 0.4.0)
 
-All files for this version are on the [release page](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.3.0):
+All files for this version are on the [release page](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.4.0):
 
 | File | What it is |
 |---|---|
@@ -19,9 +19,9 @@ All files for this version are on the [release page](https://github.com/Nacrozma
 | `ATLAS-Co-Pilot-x64.msi` | The same app as an MSI package, for IT-managed PCs. Most people don't need it. |
 | `SHA256SUMS.txt` | Checksums, to confirm the download isn't damaged (optional, see the end of this page). |
 
-**Already have 0.2.0?** Run the new installer over it. Your conversations, settings, memories and keys are
-kept. If you use the Prometheus link, also update `sibling_adapter.py` on the Prometheus side (it has a
-security fix).
+**Already have 0.2.0 or 0.3.0?** Run the new installer over it. Your conversations, settings, memories and
+keys are kept. New in 0.4.0: optional on-device voice (step 6). If you use the Prometheus link and are
+coming from 0.2.0, also update `sibling_adapter.py` on the Prometheus side (it has a security fix).
 
 ## 2. Install
 
@@ -99,7 +99,7 @@ Only the AI service you chose receives your messages.
 - **Prometheus (optional):** if Prometheus is on the same PC, open **Siblings** to pair them. Guide:
   [atlas/docs/PAIRING.md](atlas/docs/PAIRING.md).
 
-## 6. Voice (optional; version 0.4.0 and later)
+## 6. Voice (optional)
 
 Atlas can listen and speak entirely on your PC: no speech service, no API key, and it works offline once
 set up. Voice is off until you turn it on.
@@ -149,10 +149,10 @@ In PowerShell, in your Downloads folder:
 Get-FileHash .\ATLAS-Co-Pilot-Setup-x64.exe -Algorithm SHA256
 ```
 
-For version 0.3.0 it must be:
+For version 0.4.0 it must be:
 
 ```
-3260AD555B6B6270CF6A510DCEDE6FA34C69822D3EA420B51351F9B6712A01E5
+4DA70946531C965FF0352FFF0D244EE286B72701150D40002C29ADA1BF29FFB2
 ```
 
 (The same values are in `SHA256SUMS.txt` on the release page.)
