@@ -12,6 +12,7 @@ import { MissionControlPage } from "@/features/mission-control/MissionControl";
 import { ProjectsPage } from "@/features/projects/Projects";
 import { SettingsPage } from "@/features/settings/Settings";
 import { VoicePage } from "@/features/voice/Voice";
+import { VoiceProvider } from "@/features/voice/VoiceProvider";
 import { useUi } from "@/state/ui";
 import { ApprovalDock } from "./ApprovalDock";
 import { CommandPalette, newConversation } from "./CommandPalette";
@@ -80,6 +81,7 @@ export function Shell() {
       </main>
       <ApprovalDock />
       <CommandPalette />
+      <VoiceProvider />
     </div>
   );
 }

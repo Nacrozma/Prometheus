@@ -99,6 +99,27 @@ Only the AI service you chose receives your messages.
 - **Prometheus (optional):** if Prometheus is on the same PC, open **Siblings** to pair them. Guide:
   [atlas/docs/PAIRING.md](atlas/docs/PAIRING.md).
 
+## 6. Voice (optional; version 0.4.0 and later)
+
+Atlas can listen and speak entirely on your PC: no speech service, no API key, and it works offline once
+set up. Voice is off until you turn it on.
+
+1. **Turn it on:** Settings → Voice → turn on **Voice**.
+2. **Download speech output:** click **Set up speech output**. That is the engine (about 27 MB) and the
+   Alba voice (about 67 MB); other voices are optional.
+3. **Download speech recognition:** click **Set up speech recognition**. That is the engine (about 4 MB)
+   and the Whisper base model (about 148 MB). Settings → Voice recommends a model for your PC, and
+   **Run benchmark** measures the real speed.
+4. **Talk:** in the Companion, click the microphone (or press **Ctrl + Shift + Space**), speak, then click
+   again. Your words appear in the message box to check before sending.
+   * Windows asks once for microphone access.
+   * If it's blocked: Settings → Privacy & security → Microphone → allow desktop apps.
+5. **Hear replies:** turn on **Read replies aloud** (or the speaker button above the message box).
+   **Esc** stops speech.
+
+Every download is checked against its publisher's checksum. To free the space, use **Remove** in
+Settings → Voice. Troubleshooting: [atlas/docs/VOICE_TROUBLESHOOTING.md](atlas/docs/VOICE_TROUBLESHOOTING.md).
+
 ---
 
 ## Uninstalling

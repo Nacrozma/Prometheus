@@ -1,5 +1,6 @@
 import { PrometheusAvatar } from "@/features/siblings/avatar/PrometheusAvatar";
-import { AlertTriangle, Brain, ChevronRight, CircleCheck, CircleSlash, Info, RefreshCw, RotateCcw, Wrench, XCircle } from "lucide-react";
+import { AlertTriangle, Brain, ChevronRight, CircleCheck, CircleSlash, Info, RefreshCw, RotateCcw, Volume2, Wrench, XCircle } from "lucide-react";
+import { useVoice } from "@/state/voice";
 import { useState } from "react";
 import { CopyButton, Markdown } from "@/components/Markdown";
 import { Badge } from "@/components/ui/primitives";
@@ -101,12 +102,14 @@ export function Thread({
   messages,
   onAskAgain,
   onRegenerate,
+  onSpeak,
   canAskAgain,
   running = false,
 }: {
   messages: Message[];
   onAskAgain: (text: string) => void;
   onRegenerate?: () => void;
+  onSpeak?: (text: string) => void;
   canAskAgain: boolean;
   running?: boolean;
 }) {
@@ -122,6 +125,7 @@ export function Thread({
   });
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
   const regen = canAskAgain && onRegenerate && canRegenerate(messages);
+  const canSpeak = useVoice((s) => Boolean(s.settings?.enabled && s.status?.tts_ready)) && Boolean(onSpeak);
   const actionCls = "inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 hover:bg-bg-4 hover:text-text-1";
 
   return (
@@ -166,6 +170,11 @@ export function Thread({
                 {m.status === "truncated" && <Badge tone="warn">cut off at length limit</Badge>}
                 {m.status === "refused" && <Badge tone="warn">declined by model</Badge>}
                 <CopyButton text={m.content} />
+                {canSpeak && (
+                  <button onClick={() => onSpeak?.(m.content)} className={actionCls} title="Read this reply aloud">
+                    <Volume2 className="size-3.5" aria-hidden /> Speak
+                  </button>
+                )}
                 {canAskAgain && lastUser && m === messages.filter((x) => x.role === "assistant").at(-1) &&
                   (regen ? (
                     <button onClick={onRegenerate} className={actionCls} title={`Replace this reply with a new one (${modKey()}+Shift+Enter)`} aria-keyshortcuts="Control+Shift+Enter">

@@ -1,9 +1,11 @@
-import { ArrowUp, Paperclip, Square } from "lucide-react";
+import { ArrowUp, Loader2, Mic, Paperclip, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button, IconButton } from "@/components/ui/primitives";
 import { api, AtlasError } from "@/lib/bridge";
 import { modKey } from "./conversation";
+import { audio } from "@/features/voice/audioEngine";
+import { useVoice } from "@/state/voice";
 
 export function Composer({
   running,
@@ -12,6 +14,7 @@ export function Composer({
   onSend,
   onStop,
   autoFocus,
+  draft,
 }: {
   running: boolean;
   disabled?: boolean;
@@ -19,6 +22,8 @@ export function Composer({
   onSend: (text: string) => void;
   onStop: () => void;
   autoFocus?: boolean;
+  /** A recognised voice request to place in the box for review (nonce changes each time). */
+  draft?: { text: string; nonce: number } | null;
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -33,6 +38,15 @@ export function Composer({
   useEffect(() => {
     if (autoFocus) ref.current?.focus();
   }, [autoFocus]);
+
+  const voiceOn = useVoice((s) => Boolean(s.settings?.enabled));
+  const capture = useVoice((s) => s.capture);
+  const toggleListening = useVoice((s) => s.toggleListening);
+  useEffect(() => {
+    if (!draft) return;
+    setText((t) => (t.trim() ? `${t.trimEnd()} ${draft.text}` : draft.text));
+    ref.current?.focus();
+  }, [draft]);
 
   const submit = () => {
     const t = text.trim();
@@ -79,6 +93,29 @@ export function Composer({
           <IconButton label="Share a text file with Atlas" size="sm" onClick={attach} disabled={disabled}>
             <Paperclip className="size-4" aria-hidden />
           </IconButton>
+          {voiceOn && (
+            <IconButton
+              label={capture === "listening" ? "Finish speaking (Esc cancels)" : capture === "transcribing" ? "Understanding what you said" : `Talk to Atlas (${modKey()}+Shift+Space)`}
+              size="sm"
+              variant={capture === "listening" ? "danger" : "ghost"}
+              aria-pressed={capture === "listening"}
+              aria-keyshortcuts="Control+Shift+Space"
+              data-mic
+              data-capture={capture}
+              disabled={capture === "transcribing"}
+              onClick={() => {
+                audio.context();
+                void toggleListening();
+              }}
+            >
+              {capture === "transcribing" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Mic className="size-4" aria-hidden />}
+            </IconButton>
+          )}
+          {capture === "listening" && (
+            <span className="ml-1 inline-flex items-center gap-1.5 text-[0.6875rem] text-err" role="status">
+              <span className="size-2 rounded-full bg-err anim-pulse" aria-hidden /> Microphone on
+            </span>
+          )}
           <span className="ml-1 hidden text-[0.6875rem] text-text-3 sm:inline">
             {running ? "Esc to stop" : `Enter to send · Shift+Enter for a new line · ${modKey()}+Shift+Enter to regenerate`}
           </span>

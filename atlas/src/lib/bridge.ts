@@ -53,6 +53,42 @@ export const api = {
   saveTextViaDialog: (suggestedName: string, extension: "json" | "md" | "txt" | "csv", content: string) =>
     call("save_text_via_dialog", { suggestedName, extension, content }, Opt(z.string())),
 
+  voiceStatus: () => call("voice_status", {}, S.VoiceStatusSchema),
+  voiceInstall: (id: string, onProgress: (p: S.DownloadProgress) => void) => {
+    const channel = new Channel<unknown>();
+    channel.onmessage = (raw) => {
+      const parsed = S.DownloadProgressSchema.safeParse(raw);
+      if (parsed.success) onProgress(parsed.data);
+    };
+    return call("voice_install", { id, onProgress: channel }, S.VoiceStatusSchema);
+  },
+  voiceInstallCancel: (id: string) => call("voice_install_cancel", { id }, z.boolean()),
+  voiceRemove: (id: string) => call("voice_remove", { id }, S.VoiceStatusSchema),
+  voiceVerify: (id: string) => call("voice_verify", { id }, z.array(z.string())),
+  /** WAV bytes for playback. */
+  voiceSynthesize: async (text: string, speed?: number): Promise<ArrayBuffer> => {
+    try {
+      const out = await invoke<ArrayBuffer | number[]>("voice_synthesize", { text, speed: speed ?? null });
+      return out instanceof ArrayBuffer ? out : new Uint8Array(out).buffer;
+    } catch (e) {
+      throw toAtlasError(e);
+    }
+  },
+  voiceStopSpeech: () => call("voice_stop_speech", {}, Void),
+  /** Send a 16-bit PCM recording as raw bytes; it is transcribed in memory and discarded. */
+  voiceTranscribe: async (pcm: Int16Array, sampleRate: number) => {
+    let raw: unknown;
+    try {
+      raw = await invoke("voice_transcribe", new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength), { headers: { "x-sample-rate": String(sampleRate) } });
+    } catch (e) {
+      throw toAtlasError(e);
+    }
+    const parsed = S.TranscriptSchema.safeParse(raw);
+    if (!parsed.success) throw new AtlasError("contract", "Atlas received an unexpected transcription result.");
+    return parsed.data;
+  },
+  voiceCancelTranscription: () => call("voice_cancel_transcription", {}, z.boolean()),
+  voiceBenchmark: () => call("voice_benchmark", {}, S.BenchmarkSchema),
   settings: () => call("settings_get", {}, S.SettingsSchema),
   updateSettings: (settings: S.Settings) => call("settings_update", { settings }, S.SettingsSchema),
   /** Record that the one-time introduction finished or was skipped (idempotent). */

@@ -196,9 +196,12 @@ impl VoiceService {
         let voice = Self::selected_voice(settings);
         let model = Self::selected_stt_model(settings);
         let fixtures = self.fixtures();
-        let installed = |a: Option<&'static Artifact>| a.is_some_and(|a| self.state_of(a) == InstallState::Installed);
-        let tts_ready = fixtures || (installed(tts_engine) && installed(Some(voice)));
-        let stt_ready = fixtures || (installed(stt_engine) && installed(Some(model)));
+        let installed = |a: &'static Artifact| self.state_of(a) == InstallState::Installed;
+        // Readiness always means "the files are installed". In test builds the stand-in engines
+        // replace only the engine programs (and stand in where none is published for the platform).
+        let engine_ok = |e: Option<&'static Artifact>| e.map(installed).unwrap_or(fixtures);
+        let tts_ready = engine_ok(tts_engine) && installed(voice);
+        let stt_ready = engine_ok(stt_engine) && installed(model);
         let temp_audio_files = self
             .tmp()
             .ok()
@@ -232,10 +235,11 @@ impl VoiceService {
             return Err(AtlasError::Validation(format!("{} is not for this computer's platform", a.name)));
         }
         let (art, url) = self.effective(a);
-        let local = url.starts_with("http://127.0.0.1:") || url.starts_with("http://localhost:");
-        if settings.network.offline_mode && !local {
+        // Offline mode blocks every download, wherever it comes from.
+        if settings.network.offline_mode {
             return Err(AtlasError::PermissionDenied("offline mode is on, so Atlas will not download anything. Turn it off in Settings → Data & privacy to download voice files".into()));
         }
+        let local = url.starts_with("http://127.0.0.1:") || url.starts_with("http://localhost:");
         if !url.starts_with("https://") && !local {
             return Err(AtlasError::Validation("voice downloads must use HTTPS".into()));
         }
@@ -294,23 +298,31 @@ impl VoiceService {
     }
 
     pub fn tts_engine(&self, settings: &Settings) -> Result<Arc<dyn TextToSpeech>> {
-        if self.fixtures() {
-            return Ok(Arc::new(tts::FixtureTts));
-        }
-        let engine = catalog::engine(ArtifactKind::TtsEngine).ok_or_else(|| AtlasError::Validation("speech output is not available on this platform yet".into()))?;
-        let engine_dir = self.require_installed(engine)?;
         let voice = Self::selected_voice(settings);
         let voice_dir = self.require_installed(voice)?;
+        let engine = catalog::engine(ArtifactKind::TtsEngine);
+        if self.fixtures() {
+            if let Some(e) = engine {
+                self.require_installed(e)?;
+            }
+            return Ok(Arc::new(tts::FixtureTts));
+        }
+        let engine = engine.ok_or_else(|| AtlasError::Validation("speech output is not available on this platform yet".into()))?;
+        let engine_dir = self.require_installed(engine)?;
         Ok(Arc::new(tts::SherpaTts::locate(&engine_dir, &voice_dir, &self.tmp()?, voice.name)?))
     }
 
     fn stt_engine_for(&self, model: &'static Artifact) -> Result<Arc<dyn SpeechToText>> {
+        let model_dir = self.require_installed(model)?;
+        let engine = catalog::engine(ArtifactKind::SttEngine);
         if self.fixtures() {
+            if let Some(e) = engine {
+                self.require_installed(e)?;
+            }
             return Ok(Arc::new(stt::FixtureStt { phrase: "What is 6 times 7?".into() }));
         }
-        let engine = catalog::engine(ArtifactKind::SttEngine).ok_or_else(|| AtlasError::Validation("speech recognition is not available on this platform yet".into()))?;
+        let engine = engine.ok_or_else(|| AtlasError::Validation("speech recognition is not available on this platform yet".into()))?;
         let engine_dir = self.require_installed(engine)?;
-        let model_dir = self.require_installed(model)?;
         Ok(Arc::new(stt::WhisperCli::locate(&engine_dir, &model_dir.join(model.file_name), &self.tmp()?, model.name)?))
     }
 
@@ -371,11 +383,8 @@ impl VoiceService {
         let audio_ms = speech.duration_ms().max(1);
         let input = wav::resample(&speech, stt::STT_SAMPLE_RATE);
         let mut models = Vec::new();
-        let candidates: Vec<&'static Artifact> = if self.fixtures() {
-            vec![Self::selected_stt_model(settings)]
-        } else {
-            catalog::available().filter(|a| a.kind == ArtifactKind::SttModel && self.state_of(a) == InstallState::Installed).collect()
-        };
+        let candidates: Vec<&'static Artifact> =
+            catalog::available().filter(|a| a.kind == ArtifactKind::SttModel && self.state_of(a) == InstallState::Installed).collect();
         for m in candidates {
             let stt = match self.stt_engine_for(m) {
                 Ok(s) => s,

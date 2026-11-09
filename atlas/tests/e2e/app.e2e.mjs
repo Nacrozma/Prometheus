@@ -104,6 +104,8 @@ const invoke = (cmd, args = {}) =>
 const exactButton = (text) => By.xpath(`//button[normalize-space()=${JSON.stringify(text)}]`);
 const isVisible = (sel) => driver.executeScript(`return document.querySelector(${JSON.stringify(sel)})?.style.visibility === "visible"`);
 const introGone = () => gone("[data-first-launch]");
+/** Exact text content (WebDriver's getText is empty while text is still fading in). */
+const textOf = (sel) => driver.executeScript(`return document.querySelector(${JSON.stringify(sel)})?.textContent ?? null`);
 
 before(async () => {
   driver = await new Builder()
@@ -124,10 +126,10 @@ after(async () => {
 test("the introduction plays once on first launch, with the dedication exactly as written", async () => {
   await find(By.css("[data-first-launch='first']"), 30000);
   await driver.wait(() => isVisible("[data-dedication]"), 15000, "dedication shown");
-  assert.equal(await (await find(By.css("[data-dedication]"))).getText(), "Created with love.");
+  assert.equal(await textOf("[data-dedication]"), "Created with love.");
   await shot("00-introduction-dedication");
   await driver.wait(() => isVisible("[data-welcome]"), 10000, "welcome shown");
-  assert.equal(await (await find(By.css("[data-welcome]"))).getText(), "Welcome. I'm Atlas. It's good to finally meet you.");
+  assert.equal(await textOf("[data-welcome]"), "Welcome. I'm Atlas. It's good to finally meet you.");
   assert.equal(await isVisible("[data-dedication]"), false, "one line at a time");
   // It ends by itself and the core records it.
   await driver.wait(introGone, 15000, "introduction ended");
@@ -314,12 +316,154 @@ test("personality presets apply their settings, and the introduction replays as 
   const intro = await find(By.css("[data-first-launch='replay']"));
   assert.equal(await intro.getAttribute("data-reduced"), "true");
   await driver.wait(() => isVisible("[data-dedication]"), 5000, "dedication shown");
-  assert.equal(await (await find(By.css("[data-dedication]"))).getText(), "Created with love.");
+  assert.equal(await textOf("[data-dedication]"), "Created with love.");
   await shot("14-introduction-replay-reduced");
   await driver.actions().sendKeys(Key.ESCAPE).perform();
   await driver.wait(introGone, 5000, "skipped with Esc");
   await click("Appearance");
   await driver.findElement(exactButton("System")).click();
+});
+
+/** Voice checks read what the app measured from real Web Audio (stand-in engines; see VoiceProvider). */
+const voice = (expr) => driver.executeScript(`return window.__atlasVoice ? window.__atlasVoice.${expr} : null`);
+const composerValue = () => driver.executeScript("return document.getElementById('composer')?.value ?? ''");
+function wavFiles(dir) {
+  const out = [];
+  const walk = (d) => {
+    for (const e of fs.existsSync(d) ? fs.readdirSync(d, { withFileTypes: true }) : []) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.(wav|pcm|webm|ogg)$/i.test(e.name)) out.push(p);
+    }
+  };
+  walk(dir);
+  return out;
+}
+
+test("voice: verified downloads, push-to-talk into an editable message, a spoken reply through real playback, and Esc stops it", async () => {
+  await go(",");
+  await (await find(exactButton("Voice"))).click();
+  await find(By.css("[data-voice-settings]"));
+  await (await find(By.css('[data-voice-settings] [role=switch][aria-label="Voice"]'))).click();
+  await driver.wait(async () => (await invoke("settings_get")).voice.enabled === true, 5000, "voice enabled");
+  await waitText("Test build: stand-in engines, not real speech");
+
+  // A download whose checksum does not match is refused and nothing is installed.
+  await (await find(By.css('[data-artifact="voice-en_US-ryan-medium"] [data-action="download"]'))).click();
+  await waitText("failed its integrity check", 20000);
+  assert.equal(await (await find(By.css('[data-artifact="voice-en_US-ryan-medium"]'))).getAttribute("data-state"), "not_installed");
+
+  // Speech output and recognition set up through the real download, checksum and unpack path.
+  await click("Set up speech output");
+  await find(By.css('[data-artifact="voice-en_GB-alba-medium"][data-state="installed"]'), 30000);
+  assert.deepEqual(await invoke("voice_verify", { id: "voice-en_GB-alba-medium" }), []);
+  await click("Set up speech recognition");
+  await find(By.css('[data-artifact="stt-whisper-base"][data-state="installed"]'), 30000);
+  await (await find(By.css('[role=switch][aria-label="Read replies aloud"]'))).click();
+  await driver.wait(async () => (await invoke("settings_get")).voice.speak_responses === true, 5000);
+  await shot("15-voice-settings");
+
+  // Push-to-talk: the stand-in microphone is a test tone; the ring measures it.
+  await driver.actions().keyDown(Key.CONTROL).sendKeys("n").keyUp(Key.CONTROL).perform();
+  await driver.sleep(400);
+  await driver.executeScript("arguments[0].click()", await find(By.css("[data-mic]"))); // toasts can cover the composer
+  await find(By.css('[data-mic][data-capture="listening"]'));
+  await waitText("Microphone on");
+  await find(By.css('[data-voice-bar] [data-voice-ring][data-state="listening"]'));
+  // The analyser window is ~12 ms, so sample until the signal shows (speech has gaps between syllables).
+  await driver.wait(async () => (await voice("level()")) > 0.01, 3000, "the ring reads real microphone-path audio");
+  await driver.sleep(1000); // speak for a moment (recordings under 0.3 s are refused as too short)
+  await driver.executeScript("arguments[0].click()", await find(By.css("[data-mic]"))); // toasts can cover the composer
+  await driver.wait(async () => (await composerValue()) === "What is 6 times 7?", 10000, "transcript in the composer for review");
+  assert.equal(await voice("capturing()"), false, "the microphone is released");
+
+  // The transcript is edited, then sent through the normal pipeline; the reply is spoken.
+  const box = await find(By.id("composer"));
+  await box.sendKeys(" Thanks.", Key.ENTER);
+  await waitText("Echo: What is 6 times 7? Thanks.", 20000);
+  await driver.wait(async () => (await voice("playback()")) === "speaking", 15000, "speaking");
+  await find(By.css('[data-voice-bar] [data-voice-ring][data-state="speaking"]'));
+  await driver.wait(async () => (await voice("level()")) > 0.01, 3000, "the ring reads the real playback signal");
+  await find(By.css("[data-voice-caption]"));
+  await shot("16-voice-speaking");
+
+  // Esc interrupts at once; the reply text stays exactly as written and nothing is re-sent.
+  const conv = (await invoke("conversations_list", { projectId: null, includeArchived: false, limit: 1, offset: 0 }))[0];
+  const before = (await invoke("conversation_messages", { id: conv.id })).length;
+  await driver.actions().sendKeys(Key.ESCAPE).perform();
+  await driver.wait(async () => (await voice("playback()")) === "idle", 2000, "speech stopped promptly");
+  await driver.sleep(300);
+  assert.equal(await voice("level()"), 0, "silence after the stop");
+  assert.equal(await countText("Echo: What is 6 times 7? Thanks."), 1, "the reply text is intact");
+  assert.equal((await invoke("conversation_messages", { id: conv.id })).length, before, "no new request after the interruption");
+});
+
+test("voice: settings persist, offline speech still works but downloads are refused, microphone loss is handled, reduced motion stills the ring, and no audio is stored", async () => {
+  await driver.navigate().refresh();
+  await find(By.css("nav"), 30000);
+  await driver.wait(() => gone("[data-splash]"), 15000, "splash removed after the reload");
+  const s = await invoke("settings_get");
+  assert.equal(s.voice.enabled, true);
+  assert.equal(s.voice.speak_responses, true);
+  const st = await invoke("voice_status");
+  assert.ok(st.tts_ready && st.stt_ready);
+  assert.equal(st.voices.find((v) => v.id === "voice-en_GB-alba-medium").state, "installed");
+
+  // Offline mode: local speech keeps working; downloads are refused with a clear reason.
+  await invoke("settings_update", { settings: { ...s, network: { ...s.network, offline_mode: true } } });
+  await go("2");
+  // After a reload no conversation is open; open the one from the previous test.
+  await click("What is 6 times 7? Thanks.");
+  await waitText("Echo: What is 6 times 7? Thanks.", 15000);
+  await driver.executeScript("arguments[0].click()", await find(exactButton("Speak")));
+  await driver.wait(async () => (await voice("playback()")) === "speaking", 15000, "speaks offline");
+  await driver.executeScript("arguments[0].click()", await find(By.css('[aria-label="Stop speaking (Esc)"]')));
+  await driver.wait(async () => (await voice("playback()")) === "idle", 2000);
+  await go(",");
+  await (await find(exactButton("Voice"))).click();
+  await (await find(By.css('[data-artifact="stt-whisper-tiny"] [data-action="download"]'))).click();
+  await waitText("offline mode is on", 10000);
+  const s2 = await invoke("settings_get");
+  await invoke("settings_update", { settings: { ...s2, network: { ...s2.network, offline_mode: false } } });
+
+  // The microphone disappears mid-recording: listening stops with a clear message; typing still works.
+  await go("2");
+  await driver.executeScript("arguments[0].click()", await find(By.css("[data-mic]"))); // toasts can cover the composer
+  await find(By.css('[data-mic][data-capture="listening"]'));
+  await driver.executeScript("window.__atlasVoice.micLost('The microphone was disconnected.')");
+  await waitText("The microphone was disconnected.");
+  assert.equal(await voice("capturing()"), false);
+  const echoes = await countText("Echo: typed after the microphone left");
+  await send("typed after the microphone left");
+  await waitForMore("Echo: typed after the microphone left", echoes);
+  await driver.actions().sendKeys(Key.ESCAPE).perform(); // stop the spoken reply
+
+  // Reduced motion: the ring is still (no animation frames while idle).
+  await go(",");
+  await click("Appearance");
+  await (await find(exactButton("Reduced"))).click();
+  await driver.executeScript("arguments[0].click()", await find(By.css('nav[aria-label="Main"] button[aria-label="Voice"]')));
+  const ring = await find(By.css("[data-voice-ring]"));
+  await driver.wait(async () => (await ring.getAttribute("data-reduced")) === "true", 5000);
+  // A still frame is drawn on each state change; let pending changes settle, then expect none.
+  let f1 = await ring.getAttribute("data-frames");
+  await driver.wait(async () => {
+    await driver.sleep(800);
+    const f = await ring.getAttribute("data-frames");
+    if (f === f1) return true;
+    f1 = f;
+    return false;
+  }, 8000);
+  await driver.sleep(1500);
+  assert.equal(await ring.getAttribute("data-frames"), f1, "no animation loop under reduced motion");
+  await shot("17-voice-page-reduced");
+  await go(",");
+  await click("Appearance");
+  await (await find(exactButton("System"))).click();
+
+  // Nothing recorded or synthesised was left on disk.
+  assert.equal((await invoke("voice_status")).temp_audio_files, 0);
+  if (process.env.ATLAS_DATA_DIR) assert.deepEqual(wavFiles(process.env.ATLAS_DATA_DIR), [], "no audio files in Atlas's data folder");
 });
 
 test("Atlas Forge: explorer, approved edit with revertible snapshot, terminal", async () => {

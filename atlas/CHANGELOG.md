@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.0 — 2026-11-09
+
+### Added
+- **Voice, entirely on this computer:** no speech service, no API key; works offline once the files
+  are downloaded.
+  - **Speech output:** sherpa-onnx 2.0.1 running Piper voices.
+    - Alba (UK English, CC BY 4.0) is the default. Lessac (also a light version), Ryan and Kareem
+      (Arabic) are optional.
+    - Replies are read aloud as they stream, a sentence at a time; code and tables are announced, not
+      read.
+    - Speed, volume, pause, stop, replay and mute.
+  - **Speech recognition:** whisper.cpp 1.8.2 with Whisper tiny, base (the starting recommendation),
+    small or large-v3 turbo.
+    - Push-to-talk (microphone button or Ctrl/⌘+Shift+Space); Esc cancels.
+    - The transcript lands in the message box to edit, or is sent automatically if you choose.
+  - **The electric-blue voice ring:** an original circular waveform driven by the real playback or
+    microphone signal, with idle, listening, processing, speaking, paused, interrupted, error and
+    offline states. It is still under reduced motion and has a static fallback.
+  - **Settings → Voice:**
+    - downloads with sizes and licences shown first, real progress, cancel, checksum verification and
+      Verify/Remove;
+    - microphone choice and test;
+    - a hardware report with a model recommendation;
+    - an on-device benchmark;
+    - privacy commitments.
+  - **The Voice page** is now the voice hub. A "Speak" action is added to replies.
+- **Security:** downloads only from a pinned list with publisher checksums. Unpacking is contained (no
+  `..`, absolute paths or links). Engines run as separate processes without a shell. Temporary audio
+  is deleted after each call. Nothing is logged, nothing goes to Prometheus, and offline mode blocks
+  downloads.
+
 ## 0.3.0 — 2026-11-08
 
 ### Added

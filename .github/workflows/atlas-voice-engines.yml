@@ -1,0 +1,48 @@
+# Real speech engines on real machines: downloads the pinned sherpa-onnx, Piper voice, whisper.cpp
+# and Whisper models from their public sources, verifies them, synthesises speech, transcribes it
+# back, and publishes the benchmark and an audio sample as artifacts. No microphone or speaker is
+# used (CI machines have none); that part needs the owner's PC.
+name: atlas-voice-engines
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "Whisper models to benchmark (comma-separated: tiny,base,small,large-v3-turbo-q5)"
+        default: "tiny,base,small"
+  push:
+    paths:
+      - "atlas/core/src/voice/**"
+      - "atlas/core/tests/voice_real_engines.rs"
+      - ".github/workflows/atlas-voice-engines.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  engines:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: atlas
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: atlas
+      - name: Real engines, real downloads, real speech round trip
+        shell: bash
+        env:
+          ATLAS_VOICE_BENCH_OUT: ${{ runner.temp }}/voice-bench
+          VOICE_BENCH_MODELS: ${{ inputs.models || 'tiny,base,small' }}
+        run: cargo test -p atlas-core --test voice_real_engines -- --ignored --nocapture --test-threads=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: voice-benchmark-${{ matrix.os }}
+          path: ${{ runner.temp }}/voice-bench
+          if-no-files-found: warn

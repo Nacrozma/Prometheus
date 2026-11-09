@@ -102,6 +102,18 @@ Budgets (Settings → Usage & budgets):
   model step of a task.
 * An unknown or unverified price, while budgets are set, produces a visible warning.
 
+## Voice (no provider)
+
+Voice uses no AI provider and no API key.
+* **Speech output:** sherpa-onnx with Piper voices.
+* **Speech recognition:** whisper.cpp with Whisper models.
+
+Both run on the computer, from files downloaded on request (Settings → Voice); see ATLAS_VOICE_ARCHITECTURE.md.
+
+Optional cloud speech engines could be added later behind the same `TextToSpeech` / `SpeechToText`
+interfaces. They would need explicit configuration, a key in the credential store, consent text saying
+what leaves the device, and budget checks. Atlas never switches to one on its own.
+
 ## Adding a provider kind
 
 1. Implement `ChatProvider` in `core/src/ai/<name>.rs`, with wiremock tests for streaming, errors and cancellation.

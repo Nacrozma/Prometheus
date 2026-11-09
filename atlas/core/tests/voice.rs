@@ -196,6 +196,9 @@ async fn offline_mode_refuses_downloads_but_settings_validate() {
     let e = a.voice_install(MODEL, &mut |_| {}).await.unwrap_err();
     assert_eq!(e.code(), "permission_denied");
     assert!(e.to_string().contains("offline mode"));
+    // No exceptions: even a loopback source is refused while offline.
+    a.voice.set_override(MODEL, Override { url: "http://127.0.0.1:9/m.bin".into(), sha256: sha(b"x"), bytes: 10 });
+    assert_eq!(a.voice_install(MODEL, &mut |_| {}).await.unwrap_err().code(), "permission_denied");
 
     // Voice settings are validated in the core.
     s.network.offline_mode = false;
@@ -222,8 +225,37 @@ async fn stand_in_engines_for_test_builds_speak_and_transcribe_and_say_so() {
     assert!(!a.voice_status().unwrap().tts_ready, "nothing installed, so speech output is not ready");
     assert_eq!(a.voice_synthesize("Hello", None).await.unwrap_err().code(), "not_found");
     a.voice.use_fixtures(true);
+    // Stand-in engines replace the programs, not the downloads: still not ready until installed.
+    assert!(!a.voice_status().unwrap().tts_ready);
+    assert_eq!(a.voice_synthesize("Hello", None).await.unwrap_err().code(), "not_found");
+    let server = MockServer::start().await;
+    let files = tar_bz2(&[("x/placeholder", b"never executed", 0o644)]);
+    let model = b"stand-in model".to_vec();
+    serve(&server, "/files.tar.bz2", files.clone()).await;
+    serve(&server, "/model.bin", model.clone()).await;
+    let mut ids = vec![VOICE.to_string()];
+    for kind in [catalog::ArtifactKind::TtsEngine, catalog::ArtifactKind::SttEngine] {
+        if let Some(e) = catalog::engine(kind)
+            && e.archive == catalog::Archive::TarBz2
+        {
+            ids.push(e.id.into());
+        }
+    }
+    for id in &ids {
+        over(&a, id, format!("{}/files.tar.bz2", server.uri()), &files);
+        a.voice_install(id, &mut |_| {}).await.unwrap();
+    }
+    over(&a, MODEL, format!("{}/model.bin", server.uri()), &model);
+    a.voice_install(MODEL, &mut |_| {}).await.unwrap();
     let st = a.voice_status().unwrap();
-    assert!(st.fixtures && st.tts_ready && st.stt_ready);
+    assert!(st.fixtures && st.tts_ready, "{st:?}");
+    // On platforms where whisper.cpp publishes a (zip) engine, it must be installed too.
+    if catalog::engine(catalog::ArtifactKind::SttEngine).is_none_or(|e| e.archive == catalog::Archive::TarBz2) {
+        assert!(st.stt_ready);
+    } else {
+        assert!(!st.stt_ready, "the Windows recognition engine is not installed in this test");
+        return;
+    }
     let wav_bytes = a.voice_synthesize("Hello there, this is Atlas.", Some(1.0)).await.unwrap();
     let pcm = wav::decode(&wav_bytes).unwrap();
     assert!(pcm.duration_ms() > 500 && pcm.rms() > 0.05);

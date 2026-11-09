@@ -67,7 +67,17 @@ export const SettingsSchema = z.object({
     on_exceed: z.enum(["stop", "ask"]),
     price_overrides: z.array(PriceOverrideSchema),
   }),
-  voice: z.object({ enabled: z.boolean(), speak_responses: z.boolean(), language: z.string() }),
+  voice: z.object({
+    enabled: z.boolean(),
+    speak_responses: z.boolean(),
+    language: z.string(),
+    tts_voice: z.string().nullable(),
+    stt_model: z.string().nullable(),
+    speed: z.number(),
+    volume: z.number(),
+    auto_send: z.boolean(),
+    input_device: z.string().nullable(),
+  }),
   default_project_id: z.string().nullable(),
   forge: z.object({ command_timeout_secs: z.number(), max_output_kb: z.number() }),
   first_launch: z.object({ completed_at: z.string().nullable() }),
@@ -614,3 +624,75 @@ export const MissionDetailSchema = z.object({
   atlas_spend_usd: z.number(),
 });
 export type MissionDetail = z.infer<typeof MissionDetailSchema>;
+
+// ---------- voice ----------
+export const ArtifactKindSchema = z.enum(["tts_engine", "stt_engine", "voice", "stt_model"]);
+export const ArtifactStatusSchema = z.object({
+  id: z.string(),
+  kind: ArtifactKindSchema,
+  name: z.string(),
+  description: z.string(),
+  url: z.string(),
+  sha256: z.string(),
+  bytes: z.number(),
+  platform: z.string().nullable(),
+  language: z.string().nullable(),
+  license: z.string(),
+  license_url: z.string(),
+  source: z.string(),
+  recommended: z.boolean(),
+  note: z.string(),
+  state: z.enum(["not_installed", "installed", "damaged"]),
+  installing: z.boolean(),
+});
+export type ArtifactStatus = z.infer<typeof ArtifactStatusSchema>;
+export const HardwareSchema = z.object({
+  os: z.string(),
+  arch: z.string(),
+  cpu: z.string(),
+  logical_cores: z.number(),
+  avx2: z.boolean(),
+  total_memory_mb: z.number(),
+  available_memory_mb: z.number(),
+  free_disk_mb: z.number().nullable(),
+  recommended_stt_model: z.string(),
+  recommendation: z.string(),
+});
+export const VoiceStatusSchema = z.object({
+  platform: z.string(),
+  tts_supported: z.boolean(),
+  stt_supported: z.boolean(),
+  tts_engine: ArtifactStatusSchema.nullable(),
+  stt_engine: ArtifactStatusSchema.nullable(),
+  voices: z.array(ArtifactStatusSchema),
+  stt_models: z.array(ArtifactStatusSchema),
+  selected_voice: z.string(),
+  selected_stt_model: z.string(),
+  tts_ready: z.boolean(),
+  stt_ready: z.boolean(),
+  fixtures: z.boolean(),
+  hardware: HardwareSchema,
+  temp_audio_files: z.number(),
+  storage_bytes: z.number(),
+});
+export type VoiceStatus = z.infer<typeof VoiceStatusSchema>;
+export const DownloadProgressSchema = z.discriminatedUnion("phase", [
+  z.object({ phase: z.literal("downloading"), received: z.number(), total: z.number().nullable() }),
+  z.object({ phase: z.literal("verifying") }),
+  z.object({ phase: z.literal("unpacking") }),
+  z.object({ phase: z.literal("done") }),
+]);
+export type DownloadProgress = z.infer<typeof DownloadProgressSchema>;
+export const TranscriptSchema = z.object({ text: z.string(), audio_ms: z.number(), elapsed_ms: z.number(), engine: z.string() });
+export type Transcript = z.infer<typeof TranscriptSchema>;
+export const BenchmarkSchema = z.object({
+  fixtures: z.boolean(),
+  phrase: z.string(),
+  voice: z.string(),
+  synthesis_ms: z.number(),
+  audio_ms: z.number(),
+  synthesis_rtf: z.number(),
+  models: z.array(z.object({ id: z.string(), name: z.string(), elapsed_ms: z.number(), real_time_factor: z.number(), transcript: z.string(), word_accuracy: z.number() })),
+  hardware: HardwareSchema,
+});
+export type Benchmark = z.infer<typeof BenchmarkSchema>;

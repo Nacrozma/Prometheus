@@ -294,6 +294,7 @@ export function Onboarding({ settings, onDone }: { settings: Settings; onDone: (
                 <li className="flex items-center gap-2"><StatusPill tone={connected ? "ok" : "warn"} label={connected ? "An AI model is connected" : "No model connected yet — add one in Integrations"} /></li>
                 <li className="flex items-center gap-2"><StatusPill tone={workspace ? "ok" : "neutral"} label={workspace ? "Workspace folder chosen" : "No workspace — file tools stay off"} /></li>
                 <li className="flex items-center gap-2"><StatusPill tone="ok" label="Changes always ask for your approval first" /></li>
+                <li className="flex items-center gap-2"><StatusPill tone="neutral" label="Voice is optional and runs on this PC: turn it on later in Settings → Voice (downloads about 95 MB to speak, 150 MB to listen)" /></li>
               </ul>
               <div className="mt-8 flex flex-wrap justify-center gap-2">
                 <Button variant="primary" size="lg" disabled={!connected} onClick={() => finish("chat")}>Start your first conversation</Button>

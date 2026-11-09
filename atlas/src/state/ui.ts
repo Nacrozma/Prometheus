@@ -16,6 +16,7 @@ export type Route =
 
 export type SettingsSection =
   | "companion"
+  | "voice"
   | "models"
   | "routing"
   | "forge"

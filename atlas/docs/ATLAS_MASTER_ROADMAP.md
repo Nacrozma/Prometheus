@@ -26,7 +26,7 @@ from earlier reports.
 | Avatar states beyond idle/thinking/speaking/adapting/offline (connecting, receiving, engineering, running tests, awaiting approval, reporting, error, paused) | Partial | 5 render states are mapped from real link and mission state; finer states need a richer mapping, not new shaders |
 | Splash / first-run onboarding | Implemented | `features/onboarding`, `App.tsx` splash |
 | **Cinematic first-launch with "Created with love."** | Implemented (0.3.0) | `features/first-launch/*`; runs once (core-owned state), Skip/Esc, replay in Settings → About, still scene under reduced motion; the voice ring joins it in Stage 2 |
-| **Electric-blue audio-reactive voice ring** | Missing | New renderer; depends on real voice output (below) |
+| **Electric-blue audio-reactive voice ring** | Implemented (0.4.0) | `features/voice/VoiceRing.tsx`, `ringShader.ts`. WebGL2, driven by the live Web Audio analyser (playback or microphone); 8 states; still under reduced motion; static fallback. Not yet part of the first-launch introduction (next step). Not yet seen on the owner's PC |
 
 ### Companion and conversation
 
@@ -44,8 +44,8 @@ from earlier reports.
 
 | Capability | Status | Where / notes |
 |---|---|---|
-| Voice input (push-to-talk, transcription) | **Missing** | Voice page honestly says "Not available yet"; no microphone access |
-| Voice output (TTS for responses) | **Missing** | Only a system-voice test button; `speak_responses` stored but unused |
+| Voice input (push-to-talk, transcription) | Implemented (0.4.0); hardware MANUAL | whisper.cpp 1.8.2 + Whisper models, on-device. Push-to-talk, transcript review/edit, cancel, single-flight, mic-loss handling. Real engines verified in CI; a real microphone only on the owner's PC |
+| Voice output (TTS for responses) | Implemented (0.4.0); hardware MANUAL | sherpa-onnx 2.0.1 + Piper voices, on-device. Progressive sentence playback, Markdown-aware, stop/pause/replay/mute. Real engines verified in CI; real speakers only on the owner's PC |
 | Compact window, tray, global shortcut, always-on-top | Missing | Tauri plugins exist (tray, global-shortcut); not used |
 | Desktop notifications | Missing | In-app toasts only |
 
@@ -200,7 +200,7 @@ What was built is described in ATLAS_EXPERIENCE_SPECIFICATION.md and ATLAS_FIRST
 
 | Stage | Contents |
 |---|---|
-| 2 | Voice output (OS TTS, then provider TTS) → electric-blue audio-reactive ring → push-to-talk input with explicit local/cloud labelling |
+| 2 | **Released in 0.4.0.** Local TTS (sherpa-onnx + Piper) → audio-reactive ring → local push-to-talk (whisper.cpp). OS TTS was rejected: its audio can't be analysed, so the ring couldn't be real. See ATLAS_VOICE_ARCHITECTURE.md. Remaining: ring in the first-launch introduction, wake word (deferred), cloud engines (deferred), owner hardware check |
 | 3 | Desktop presence: tray, global shortcut, compact window, desktop notifications |
 | 4 | Command Center polish, notification engine, briefing foundation |
 | 5 | Memory provenance and staleness, Knowledge Vault (documents and citations) |

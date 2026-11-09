@@ -17,6 +17,9 @@ import { LiveTurn } from "./LiveTurn";
 import { ModelPicker, type ModelChoice } from "./ModelPicker";
 import { Thread } from "./Thread";
 import { canRegenerate, conversationToMarkdown } from "./conversation";
+import { audio } from "@/features/voice/audioEngine";
+import { VoiceBar } from "@/features/voice/VoiceBar";
+import { useVoice } from "@/state/voice";
 
 const SUGGESTIONS = [
   "Help me plan my week — ask me what's on it first.",
@@ -257,8 +260,24 @@ export function CompanionPage() {
         return;
       }
     }
+    // A click or key press: let Atlas's speech start when the reply arrives.
+    audio.context();
+    const v = useVoice.getState();
+    if (v.settings?.enabled && v.settings.speak_responses) v.setAwaitingReply(true);
     void send(id, text, choice);
   };
+
+  // A recognised voice request: send it at once, or leave it in the box to review.
+  const voiceDraft = useVoice((s) => s.draft);
+  const [composerDraft, setComposerDraft] = useState<{ text: string; nonce: number } | null>(null);
+  const handledDraft = useRef(0);
+  useEffect(() => {
+    if (!voiceDraft || voiceDraft.nonce === handledDraft.current) return;
+    handledDraft.current = voiceDraft.nonce;
+    if (useVoice.getState().settings?.auto_send && !running) void onSend(voiceDraft.text);
+    else setComposerDraft(voiceDraft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceDraft]);
 
   const msgs = messages.data ?? [];
   const regenerateOk = Boolean(activeId) && !running && canRegenerate(msgs);
@@ -322,7 +341,7 @@ export function CompanionPage() {
             </div>
           ) : (
             <>
-              <Thread messages={msgs} canAskAgain={!running} running={running} onAskAgain={(t) => onSend(t)} onRegenerate={regenerate} />
+              <Thread messages={msgs} canAskAgain={!running} running={running} onAskAgain={(t) => onSend(t)} onRegenerate={regenerate} onSpeak={(t) => useVoice.getState().speakText(t)} />
               {transient.map((n, i) => (
                 <p key={i} className="mx-auto mb-2 max-w-3xl px-6 text-xs text-warn">{n.text}</p>
               ))}
@@ -331,7 +350,9 @@ export function CompanionPage() {
           )}
           {activeId && <BudgetPrompt conversationId={activeId} />}
         </div>
+        <VoiceBar />
         <Composer
+          draft={composerDraft}
           running={running}
           disabled={Boolean(noProviders)}
           disabledReason="Connect an AI provider first"

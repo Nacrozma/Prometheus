@@ -29,6 +29,14 @@ export interface TurnState {
 
 type SendOpts = { providerId?: string | null; model?: string | null; regenerate?: boolean };
 
+/** Listeners for every turn event (the voice reads replies aloud from here). */
+type TurnListener = (conversationId: string, e: TurnEvent) => void;
+const turnListeners = new Set<TurnListener>();
+export function onTurnEvent(fn: TurnListener): () => void {
+  turnListeners.add(fn);
+  return () => turnListeners.delete(fn);
+}
+
 export const empty = (): TurnState => ({ running: false, text: "", reasoning: "", tools: [], notices: [], revision: 0 });
 
 interface TurnsStore {
@@ -101,7 +109,16 @@ export const useTurns = create<TurnsStore>((set, get) => ({
     try {
       await api.send(
         { conversationId, text, providerId: opts?.providerId, model: opts?.model, budgetOverride: opts?.budgetOverride, regenerate: opts?.regenerate },
-        (e) => patch((s) => reduce(s, e)),
+        (e) => {
+          patch((s) => reduce(s, e));
+          for (const fn of turnListeners) {
+            try {
+              fn(conversationId, e);
+            } catch (err) {
+              console.error("[atlas] turn listener failed", err);
+            }
+          }
+        },
       );
     } catch (e) {
       if (e instanceof AtlasError && e.code === "budget_confirmation_required") {
