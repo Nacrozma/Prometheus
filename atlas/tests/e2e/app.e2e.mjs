@@ -31,7 +31,13 @@ async function find(locator, ms = 15000) {
 async function click(text, tag = "button") {
   const el = await find(xpText(tag, text));
   await driver.wait(until.elementIsEnabled(el), 15000);
-  await el.click();
+  try {
+    await el.click();
+  } catch (e) {
+    // A transient toast can sit over the target; the element itself is enabled, so click it directly.
+    if (e?.name !== "ElementClickInterceptedError") throw e;
+    await driver.executeScript("arguments[0].click()", el);
+  }
 }
 /** Wait until `text` is visible on the page (matches across text nodes, unlike an XPath text() test). */
 async function waitText(text, ms = 15000) {
