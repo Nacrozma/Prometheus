@@ -105,7 +105,7 @@ Atlas can listen and speak entirely on your PC: no speech service, no API key, a
 set up. Voice is off until you turn it on.
 
 1. **Turn it on:** Settings → Voice → turn on **Voice**.
-2. **Download speech output:** click **Set up speech output**. That is the engine (about 27 MB) and the
+2. **Download speech output:** click **Set up speech output**. That is the engine (about 24 MB) and the
    Alba voice (about 67 MB); other voices are optional.
 3. **Download speech recognition:** click **Set up speech recognition**. That is the engine (about 4 MB)
    and the Whisper base model (about 148 MB). Settings → Voice recommends a model for your PC, and
