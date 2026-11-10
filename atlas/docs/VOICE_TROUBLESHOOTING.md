@@ -70,3 +70,10 @@ Voice is optional: if anything here goes wrong, typing keeps working exactly as 
 * It never listens in the background, and never keeps recordings.
 * It never sends audio or transcripts to any service or to Prometheus.
 * It never switches to a cloud speech service on its own.
+
+## Measuring it on your PC
+
+**Settings → Voice → Voice check** tests your real speakers and microphone and shows what Atlas
+measured: how long speech takes to start, what it recognised and how many words were right. **Copy
+report** gives the results as text (no audio). The full checklist is in
+[VOICE_HARDWARE_VALIDATION.md](VOICE_HARDWARE_VALIDATION.md).

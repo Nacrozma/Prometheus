@@ -59,9 +59,9 @@ No feature is currently known to be broken. "Unreliable" is used where real-worl
 | Feature | Now | Planned |
 |---|---|---|
 | Local speech output and recognition engines | ✅ CI, real engines | Keep |
-| Real microphone and speaker behaviour | 🔴 unproven | 0.4.1: owner's PC, with an in-app Voice check that records the results |
-| Maintained capture API | 🟡 deprecated API | 0.4.1: AudioWorklet, with the old path as fallback |
-| Output-device selection | ⬜ | 0.4.1 (where the web view supports it) |
+| Real microphone and speaker behaviour | 🔴 unproven | Voice check shipped in 0.4.1; **the owner's run is still open** (VOICE_HARDWARE_VALIDATION.md) |
+| Maintained capture API | ✅ done in 0.4.1 (AudioWorklet; e2e-verified on WebView2 and WebKitGTK) | Keep |
+| Output-device selection | ✅ done in 0.4.1 on Windows; not offered by WebKitGTK (Linux) | Keep |
 | Microphone selection, speed, volume, voice choice | ✅ | Keep |
 | Evidence-based default model | 🟡 base chosen from CI numbers | 0.4.1: decide from the owner's measurements |
 | Audio setup wizard | ⬜ | 0.4.2 |

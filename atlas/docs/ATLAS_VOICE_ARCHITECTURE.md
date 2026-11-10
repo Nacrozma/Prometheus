@@ -26,7 +26,7 @@ Stage 2 (0.4.0). This page covers what exists.
 | A. Speech recognition (STT) | `core/src/voice/stt.rs` | `SpeechToText` trait; `WhisperCli` (whisper.cpp 1.8.2); single-flight; 0.3–120 s recordings |
 | B. Text-to-speech (TTS) | `core/src/voice/tts.rs` | `TextToSpeech` trait; `SherpaTts` (sherpa-onnx 1.12.40 running Piper voices); text sanitised and length-capped |
 | C. Playback and streaming | `src/features/voice/audioEngine.ts` | Sentence queue, synthesised one ahead of playback; volume; pause, resume and stop |
-| D. Microphone | `src/features/voice/audioEngine.ts` | Push-to-talk capture via `getUserMedia`, downsampled to 16 kHz in memory; released on stop |
+| D. Microphone | `src/features/voice/audioEngine.ts`, `public/voice-capture.worklet.js` | Push-to-talk capture via `getUserMedia`; samples are collected on the audio thread by an AudioWorklet (ScriptProcessor only as a fallback), held in memory, downsampled to 16 kHz and cleared after recognition. Output device selectable where the web view supports `setSinkId` (WebView2). **Voice check** (`VoiceCheck.tsx`, `voiceCheck.ts`) measures real hardware; see VOICE_HARDWARE_VALIDATION.md |
 | E. Visualisation | `src/features/voice/VoiceRing.tsx`, `ringShader.ts` | WebGL2 ring driven by a 64-band spectrum from the live analyser; 8 states |
 | F. Orchestration | `src/state/voice.ts`, `VoiceProvider.tsx` | State machine, shortcuts, reading replies as they stream, transcript to composer |
 

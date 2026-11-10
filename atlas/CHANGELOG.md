@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.1 — 2026-11-10
+
+Voice groundwork for testing on real hardware. **A real microphone and real speakers have still not
+been tested by anyone**; the Voice check below is how the owner does that
+(docs/VOICE_HARDWARE_VALIDATION.md).
+
+### Added
+- **Voice check** (Settings → Voice): tests your real speakers and microphone and records what Atlas
+  measured.
+  - Speakers: time to first sound, and what you heard.
+  - Microphone: read a set sentence under chosen conditions; shows what was recognised, the share of
+    words right, speech length, recognition time and input level.
+  - **Copy report** gives the results with the PC, devices and models. No audio is kept or sent.
+- **Output device choice** (Settings → Voice → Play through), where the system lets apps choose
+  (Windows). If the chosen device disappears, Atlas falls back to the system default.
+
+### Changed
+- **Microphone capture uses an audio worklet**, replacing the deprecated ScriptProcessor. The old path
+  remains only as a fallback for web views without worklet support. End-to-end tests confirm the
+  worklet is what runs on Windows (WebView2) and Linux (WebKitGTK).
+- Microphone and speaker ids are validated in the core.
+
+### Not changed
+- The default recognition model stays "base" until real measurements exist.
+
 ## 0.4.0 — 2026-11-09 (released: atlas-v0.4.0)
 
 ### Added
