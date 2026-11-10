@@ -456,6 +456,8 @@ pub struct VoiceSettings {
     pub auto_send: bool,
     /// The microphone to use (an id the system gives the app; not a secret). `None` = default.
     pub input_device: Option<String>,
+    /// The speakers or headphones to use (a system-given id; not a secret). `None` = default.
+    pub output_device: Option<String>,
 }
 
 impl Default for VoiceSettings {
@@ -470,6 +472,7 @@ impl Default for VoiceSettings {
             volume: 90,
             auto_send: false,
             input_device: None,
+            output_device: None,
         }
     }
 }
@@ -513,8 +516,10 @@ impl Settings {
                 return Err(AtlasError::Validation(format!("unknown {what} '{id}'")));
             }
         }
-        if v.input_device.as_ref().is_some_and(|d| d.len() > 512) {
-            return Err(AtlasError::Validation("microphone id is too long".into()));
+        for (what, id) in [("microphone", &v.input_device), ("speaker", &v.output_device)] {
+            if id.as_ref().is_some_and(|d| d.len() > 512 || d.chars().any(char::is_control)) {
+                return Err(AtlasError::Validation(format!("{what} id is not valid")));
+            }
         }
         let ci = &self.companion.custom_instructions;
         if ci.chars().count() > MAX_CUSTOM_INSTRUCTIONS {

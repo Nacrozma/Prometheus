@@ -58,6 +58,7 @@ export const useVoice = create<VoiceStore>((set, get) => {
     setSettings: (v) => {
       audio.setVolume(v.volume / 100);
       audio.speed = v.speed;
+      audio.preferOutput(v.output_device ?? null);
       set({ settings: v });
     },
     startListening: async () => {

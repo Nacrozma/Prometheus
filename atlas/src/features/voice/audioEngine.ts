@@ -44,6 +44,14 @@ export class AudioEngine {
   private stream: MediaStream | null = null;
   private source: AudioNode | null = null;
   private processor: ScriptProcessorNode | null = null;
+  private worklet: AudioWorkletNode | null = null;
+  private workletLoaded: Promise<boolean> | null = null;
+  private mute: GainNode | null = null;
+  /** How the current or last recording was captured (shown in the voice check report). */
+  captureBackend: "worklet" | "script-processor" | null = null;
+  /** The output device in use ("" = system default). */
+  private sinkId = "";
+  private wantSink = "";
   private fixtureNodes: AudioScheduledSourceNode[] = [];
   private chunks: Float32Array[] = [];
   private captureTimer: ReturnType<typeof setTimeout> | null = null;
@@ -71,9 +79,57 @@ export class AudioEngine {
       this.playAnalyser.smoothingTimeConstant = 0.6;
       this.gain.connect(this.playAnalyser);
       this.playAnalyser.connect(this.ctx.destination);
+      if (this.wantSink) void this.setOutputDevice(this.wantSink);
     }
     if (this.ctx.state === "suspended" && this.state !== "paused") void this.ctx.resume().catch(() => {});
     return this.ctx;
+  }
+
+  /** Whether this web view lets Atlas choose the output device. */
+  outputSelectable(): boolean {
+    const AC = window.AudioContext as unknown as { prototype?: object } | undefined;
+    return Boolean(AC?.prototype && "setSinkId" in AC.prototype);
+  }
+
+  /** Remember the owner's output device; it is applied as soon as audio is in use. */
+  preferOutput(id: string | null) {
+    this.wantSink = id ?? "";
+    if (this.ctx && this.wantSink !== this.sinkId) void this.setOutputDevice(this.wantSink);
+  }
+
+  /** Play through a chosen output device ("" or null = system default). False if it could not be used. */
+  async setOutputDevice(id: string | null): Promise<boolean> {
+    const want = id ?? "";
+    if (!this.outputSelectable()) return want === "";
+    this.wantSink = want;
+    if (want === this.sinkId && this.ctx) return true;
+    const ctx = this.context() as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+    try {
+      await ctx.setSinkId?.(want);
+      this.sinkId = want;
+      return true;
+    } catch {
+      // The device was unplugged or is not allowed: fall back to the system default.
+      if (want !== "") {
+        await ctx.setSinkId?.("").catch(() => {});
+        this.sinkId = "";
+      }
+      return false;
+    }
+  }
+
+  /** Load the capture module once per audio context. False where worklets are unavailable. */
+  private loadWorklet(ctx: AudioContext): Promise<boolean> {
+    if (!this.workletLoaded) {
+      this.workletLoaded =
+        ctx.audioWorklet && typeof AudioWorkletNode !== "undefined"
+          ? ctx.audioWorklet.addModule(`${import.meta.env.BASE_URL}voice-capture.worklet.js`).then(
+              () => true,
+              () => false,
+            )
+          : Promise.resolve(false);
+    }
+    return this.workletLoaded;
   }
 
   setVolume(v: number) {
@@ -276,16 +332,27 @@ export class AudioEngine {
       this.source = ctx.createMediaStreamSource(this.stream);
     }
     this.source.connect(this.micAnalyser);
-    // ScriptProcessor is deprecated but supported by both WebView2 and WebKitGTK without loading a
-    // separate module; it only copies samples into memory.
-    this.processor = ctx.createScriptProcessor(4096, 1, 1);
-    this.processor.onaudioprocess = (ev) => {
-      if (this.capturing) this.chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
-    };
-    const mute = ctx.createGain();
-    mute.gain.value = 0;
-    this.source.connect(this.processor);
-    this.processor.connect(mute).connect(ctx.destination);
+    // Samples are collected on the audio thread by a worklet. Web views without worklet support
+    // fall back to the older ScriptProcessor, which does the same job on the main thread.
+    this.mute = ctx.createGain();
+    this.mute.gain.value = 0;
+    if (await this.loadWorklet(ctx)) {
+      this.worklet = new AudioWorkletNode(ctx, "atlas-capture", { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1, channelCountMode: "explicit" });
+      this.worklet.port.onmessage = (ev: MessageEvent<Float32Array>) => {
+        if (this.capturing) this.chunks.push(ev.data);
+      };
+      this.source.connect(this.worklet);
+      this.worklet.connect(this.mute).connect(ctx.destination);
+      this.captureBackend = "worklet";
+    } else {
+      this.processor = ctx.createScriptProcessor(4096, 1, 1);
+      this.processor.onaudioprocess = (ev) => {
+        if (this.capturing) this.chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+      };
+      this.source.connect(this.processor);
+      this.processor.connect(this.mute).connect(ctx.destination);
+      this.captureBackend = "script-processor";
+    }
     this.capturing = true;
     this.captureTimer = setTimeout(() => this.lose("Recordings are limited to two minutes; listening stopped."), MAX_RECORDING_MS);
     this.emit();
@@ -320,6 +387,14 @@ export class AudioEngine {
     this.processor?.disconnect();
     if (this.processor) this.processor.onaudioprocess = null;
     this.processor = null;
+    if (this.worklet) {
+      this.worklet.port.postMessage("stop");
+      this.worklet.port.onmessage = null;
+      this.worklet.disconnect();
+    }
+    this.worklet = null;
+    this.mute?.disconnect();
+    this.mute = null;
     this.source?.disconnect();
     this.source = null;
     for (const n of this.fixtureNodes) {

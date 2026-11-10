@@ -369,6 +369,23 @@ test("voice: verified downloads, push-to-talk into an editable message, a spoken
   await driver.wait(async () => (await invoke("settings_get")).voice.speak_responses === true, 5000);
   await shot("15-voice-settings");
 
+  // Voice check (stand-in engines here, so this proves the flow and the capture path, not hardware).
+  await click("Play test sentence");
+  await find(By.css("[data-speaker-question]"), 20000);
+  await click("Clearly");
+  await find(By.css('[data-check-results] [data-result="speaker"]'));
+  await driver.actions().sendKeys(Key.ESCAPE).perform(); // stop the test sentence
+  await driver.executeScript("arguments[0].click()", await find(By.xpath("//*[@data-voice-check]//button[normalize-space(.)='Start']")));
+  await find(By.xpath("//*[@data-voice-check]//button[normalize-space(.)='Stop']"));
+  await driver.sleep(1000);
+  await driver.executeScript("arguments[0].click()", await find(By.xpath("//*[@data-voice-check]//button[normalize-space(.)='Stop']")));
+  await find(By.css('[data-check-results] [data-result="microphone"]'), 15000);
+  await waitText("Heard: “What is 6 times 7?”");
+  // The maintained capture API (an audio worklet) is what actually ran in this web view.
+  assert.equal(await voice("backend()"), "worklet", "microphone capture uses the audio worklet");
+  assert.equal(await voice("capturing()"), false);
+  await shot("15b-voice-check");
+
   // Push-to-talk: the stand-in microphone is a test tone; the ring measures it.
   await driver.actions().keyDown(Key.CONTROL).sendKeys("n").keyUp(Key.CONTROL).perform();
   await driver.sleep(400);

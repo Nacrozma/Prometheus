@@ -210,10 +210,21 @@ async fn offline_mode_refuses_downloads_but_settings_validate() {
     s.voice.tts_voice = Some(VOICE.into());
     s.voice.language = "en US; rm".into();
     assert!(a.update_settings(s.clone()).is_err());
+    s.voice.output_device = Some("bad\u{7}id".into()); // control characters are refused
+    assert!(a.update_settings(s.clone()).is_err());
+    s.voice.output_device = Some("x".repeat(600));
+    assert!(a.update_settings(s.clone()).is_err());
+    s.voice.output_device = Some("a1b2c3-speakers".into());
     s.voice.language = "ar".into();
     s.voice.stt_model = Some("stt-whisper-small".into());
     let saved = a.update_settings(s).unwrap();
     assert_eq!(saved.voice.stt_model.as_deref(), Some("stt-whisper-small"));
+    assert_eq!(saved.voice.output_device.as_deref(), Some("a1b2c3-speakers"));
+    // Settings saved by 0.4.0 (no output device field) still load.
+    let mut old: serde_json::Value = serde_json::to_value(&saved.voice).unwrap();
+    old.as_object_mut().unwrap().remove("output_device");
+    let loaded: atlas_core::settings::VoiceSettings = serde_json::from_value(old).unwrap();
+    assert_eq!(loaded.output_device, None);
     // Unknown downloads are refused.
     assert_eq!(a.voice_install("nope", &mut |_| {}).await.unwrap_err().code(), "not_found");
 }

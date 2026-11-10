@@ -8,6 +8,7 @@ import { useAtlasQuery } from "@/lib/query";
 import type { ArtifactStatus, Benchmark, DownloadProgress, Settings } from "@/lib/schemas";
 import { useVoice } from "@/state/voice";
 import { audio } from "./audioEngine";
+import { VoiceCheck } from "./VoiceCheck";
 import { VoiceRing } from "./VoiceRing";
 
 const LANGUAGES: [string, string][] = [
@@ -153,7 +154,7 @@ export function VoiceSettingsSection({ s, save }: { s: Settings; save: (n: Setti
   const loadDevices = async () => {
     try {
       const all = await navigator.mediaDevices?.enumerateDevices?.();
-      setDevices((all ?? []).filter((d) => d.kind === "audioinput"));
+      setDevices((all ?? []).filter((d) => d.kind === "audioinput" || d.kind === "audiooutput"));
     } catch {
       setDevices([]);
     }
@@ -167,6 +168,13 @@ export function VoiceSettingsSection({ s, save }: { s: Settings; save: (n: Setti
     if (testTimer.current) clearTimeout(testTimer.current);
     if (audio.capturing && testing) audio.cancelCapture();
   }, [testing]);
+
+  const inputs = devices.filter((d) => d.kind === "audioinput" && d.deviceId && d.deviceId !== "default");
+  const outputs = devices.filter((d) => d.kind === "audiooutput" && d.deviceId && d.deviceId !== "default");
+  const chooseOutput = async (id: string | null) => {
+    if (!(await audio.setOutputDevice(id))) return toast.error("That output device could not be used. Atlas is using the system default.");
+    await set({ output_device: id });
+  };
 
   const preview = () => {
     if (!st?.tts_ready) return toast.error("Download the speech engine and a voice first.");
@@ -264,6 +272,21 @@ export function VoiceSettingsSection({ s, save }: { s: Settings; save: (n: Setti
                 Volume {v.volume}%
                 <input type="range" aria-label="Voice volume" min={0} max={100} step={5} value={v.volume} onChange={(e) => void set({ volume: Number(e.target.value) })} className="w-32 accent-[color:var(--accent)]" />
               </label>
+              {audio.outputSelectable() ? (
+                <label className="flex items-center gap-2 text-xs text-text-2">
+                  Play through
+                  <Select aria-label="Speakers or headphones" value={v.output_device ?? ""} onChange={(e) => void chooseOutput(e.target.value || null)} className="w-56">
+                    <option value="">System default</option>
+                    {outputs.map((d, i) => (
+                      <option key={d.deviceId || i} value={d.deviceId}>
+                        {d.label || `Output ${i + 1}`}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+              ) : (
+                <span className="text-xs text-text-3" data-output-fixed>Plays through the system's default output (this system doesn't let apps choose).</span>
+              )}
             </div>
             <div className="flex items-center justify-between gap-4">
               <p className="text-xs text-text-2">Read Atlas's replies aloud (code and tables are mentioned, not read)</p>
@@ -307,7 +330,7 @@ export function VoiceSettingsSection({ s, save }: { s: Settings; save: (n: Setti
                 Microphone
                 <Select aria-label="Microphone" value={v.input_device ?? ""} onChange={(e) => void set({ input_device: e.target.value || null })} className="w-56">
                   <option value="">System default</option>
-                  {devices.map((d, i) => (
+                  {inputs.map((d, i) => (
                     <option key={d.deviceId || i} value={d.deviceId}>
                       {d.label || `Microphone ${i + 1}`}
                     </option>
@@ -326,6 +349,10 @@ export function VoiceSettingsSection({ s, save }: { s: Settings; save: (n: Setti
             </div>
           </div>
         )}
+      </Section>
+
+      <Section title="Voice check" desc="Test your real speakers and microphone. Atlas records what it measured so you can see how voice behaves on this PC.">
+        <VoiceCheck v={v} st={st} devices={devices} />
       </Section>
 
       <Section title="This computer" desc="Measured locally to recommend a model. Nothing is sent anywhere.">

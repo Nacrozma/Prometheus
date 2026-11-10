@@ -77,6 +77,7 @@ export const SettingsSchema = z.object({
     volume: z.number(),
     auto_send: z.boolean(),
     input_device: z.string().nullable(),
+    output_device: z.string().nullable().default(null),
   }),
   default_project_id: z.string().nullable(),
   forge: z.object({ command_timeout_secs: z.number(), max_output_kb: z.number() }),

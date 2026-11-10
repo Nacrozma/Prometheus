@@ -95,6 +95,7 @@ export function VoiceProvider() {
       level: () => audio.level(),
       playback: () => audio.state,
       capturing: () => audio.capturing,
+      backend: () => audio.captureBackend,
       micLost: (reason: string) => audio.onCaptureLost?.(reason),
     };
   }, [status.data?.fixtures]);
