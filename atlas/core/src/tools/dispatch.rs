@@ -43,6 +43,7 @@ pub struct Dispatcher {
     pub db: Arc<Db>,
     pub broker: Arc<Broker>,
     pub bus: SharedBus,
+    pub notifications: Arc<crate::desktop::NotificationCenter>,
 }
 
 fn failed(tool_id: &str, step_id: Option<String>, status: &str, msg: String) -> DispatchResult {
@@ -154,8 +155,20 @@ impl Dispatcher {
                     }
                 notify(&self.bus, Topic::Approvals, Some(&id));
                 notify(&self.bus, Topic::Tasks, Some(task_id));
+                let _ = self.notifications.raise(
+                    &ctx.settings.desktop.notifications,
+                    crate::desktop::NewNotification {
+                        category: crate::desktop::Category::Approval,
+                        title: "Atlas needs your approval",
+                        detail: &preview.action,
+                        target: "approvals",
+                        dedupe_key: &format!("approval:{id}"),
+                        only_if_away: false,
+                    },
+                );
                 let timeout = Duration::from_secs(ctx.settings.limits.approval_timeout_secs as u64);
                 let outcome = self.broker.wait(&self.db, &id, timeout, &ctx.cancel).await;
+                self.notifications.resolve(&format!("approval:{id}"));
                 notify(&self.bus, Topic::Approvals, Some(&id));
                 if tasks::status(&self.db, task_id).ok() == Some(TaskStatus::AwaitingApproval) {
                     let _ = tasks::transition(&self.db, task_id, TaskStatus::Running);

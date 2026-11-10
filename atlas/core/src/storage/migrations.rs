@@ -309,6 +309,22 @@ pub const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_mission_events ON mission_events(mission_id, id);
     "#,
+    // v0.4.2: notifications shown in Atlas (and by the system when the owner allows it).
+    r#"
+    CREATE TABLE notifications (
+        id TEXT PRIMARY KEY,
+        category TEXT NOT NULL CHECK (category IN ('approval','reply','mission','error','test')),
+        title TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT '',
+        target TEXT NOT NULL DEFAULT '',
+        dedupe_key TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        read_at TEXT,
+        shown_by_system INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX idx_notifications_unread ON notifications(read_at, created_at);
+    CREATE INDEX idx_notifications_dedupe ON notifications(dedupe_key, read_at);
+    "#,
 ];
 
 pub const CURRENT_SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

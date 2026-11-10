@@ -59,6 +59,8 @@ pub struct Atlas {
     pub voice: crate::voice::VoiceService,
     /// Downloads of voice files: no overall time limit (large models), but a stall limit per chunk.
     pub(crate) voice_http: reqwest::Client,
+    /// Notifications: the in-app list, and system notifications when the owner allows them.
+    pub notifications: Arc<crate::desktop::NotificationCenter>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -100,6 +102,7 @@ impl Atlas {
         let factory = cfg.factory.unwrap_or_else(|| Arc::new(DefaultFactory { http: http.clone() }));
         audit::record(&db, "app.start", "info", None, None, json!({"version": cfg.version}));
         let voice = crate::voice::VoiceService::new(cfg.data_dir.as_deref());
+        let notifications = Arc::new(crate::desktop::NotificationCenter::new(db.clone(), cfg.bus.clone()));
         Ok(Arc::new_cyclic(|me| Atlas {
             db,
             secrets: cfg.secrets,
@@ -120,6 +123,7 @@ impl Atlas {
                 .https_only(false)
                 .build()
                 .unwrap_or_default(),
+            notifications,
             me: me.clone(),
             recovered_tasks: recovered,
         }))
@@ -130,7 +134,7 @@ impl Atlas {
     }
 
     pub fn dispatcher(&self) -> Dispatcher {
-        Dispatcher { registry: self.registry.clone(), db: self.db.clone(), broker: self.broker.clone(), bus: self.bus.clone() }
+        Dispatcher { registry: self.registry.clone(), db: self.db.clone(), broker: self.broker.clone(), bus: self.bus.clone(), notifications: self.notifications.clone() }
     }
 
     pub fn tool_context(&self, settings: Settings, task_id: Option<String>, project_id: Option<String>, cancel: CancellationToken) -> ToolContext {
@@ -180,11 +184,63 @@ impl Atlas {
         if let Some(pid) = &new.default_provider_id {
             providers::get(&self.db, pid)?;
         }
+        new.desktop.shortcut = crate::desktop::parse_shortcut(&new.desktop.shortcut)?;
         new.save(&self.db)?;
         audit::record(&self.db, "settings.updated", "info", None, None, json!({}));
+        // Turning on something that reaches outside the window is recorded by name.
+        let (a, b) = (&current.desktop, &new.desktop);
+        for (what, was, is) in [("system_notifications", a.notifications.system, b.notifications.system), ("global_shortcut", a.shortcut_enabled, b.shortcut_enabled), ("close_to_tray", a.close_to_tray, b.close_to_tray)] {
+            if was != is {
+                audit::record(&self.db, "desktop.permission_changed", "info", None, None, json!({ "setting": what, "enabled": is }));
+            }
+        }
         notify(&self.bus, Topic::Settings, None);
         notify(&self.bus, Topic::Registry, None);
         Ok(new)
+    }
+
+    // ----- notifications -----
+
+    /// Raise a notification under the current settings. Failures never disturb the caller.
+    pub fn raise_notification(&self, n: crate::desktop::NewNotification<'_>) {
+        if let Ok(s) = self.settings() {
+            let _ = self.notifications.raise(&s.desktop.notifications, n);
+        }
+    }
+
+    /// Tell the owner about a mission state that needs them or has ended.
+    fn notify_mission(&self, m: &crate::sibling::missions::Mission) {
+        use crate::desktop::Category;
+        use crate::sibling::missions::MissionState as S;
+        let (category, title) = match m.state {
+            S::NeedsUserInput => (Category::Mission, "Prometheus is waiting for you"),
+            S::Reviewing => (Category::Mission, "A mission is ready for your review"),
+            S::Failed => (Category::Error, "A mission failed"),
+            S::Paused => (Category::Error, "A mission is paused: contact with Prometheus was lost"),
+            _ => return,
+        };
+        self.raise_notification(crate::desktop::NewNotification {
+            category,
+            title,
+            detail: &m.title,
+            target: &format!("mission:{}", m.id),
+            dedupe_key: &format!("mission:{}:{}", m.id, m.state.as_str()),
+            only_if_away: false,
+        });
+    }
+
+    /// Show a test notification so the owner can check the system allows them.
+    /// Refused unless system notifications are turned on.
+    pub fn notification_test(&self) -> Result<crate::desktop::Notification> {
+        let s = self.settings()?.desktop.notifications;
+        if !s.system {
+            return Err(AtlasError::PermissionDenied("system notifications are off. Turn them on in Settings → Desktop first".into()));
+        }
+        // A test is shown even while Atlas is in front.
+        let s = crate::desktop::NotificationSettings { only_when_away: false, ..s };
+        self.notifications
+            .raise(&s, crate::desktop::NewNotification { category: crate::desktop::Category::Test, title: "Atlas notifications are working", detail: "This is a test.", target: "", dedupe_key: "", only_if_away: false })?
+            .ok_or_else(|| AtlasError::Internal("the test notification was dropped".into()))
     }
 
     /// Create (if needed) and select a default workspace folder.
@@ -840,8 +896,12 @@ impl Atlas {
                 let before = crate::sibling::missions::get(&self.db, &id).ok();
                 match crate::sibling::missions::sync(&link, &id, 0).await {
                     Ok(after) => {
+                        let state_changed = before.as_ref().is_none_or(|b| b.state != after.state);
                         if before.map(|b| b.remote_seq != after.remote_seq || b.state != after.state).unwrap_or(true) {
                             self.mission_changed(&id);
+                        }
+                        if state_changed {
+                            self.notify_mission(&after);
                         }
                     }
                     Err(e) => {
@@ -849,6 +909,9 @@ impl Atlas {
                         if crate::sibling::missions::mark_unreachable(&self.db, &id, &e.to_string()).is_ok() {
                             audit::record(&self.db, "mission.contact_lost", "warn", None, None, json!({"mission_id": id}));
                             self.mission_changed(&id);
+                            if let Ok(m) = crate::sibling::missions::get(&self.db, &id) {
+                                self.notify_mission(&m);
+                            }
                         }
                     }
                 }

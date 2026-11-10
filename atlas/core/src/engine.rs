@@ -162,7 +162,25 @@ impl Atlas {
         };
         let result = self.run_turn(&turn_id, &conv, &text, &p, reuse, &cancel, &task_slot, &mut sink).await;
         match result {
-            Ok(s) => Ok(s),
+            Ok(s) => {
+                // Worth a notification only if the owner has looked away while Atlas worked.
+                let (category, title) = match s.outcome.as_str() {
+                    "completed" => (crate::desktop::Category::Reply, "Atlas has replied"),
+                    "failed" => (crate::desktop::Category::Error, "Atlas could not finish a reply"),
+                    _ => (crate::desktop::Category::Test, ""),
+                };
+                if !title.is_empty() {
+                    self.raise_notification(crate::desktop::NewNotification {
+                        category,
+                        title,
+                        detail: &conv.title,
+                        target: &format!("conversation:{}", conv.id),
+                        dedupe_key: &format!("turn:{}:{}", conv.id, s.outcome),
+                        only_if_away: true,
+                    });
+                }
+                Ok(s)
+            }
             Err(e @ AtlasError::BudgetConfirmation(_)) => {
                 // Nothing was sent or stored; the client asks the owner and may resend once.
                 sink(TurnEvent::Finished { outcome: "needs_confirmation".into(), error: Some(e.to_string()), usage: Usage::default(), estimated_cost_usd: None, task_id: None });

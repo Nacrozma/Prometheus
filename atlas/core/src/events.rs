@@ -19,6 +19,7 @@ pub enum Topic {
     Forge,
     Siblings,
     Missions,
+    Notifications,
 }
 
 #[derive(Debug, Clone, Serialize)]

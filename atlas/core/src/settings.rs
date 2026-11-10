@@ -23,6 +23,8 @@ pub struct Settings {
     pub retention: RetentionSettings,
     pub usage: UsageSettings,
     pub voice: VoiceSettings,
+    /// Tray, global shortcut and notifications.
+    pub desktop: crate::desktop::DesktopSettings,
     pub default_project_id: Option<String>,
     pub forge: ForgeSettings,
     /// The one-time introduction. Owned by the core: `settings_update` cannot change it.
@@ -516,6 +518,7 @@ impl Settings {
                 return Err(AtlasError::Validation(format!("unknown {what} '{id}'")));
             }
         }
+        self.desktop.validate()?;
         for (what, id) in [("microphone", &v.input_device), ("speaker", &v.output_device)] {
             if id.as_ref().is_some_and(|d| d.len() > 512 || d.chars().any(char::is_control)) {
                 return Err(AtlasError::Validation(format!("{what} id is not valid")));

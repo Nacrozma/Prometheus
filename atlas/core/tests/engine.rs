@@ -744,3 +744,153 @@ fn choosing_a_personality_through_settings_applies_its_tone_length_and_initiativ
     assert_eq!(saved.companion.personality, Personality::Custom, "a hand edit is shown as Custom");
     assert_eq!(h.atlas.settings().unwrap().companion.personality, Personality::Custom);
 }
+
+// ----- desktop presence and notifications (0.4.2) -----
+
+/// Stands in for the desktop shell: records what the system would have shown.
+#[derive(Default)]
+struct FakeShell {
+    in_front: std::sync::atomic::AtomicBool,
+    shown: Mutex<Vec<atlas_core::desktop::SystemNotice>>,
+}
+impl atlas_core::desktop::Notifier for FakeShell {
+    fn in_front(&self) -> bool {
+        self.in_front.load(Ordering::SeqCst)
+    }
+    fn show(&self, n: &atlas_core::desktop::SystemNotice) -> bool {
+        self.shown.lock().unwrap().push(n.clone());
+        true
+    }
+}
+
+fn with_shell(h: &Harness, in_front: bool) -> Arc<FakeShell> {
+    let shell = Arc::new(FakeShell::default());
+    shell.in_front.store(in_front, Ordering::SeqCst);
+    h.atlas.notifications.set_notifier(shell.clone());
+    shell
+}
+
+#[tokio::test]
+async fn system_notifications_are_off_until_enabled_and_the_core_decides() {
+    let h = harness(vec![MockProvider::text("Hello."), MockProvider::text("Hello again."), MockProvider::text("Third.")]);
+    let shell = with_shell(&h, false); // the owner is away
+    // Default: nothing reaches the system, but Atlas's own list records the reply.
+    send(&h, "hi").await.0.unwrap();
+    assert!(shell.shown.lock().unwrap().is_empty(), "system notifications are off by default");
+    let list = h.atlas.notifications.list(10).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].title, "Atlas has replied");
+    assert!(!list[0].shown_by_system);
+    assert_eq!(list[0].target, format!("conversation:{}", h.conv));
+    // The test button is refused while they are off.
+    assert_eq!(h.atlas.notification_test().unwrap_err().code(), "permission_denied");
+
+    // A second reply while the first notice is unread is not repeated.
+    send(&h, "again").await.0.unwrap();
+    assert_eq!(h.atlas.notifications.list(10).unwrap().len(), 1, "no duplicate while unread");
+
+    // Enabled: shown by the system, with generic wording (it may appear on a lock screen).
+    let mut s = h.atlas.settings().unwrap();
+    s.desktop.notifications.system = true;
+    h.atlas.update_settings(s.clone()).unwrap();
+    h.atlas.notifications.mark_read(None).unwrap();
+    assert_eq!(h.atlas.notifications.unread().unwrap(), 0);
+    h.atlas.rename_conversation(&h.conv, "Private medical question").unwrap();
+    send(&h, "third").await.0.unwrap();
+    {
+        let shown = shell.shown.lock().unwrap();
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].title, "Atlas has replied");
+        assert_eq!(shown[0].body, "Open Atlas to see it.", "no details unless the owner allows them");
+    }
+    assert!(h.atlas.notifications.list(1).unwrap()[0].shown_by_system);
+    // Turning the category off stops it at the core, whatever the shell would do.
+    s.desktop.notifications.replies = false;
+    h.atlas.update_settings(s.clone()).unwrap();
+    let n = h.atlas.notifications.raise(
+        &s.desktop.notifications,
+        atlas_core::desktop::NewNotification { category: atlas_core::desktop::Category::Reply, title: "x", detail: "", target: "", dedupe_key: "", only_if_away: false },
+    );
+    assert!(!n.unwrap().unwrap().shown_by_system);
+    assert_eq!(shell.shown.lock().unwrap().len(), 1);
+    // The test notification works once enabled, and enabling was written to the audit log.
+    assert!(h.atlas.notification_test().unwrap().shown_by_system);
+    let audit = atlas_core::audit::recent(&h.atlas.db, 50, None).unwrap();
+    assert!(audit.iter().any(|e| e.kind == "desktop.permission_changed" && e.detail["setting"] == "system_notifications" && e.detail["enabled"] == true));
+}
+
+#[tokio::test]
+async fn replies_do_not_notify_while_atlas_is_in_front_but_approvals_are_listed_and_cleared() {
+    let h = harness(vec![
+        MockProvider::tool_call("c1", "files_create", json!({"path": "n.md", "content": "x"})),
+        MockProvider::text("Done."),
+    ]);
+    let shell = with_shell(&h, true); // the owner is looking at Atlas
+    let mut s = h.atlas.settings().unwrap();
+    s.desktop.notifications.system = true;
+    s.desktop.notifications.show_details = true;
+    h.atlas.update_settings(s).unwrap();
+
+    let atlas = h.atlas.clone();
+    let conv = h.conv.clone();
+    let turn = tokio::spawn(async move {
+        atlas.send_message(TurnParams { conversation_id: conv, text: "make a note".into(), provider_id: None, model: None, ..Default::default() }, Box::new(|_| {})).await
+    });
+    let mut approval = None;
+    for _ in 0..200 {
+        if let Some(a) = h.atlas.pending_approvals().unwrap().first() {
+            approval = Some(a.id.clone());
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let approval = approval.expect("an approval prompt");
+    // The approval is listed in Atlas; the system stays quiet because Atlas is in front.
+    let list = h.atlas.notifications.list(10).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].category, atlas_core::desktop::Category::Approval);
+    assert_eq!(list[0].target, "approvals");
+    assert!(list[0].read_at.is_none());
+    assert!(shell.shown.lock().unwrap().is_empty(), "no system notification while Atlas is in front");
+    h.atlas.decide_approval(&approval, true).unwrap();
+    turn.await.unwrap().unwrap();
+    // Deciding it clears the notice; the finished reply adds none (the owner is watching).
+    let list = h.atlas.notifications.list(10).unwrap();
+    assert_eq!(list.len(), 1);
+    assert!(list[0].read_at.is_some(), "a decided approval is no longer unread");
+    assert_eq!(h.atlas.notifications.unread().unwrap(), 0);
+    h.atlas.notifications.clear().unwrap();
+    assert!(h.atlas.notifications.list(10).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn desktop_settings_validate_normalise_and_survive_old_documents() {
+    let h = harness(vec![]);
+    let mut s = h.atlas.settings().unwrap();
+    assert!(!s.desktop.shortcut_enabled && !s.desktop.notifications.system && !s.desktop.close_to_tray);
+    s.desktop.shortcut = "alt + ctrl + k".into();
+    s.desktop.shortcut_enabled = true;
+    let saved = h.atlas.update_settings(s.clone()).unwrap();
+    assert_eq!(saved.desktop.shortcut, "Ctrl+Alt+K");
+    for bad in ["Ctrl+C", "Alt+F4", "", "Ctrl+Shift+Space"] {
+        s.desktop.shortcut = bad.into();
+        assert_eq!(h.atlas.update_settings(s.clone()).unwrap_err().code(), "validation", "{bad:?}");
+    }
+    assert_eq!(h.atlas.settings().unwrap().desktop.shortcut, "Ctrl+Alt+K", "a refused shortcut changes nothing");
+    // Settings written by 0.4.1 (no desktop section) load with safe defaults.
+    let mut old = serde_json::to_value(h.atlas.settings().unwrap()).unwrap();
+    old.as_object_mut().unwrap().remove("desktop");
+    let loaded: atlas_core::settings::Settings = serde_json::from_value(old).unwrap();
+    assert_eq!(loaded.desktop, atlas_core::desktop::DesktopSettings::default());
+    // Secrets never reach a notification.
+    let n = h
+        .atlas
+        .notifications
+        .raise(
+            &loaded.desktop.notifications,
+            atlas_core::desktop::NewNotification { category: atlas_core::desktop::Category::Error, title: "key sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA failed", detail: "", target: "", dedupe_key: "", only_if_away: false },
+        )
+        .unwrap()
+        .unwrap();
+    assert!(!n.title.contains("AAAAAAAA"), "{}", n.title);
+}
