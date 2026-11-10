@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.1 — 2026-11-10
+## 0.4.1 — 2026-11-10 (released: atlas-v0.4.1)
 
 Voice groundwork for testing on real hardware. **A real microphone and real speakers have still not
 been tested by anyone**; the Voice check below is how the owner does that

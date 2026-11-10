@@ -9,9 +9,9 @@ OpenAI, OpenRouter, Mistral or Cerebras, or the free Ollama app if you'd rather 
 
 ## 1. Download
 
-**[⬇ Download ATLAS-Co-Pilot-Setup-x64.exe](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.4.0/ATLAS-Co-Pilot-Setup-x64.exe)** (9.2 MB, version 0.4.0)
+**[⬇ Download ATLAS-Co-Pilot-Setup-x64.exe](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.4.1/ATLAS-Co-Pilot-Setup-x64.exe)** (9.2 MB, version 0.4.1)
 
-All files for this version are on the [release page](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.4.0):
+All files for this version are on the [release page](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.4.1):
 
 | File | What it is |
 |---|---|
@@ -19,8 +19,8 @@ All files for this version are on the [release page](https://github.com/Nacrozma
 | `ATLAS-Co-Pilot-x64.msi` | The same app as an MSI package, for IT-managed PCs. Most people don't need it. |
 | `SHA256SUMS.txt` | Checksums, to confirm the download isn't damaged (optional, see the end of this page). |
 
-**Already have 0.2.0 or 0.3.0?** Run the new installer over it. Your conversations, settings, memories and
-keys are kept. New in 0.4.0: optional on-device voice (step 6). If you use the Prometheus link and are
+**Already have an earlier version?** Run the new installer over it. Your conversations, settings, memories and
+keys are kept. Voice (step 6) arrived in 0.4.0; 0.4.1 adds the Voice check. If you use the Prometheus link and are
 coming from 0.2.0, also update `sibling_adapter.py` on the Prometheus side (it has a security fix).
 
 ## 2. Install
@@ -117,6 +117,11 @@ set up. Voice is off until you turn it on.
 5. **Hear replies:** turn on **Read replies aloud** (or the speaker button above the message box).
    **Esc** stops speech.
 
+6. **Check it on your PC:** Settings → Voice → **Voice check** tests your real speakers and microphone
+   and shows what Atlas measured. Voice has only been tested on machines without audio devices so far,
+   so this check is the first real test. Checklist:
+   [atlas/docs/VOICE_HARDWARE_VALIDATION.md](atlas/docs/VOICE_HARDWARE_VALIDATION.md).
+
 Every download is checked against its publisher's checksum. To free the space, use **Remove** in
 Settings → Voice. Troubleshooting: [atlas/docs/VOICE_TROUBLESHOOTING.md](atlas/docs/VOICE_TROUBLESHOOTING.md).
 
@@ -149,10 +154,10 @@ In PowerShell, in your Downloads folder:
 Get-FileHash .\ATLAS-Co-Pilot-Setup-x64.exe -Algorithm SHA256
 ```
 
-For version 0.4.0 it must be:
+For version 0.4.1 it must be:
 
 ```
-4DA70946531C965FF0352FFF0D244EE286B72701150D40002C29ADA1BF29FFB2
+422E08D07AC91A7077F3D2E018B87B15A474C9A237C0D57EA9B7731012E527B7
 ```
 
 (The same values are in `SHA256SUMS.txt` on the release page.)
