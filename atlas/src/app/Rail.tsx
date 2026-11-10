@@ -1,6 +1,7 @@
 import { Activity, Brain, Cable, Hammer, FolderKanban, FolderOpen, Home, MessageSquareText, Mic, Octagon, Orbit, Plug, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { Emblem } from "@/components/Emblem";
+import { NotificationBell } from "@/features/desktop/NotificationBell";
 import { Tooltip } from "@/components/ui/primitives";
 import { api } from "@/lib/bridge";
 import { cn } from "@/lib/format";
@@ -70,6 +71,7 @@ export function Rail() {
       </button>
       {NAV.map((n) => item(n.route, n.label, n.icon, n.shortcut, n.route === "mission" ? pending : undefined))}
       <div className="mt-auto flex flex-col items-center gap-1.5">
+        <NotificationBell />
         <Tooltip label={running ? "Emergency stop: cancel all running tasks" : "Emergency stop (nothing running)"}>
           <button
             onClick={emergencyStop}

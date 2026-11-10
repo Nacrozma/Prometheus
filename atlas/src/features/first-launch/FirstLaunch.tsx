@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Emblem, useReducedMotion } from "@/components/Emblem";
+import { audio } from "@/features/voice/audioEngine";
+import { VoiceRing } from "@/features/voice/VoiceRing";
 import { api } from "@/lib/bridge";
+import { useVoice } from "@/state/voice";
 import { DEDICATION, PHASES, scene, startTimes, WELCOME, type Phase } from "./sequence";
 import { Starfield } from "./Starfield";
 
@@ -15,6 +18,10 @@ function globeSize(): number {
  * ready the moment it ends. Skip (button or Esc) is always available. With reduced motion it is
  * a still scene where only the words change.
  *
+ * Atlas's voice ring surrounds the globe. It shows real audio only: when a voice is already set
+ * up (a replay, usually), Atlas speaks its welcome and the ring moves with that sound; on a first
+ * launch nothing is installed yet, so the ring rests in its idle glow and stays silent.
+ *
  * `mode="first"` records completion in the core when it ends or is skipped; closing the app
  * part-way leaves it unrecorded, so it plays again next time. `mode="replay"` records nothing.
  */
@@ -28,10 +35,14 @@ export function FirstLaunch({ mode, onDone }: { mode: "first" | "replay"; onDone
   const finished = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
+  const spoke = useRef(false);
+  const speaking = useVoice((v) => v.playback === "speaking");
+
   const finish = useCallback(() => {
     if (finished.current) return;
     finished.current = true;
     timers.current.forEach(clearTimeout);
+    if (spoke.current) useVoice.getState().stopSpeaking();
     // Never blocks: if recording fails, the app opens anyway and the introduction plays next launch.
     if (mode === "first") void api.completeFirstLaunch().catch((e) => console.warn("[atlas] the introduction could not be recorded", e));
     onDone();
@@ -46,6 +57,31 @@ export function FirstLaunch({ mode, onDone }: { mode: "first" | "replay"; onDone
   useEffect(() => {
     if (phase === "done") finish();
   }, [phase, finish]);
+
+  // Atlas says its welcome aloud when a voice is ready; the ring then shows that real sound.
+  useEffect(() => {
+    if (phase !== "welcome" || spoke.current) return;
+    const v = useVoice.getState();
+    if (!v.settings?.enabled || !v.status?.tts_ready) return;
+    spoke.current = true;
+    audio.context();
+    v.speakText(WELCOME);
+    // Let the sentence finish before the scene leaves (bounded, so it can never hang).
+    const t = startTimes(reduced);
+    const hold = t.leaving - t.welcome;
+    timers.current.forEach(clearTimeout);
+    const started = performance.now();
+    const wait = () => {
+      const elapsed = performance.now() - started;
+      if ((audio.state === "idle" && elapsed >= hold) || elapsed >= hold + 8000) {
+        setPhase("leaving");
+        timers.current = [setTimeout(() => setPhase("done"), t.done - t.leaving)];
+      } else {
+        timers.current = [setTimeout(wait, 150)];
+      }
+    };
+    timers.current = [setTimeout(wait, 150)];
+  }, [phase, reduced]);
 
   const skip = useCallback(() => {
     if (finished.current) return;
@@ -110,8 +146,13 @@ export function FirstLaunch({ mode, onDone }: { mode: "first" | "replay"; onDone
       </div>
 
       <div className="relative flex h-full flex-col items-center justify-center px-6">
-        <div style={{ opacity: s.globe ? 1 : 0, transform: s.globe || reduced ? "none" : "scale(0.93)", ...fade(1700) }}>
-          <Emblem size={globe} animated={!reduced && s.globe} glow={s.lit} />
+        <div className="relative grid place-items-center" style={{ width: globe, height: globe }}>
+          <div aria-hidden data-intro-ring={speaking ? "speaking" : "idle"} className="pointer-events-none absolute" style={{ opacity: s.lit ? 1 : 0, ...fade(1800) }}>
+            <VoiceRing phase={speaking ? "speaking" : "idle"} size={Math.round(globe * 2.15)} />
+          </div>
+          <div style={{ opacity: s.globe ? 1 : 0, transform: s.globe || reduced ? "none" : "scale(0.93)", ...fade(1700) }}>
+            <Emblem size={globe} animated={!reduced && s.globe} glow={s.lit} />
+          </div>
         </div>
         <div role="status" aria-live="polite" className="relative mt-[6vh] h-[6.5em] w-full max-w-3xl text-center">
           <p

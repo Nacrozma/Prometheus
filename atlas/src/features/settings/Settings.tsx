@@ -11,11 +11,13 @@ import type { RoutingMode, Settings, Tier, TierModel } from "@/lib/schemas";
 import { SiblingSettingsSection } from "@/features/siblings/SiblingSettings";
 import { PersonalityPicker } from "@/features/companion/PersonalityPicker";
 import { VoiceSettingsSection } from "@/features/voice/VoiceSettings";
+import { DesktopSettingsSection } from "@/features/desktop/DesktopSettings";
 import { useUi, type SettingsSection } from "@/state/ui";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "companion", label: "Companion" },
   { id: "voice", label: "Voice" },
+  { id: "desktop", label: "Desktop" },
   { id: "models", label: "Models" },
   { id: "routing", label: "Model routing" },
   { id: "usage", label: "Usage & budgets" },
@@ -128,6 +130,8 @@ function Section({ id, s, save }: { id: SettingsSection; s: Settings; save: (n: 
       return <CompanionSection s={s} save={save} />;
     case "voice":
       return <VoiceSettingsSection s={s} save={save} />;
+    case "desktop":
+      return <DesktopSettingsSection s={s} save={save} />;
     case "models":
       return <ModelsSection s={s} save={save} />;
     case "routing":

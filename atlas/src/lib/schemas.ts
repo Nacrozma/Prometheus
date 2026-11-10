@@ -79,6 +79,22 @@ export const SettingsSchema = z.object({
     input_device: z.string().nullable(),
     output_device: z.string().nullable().default(null),
   }),
+  desktop: z.object({
+    tray: z.boolean(),
+    close_to_tray: z.boolean(),
+    shortcut_enabled: z.boolean(),
+    shortcut: z.string(),
+    shortcut_starts_listening: z.boolean(),
+    notifications: z.object({
+      system: z.boolean(),
+      only_when_away: z.boolean(),
+      show_details: z.boolean(),
+      approvals: z.boolean(),
+      replies: z.boolean(),
+      missions: z.boolean(),
+      errors: z.boolean(),
+    }),
+  }),
   default_project_id: z.string().nullable(),
   forge: z.object({ command_timeout_secs: z.number(), max_output_kb: z.number() }),
   first_launch: z.object({ completed_at: z.string().nullable() }),
@@ -484,6 +500,7 @@ export const TOPICS = [
   "forge",
   "siblings",
   "missions",
+  "notifications",
 ] as const;
 export type Topic = (typeof TOPICS)[number];
 export const ChangeEventSchema = z.object({ topic: z.enum(TOPICS), id: z.string().nullable() });
@@ -697,3 +714,30 @@ export const BenchmarkSchema = z.object({
   hardware: HardwareSchema,
 });
 export type Benchmark = z.infer<typeof BenchmarkSchema>;
+
+// ---------- desktop presence ----------
+export const NotificationSchema = z.object({
+  id: z.string(),
+  category: z.enum(["approval", "reply", "mission", "error", "test"]),
+  title: z.string(),
+  detail: z.string(),
+  target: z.string(),
+  created_at: z.string(),
+  read_at: z.string().nullable(),
+  shown_by_system: z.boolean(),
+});
+export type AtlasNotification = z.infer<typeof NotificationSchema>;
+export const NotificationListSchema = z.object({ items: z.array(NotificationSchema), unread: z.number() });
+export const DesktopStatusSchema = z.object({
+  platform: z.string(),
+  tray_supported: z.boolean(),
+  tray_visible: z.boolean(),
+  shortcut_supported: z.boolean(),
+  shortcut_registered: z.string().nullable(),
+  shortcut_error: z.string().nullable(),
+  notifications_supported: z.boolean(),
+  single_instance: z.boolean(),
+  notes: z.array(z.string()),
+  test_notifications_shown: z.number().nullable(),
+});
+export type DesktopStatus = z.infer<typeof DesktopStatusSchema>;

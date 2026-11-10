@@ -53,6 +53,13 @@ export const api = {
   saveTextViaDialog: (suggestedName: string, extension: "json" | "md" | "txt" | "csv", content: string) =>
     call("save_text_via_dialog", { suggestedName, extension, content }, Opt(z.string())),
 
+  desktopStatus: () => call("desktop_status", {}, S.DesktopStatusSchema),
+  notifications: (limit = 50) => call("notifications_list", { limit }, S.NotificationListSchema),
+  notificationsMarkRead: (opts: { id?: string; target?: string } = {}) => call("notifications_mark_read", { id: opts.id ?? null, target: opts.target ?? null }, Void),
+  notificationsClear: () => call("notifications_clear", {}, Void),
+  notificationTest: () => call("notification_test", {}, S.NotificationSchema),
+  windowHide: () => call("window_hide", {}, Void),
+
   voiceStatus: () => call("voice_status", {}, S.VoiceStatusSchema),
   voiceInstall: (id: string, onProgress: (p: S.DownloadProgress) => void) => {
     const channel = new Channel<unknown>();

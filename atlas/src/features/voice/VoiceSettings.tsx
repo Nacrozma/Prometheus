@@ -8,6 +8,7 @@ import { useAtlasQuery } from "@/lib/query";
 import type { ArtifactStatus, Benchmark, DownloadProgress, Settings } from "@/lib/schemas";
 import { useVoice } from "@/state/voice";
 import { audio } from "./audioEngine";
+import { AudioSetupWizard } from "./AudioSetupWizard";
 import { VoiceCheck } from "./VoiceCheck";
 import { VoiceRing } from "./VoiceRing";
 
@@ -149,6 +150,7 @@ export function VoiceSettingsSection({ s, save }: { s: Settings; save: (n: Setti
   const [testing, setTesting] = useState(false);
   const [bench, setBench] = useState<Benchmark | null>(null);
   const [benchBusy, setBenchBusy] = useState(false);
+  const [wizard, setWizard] = useState(false);
   const testTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadDevices = async () => {
@@ -241,8 +243,12 @@ export function VoiceSettingsSection({ s, save }: { s: Settings; save: (n: Setti
             {st.fixtures && <Badge tone="warn">Test build: stand-in engines, not real speech</Badge>}
           </div>
         </div>
+        <Button size="sm" onClick={() => setWizard(true)} data-open-wizard>
+          Guided setup…
+        </Button>
         <Switch checked={v.enabled} label="Voice" onChange={(enabled) => void set({ enabled })} />
       </div>
+      <AudioSetupWizard open={wizard} onClose={() => setWizard(false)} />
 
       <Section title="Speech output" desc="Piper voices, run by the sherpa-onnx engine. Downloaded once; works offline afterwards.">
         {!st.tts_supported ? (
