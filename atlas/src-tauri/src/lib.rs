@@ -4,6 +4,7 @@
 mod commands;
 #[cfg(feature = "e2e")]
 mod e2e;
+pub mod presence;
 
 use atlas_core::events::{ChangeEvent, EventBus};
 use atlas_core::{Atlas, AtlasConfig};
@@ -46,9 +47,26 @@ fn navigation_allowed(url: &tauri::Url) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // A second launch brings the running Atlas forward instead of starting another copy
+    // (two copies would share one database and one tray icon). Must be the first plugin.
+    #[cfg(all(not(feature = "e2e"), any(windows, target_os = "macos")))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| presence::summon(app, false)));
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    // Only Atlas's one summon shortcut is ever registered.
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        let listen = app.try_state::<presence::Presence>().is_some_and(|p| p.listen_on_summon());
+                        presence::summon(app, listen);
+                    }
+                })
+                .build(),
+        )
         .setup(|app| {
             let handle = app.handle().clone();
             let dir = data_dir(&handle);
@@ -80,7 +98,12 @@ pub fn run() {
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
             });
+            atlas.notifications.set_notifier(Arc::new(presence::ShellNotifier(handle.clone())));
+            let desktop = atlas.settings().map(|s| s.desktop).unwrap_or_default();
             app.manage(AppState { atlas, pending_restore: Mutex::new(None) });
+            let presence = presence::Presence::default();
+            presence.build_tray(&handle);
+            app.manage(presence);
 
             #[allow(unused_mut)]
             let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()));
@@ -103,11 +126,30 @@ pub fn run() {
                 .theme(Some(tauri::Theme::Dark))
                 .on_navigation(navigation_allowed)
                 .build()?;
+            // Tray visibility and the global shortcut follow the saved settings.
+            app.state::<presence::Presence>().apply(&handle, &desktop);
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // "Keep running in the tray": closing the window hides it; Quit is in the tray menu.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && window.label() == "main"
+                && window.app_handle().try_state::<presence::Presence>().is_some_and(|p| p.hides_on_close())
+            {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .invoke_handler(commands::handler())
-        .run(tauri::generate_context!())
-        .expect("error while running ATLAS Co-Pilot");
+        .build(tauri::generate_context!())
+        .expect("error while running ATLAS Co-Pilot")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event
+                && let Some(p) = app.try_state::<presence::Presence>()
+            {
+                p.shutdown(app);
+            }
+        });
 }
 
 #[cfg(test)]

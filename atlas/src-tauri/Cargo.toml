@@ -28,6 +28,9 @@ tauri-plugin-dialog = "2.8"
 tauri-plugin-opener = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"
-tauri-plugin-single-instance = "2"
 tokio = { version = "1.54.1", features = ["sync", "time"] }
 tokio-util = "0.7.20"
+
+# A second launch returns to the running Atlas (Windows and macOS).
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+tauri-plugin-single-instance = "2"

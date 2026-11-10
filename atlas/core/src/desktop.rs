@@ -313,12 +313,11 @@ impl NotificationCenter {
         };
         // Permission is decided here, in the core, from the stored settings.
         let allowed = s.system && s.category_on(n.category);
-        if allowed {
-            if let Some(nf) = notifier
-                && !(s.only_when_away && nf.in_front())
-            {
-                out.shown_by_system = nf.show(&Self::system_notice(&out, s));
-            }
+        if allowed
+            && let Some(nf) = notifier
+            && !(s.only_when_away && nf.in_front())
+        {
+            out.shown_by_system = nf.show(&Self::system_notice(&out, s));
         }
         conn.execute(
             "INSERT INTO notifications (id, category, title, detail, target, dedupe_key, created_at, shown_by_system) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",

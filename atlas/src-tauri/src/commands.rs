@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use tauri::ipc::Channel;
+use tauri::Manager as _;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
@@ -21,7 +22,8 @@ type R<T> = Result<T, AtlasError>;
 pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         app_info, diagnostics, recent_errors, open_external, save_text_via_dialog,
-        settings_get, settings_update, first_launch_complete, workspace_pick, workspace_use_default, workspace_add_sample, workspace_browse, workspace_preview, workspace_reveal,
+        settings_get, settings_update, first_launch_complete,
+        desktop_status, notifications_list, notifications_mark_read, notifications_clear, notification_test, window_hide, workspace_pick, workspace_use_default, workspace_add_sample, workspace_browse, workspace_preview, workspace_reveal,
         provider_templates, providers_list, provider_add, provider_update, provider_delete, provider_set_key, provider_clear_key, provider_test,
         integrations_list, integration_set_key, integration_clear_key, integration_set_enabled, integration_test,
         tools_list, tool_set_enabled,
@@ -170,13 +172,67 @@ fn settings_get(state: State<'_, AppState>) -> R<Settings> {
 }
 
 #[tauri::command]
-fn settings_update(state: State<'_, AppState>, settings: Settings) -> R<Settings> {
+fn settings_update(app: AppHandle, state: State<'_, AppState>, settings: Settings) -> R<Settings> {
     // The workspace may only change through the folder picker or the default-folder command.
     let current = state.atlas.settings()?;
     if settings.workspace_dir != current.workspace_dir {
         return Err(AtlasError::PermissionDenied("change the workspace folder with the folder picker".into()));
     }
-    state.atlas.update_settings(settings)
+    let saved = state.atlas.update_settings(settings)?;
+    // The tray and the global shortcut follow the saved settings at once.
+    if let Some(p) = app.try_state::<crate::presence::Presence>() {
+        p.apply(&app, &saved.desktop);
+    }
+    Ok(saved)
+}
+
+/// What the desktop presence is actually doing right now (tray shown, shortcut registered or why not).
+#[tauri::command]
+fn desktop_status(app: AppHandle) -> R<crate::presence::DesktopStatus> {
+    app.try_state::<crate::presence::Presence>().map(|p| p.status()).ok_or_else(|| AtlasError::Internal("desktop presence is not running".into()))
+}
+
+#[derive(serde::Serialize)]
+struct NotificationList {
+    items: Vec<atlas_core::desktop::Notification>,
+    unread: u32,
+}
+
+#[tauri::command]
+fn notifications_list(state: State<'_, AppState>, limit: Option<u32>) -> R<NotificationList> {
+    Ok(NotificationList { items: state.atlas.notifications.list(limit.unwrap_or(50))?, unread: state.atlas.notifications.unread()? })
+}
+
+/// Mark one notification read, everything about one target, or (with neither) all of them.
+#[tauri::command]
+fn notifications_mark_read(state: State<'_, AppState>, id: Option<String>, target: Option<String>) -> R<()> {
+    match target {
+        Some(t) => state.atlas.notifications.mark_target_read(&t),
+        None => state.atlas.notifications.mark_read(id.as_deref()),
+    }
+}
+
+#[tauri::command]
+fn notifications_clear(state: State<'_, AppState>) -> R<()> {
+    state.atlas.notifications.clear()
+}
+
+#[tauri::command]
+fn notification_test(state: State<'_, AppState>) -> R<atlas_core::desktop::Notification> {
+    state.atlas.notification_test()
+}
+
+/// Hide the window to the tray. Refused when there is no tray icon to come back from.
+#[tauri::command]
+fn window_hide(app: AppHandle) -> R<()> {
+    let visible = app.try_state::<crate::presence::Presence>().is_some_and(|p| p.status().tray_visible);
+    if !visible {
+        return Err(AtlasError::Validation("the tray icon is off, so Atlas cannot be hidden there".into()));
+    }
+    if let Some(w) = app.get_webview_window("main") {
+        w.hide().map_err(io)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
