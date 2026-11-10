@@ -104,6 +104,9 @@ Only the AI service you chose receives your messages.
 Atlas can listen and speak entirely on your PC: no speech service, no API key, and it works offline once
 set up. Voice is off until you turn it on.
 
+**Easiest:** Settings → Voice → **Guided setup…** walks you through the downloads, choosing your
+speakers and microphone, and a test of each. The manual steps are:
+
 1. **Turn it on:** Settings → Voice → turn on **Voice**.
 2. **Download speech output:** click **Set up speech output**. That is the engine (about 24 MB) and the
    Alba voice (about 67 MB); other voices are optional.
@@ -124,6 +127,31 @@ set up. Voice is off until you turn it on.
 
 Every download is checked against its publisher's checksum. To free the space, use **Remove** in
 Settings → Voice. Troubleshooting: [atlas/docs/VOICE_TROUBLESHOOTING.md](atlas/docs/VOICE_TROUBLESHOOTING.md).
+
+## 7. Tray, global shortcut and notifications (optional)
+
+Settings → **Desktop**. Nothing here is needed to use Atlas, and all of it can be turned off.
+
+| Option | What it does | Starts |
+|---|---|---|
+| Tray icon | Atlas icon near the clock: Open, Talk, Quit | On |
+| Keep running when the window is closed | Closing hides Atlas in the tray; quit from the tray menu | Off |
+| Global shortcut | Brings Atlas forward from any app, ready to type. Default **Ctrl + Alt + Space**; click **Change…** and press the keys you want | Off |
+| System notifications | Windows notifications for approvals, finished replies, missions and failures. Choose which kinds, and whether to show what they're about | Off |
+
+Atlas's own notification list (the bell at the bottom left) always works, whatever these are set to.
+
+**Not yet checked by a person.** These have been tested by automated runs only, so please try them once:
+
+1. Turn on **Global shortcut**. It should say **Active**. Switch to another app and press it: Atlas
+   comes forward with the caret in the message box. If it says the shortcut is used by another app,
+   choose a different one.
+2. Turn on **System notifications**, click **Send a test notification**. A Windows notification should
+   appear. If not: Windows Settings → System → Notifications → allow **ATLAS Co-Pilot**.
+3. Click the tray icon: Atlas opens. Right-click: Open, Talk, Quit.
+4. Turn on **Keep running…**, close the window, and bring Atlas back from the tray or the shortcut.
+
+Details and the limits on Linux and macOS: [atlas/docs/ATLAS_DESKTOP_PRESENCE.md](atlas/docs/ATLAS_DESKTOP_PRESENCE.md).
 
 ---
 

@@ -64,19 +64,20 @@ No feature is currently known to be broken. "Unreliable" is used where real-worl
 | Output-device selection | ✅ done in 0.4.1 on Windows; not offered by WebKitGTK (Linux) | Keep |
 | Microphone selection, speed, volume, voice choice | ✅ | Keep |
 | Evidence-based default model | 🟡 base chosen from CI numbers | 0.4.1: decide from the owner's measurements |
-| Audio setup wizard | ⬜ | 0.4.2 |
+| Audio setup wizard | ✅ done in 0.4.2 (Guided setup) | Keep |
 | Sentence transitions (gaps between sentences) | 🟡 one engine start per sentence | 0.4.2: measure on real hardware first, then pre-synthesise further ahead or keep the engine warm |
 | Immediate interruption without resubmitting | ✅ e2e | Keep; re-verify on hardware |
-| Ring in the first-launch introduction | ⬜ | 0.4.2 |
-| Typed ↔ spoken handoff in one conversation | 🟡 works; no explicit duplicate-submission guard across modes | 0.4.2 |
+| Ring in the first-launch introduction | ✅ done in 0.4.2; moves only with real speech (e2e-verified) | Keep |
+| Typed ↔ spoken handoff in one conversation | 🟡 works; the core already refuses a second request while one is running in a conversation (tested), so no duplicate can be sent | 0.5.0: handoff polish (Conversation Handoff) |
 | Linux and macOS recognition | ⬜ | 0.6.0: evaluate sherpa-onnx's own Whisper runtime (one engine for both directions, all three systems) |
 
 ### Presence and Command Center (Parts 3, 4, 5)
 
 | Feature | Now | Planned |
 |---|---|---|
-| Global shortcut, quick entry, compact presence, tray | ⬜ | 0.4.2 foundation (tray + shortcut), 0.5.0 quick entry |
-| OS notifications | ⬜ | 0.5.0, with the notification engine |
+| Global shortcut, tray | ✅ done in 0.4.2 (off by default; not yet tried by a person) | Keep |
+| Quick entry, compact floating presence | ⬜ | 0.5.0 |
+| Notifications (in-app list + optional system notifications, permission in the core, de-duplication) | ✅ done in 0.4.2 | 0.5.0 adds quiet hours and Focus Mode on top |
 | Command Center | 🟡 Home shows real status only | 0.5.0: extend Home (briefing, to-dos, deadlines, missions, errors; configurable) |
 | Owner to-dos, deadlines, reminders | ⬜ | 0.5.0: new tables; needed by the briefing, recap and proactive work |
 | Session recap | ⬜ | 0.5.0: built from recorded events since the last session; resume only with approval |
@@ -140,7 +141,7 @@ The boundaries in the directive hold after the audit, with two adjustments:
 | Release | Contents | Depends on |
 |---|---|---|
 | **0.4.1** Real-world stabilisation | AudioWorklet capture; output-device choice; in-app Voice check that records device, latency and accuracy; fixes from the owner's results; default model decided from those results | **The owner's PC** for the hardware pass |
-| **0.4.2** Experience completion | Ring in the introduction; audio setup wizard; sentence-transition work; handoff guard; tray and global shortcut | 0.4.1 results |
+| **0.4.2** Experience completion (**released**) | Track A: ring in the introduction; audio setup wizard; tray; global shortcut; notifications. **Track B (blocked on the owner's Voice check report):** recognition accuracy, sentence-transition and playback tuning, microphone compatibility fixes, latency work, default model | Track B needs real-hardware evidence |
 | **0.5.0** Presence & Intelligence | To-dos and deadlines → scheduler (reminders, daily briefing, global pause) → notification engine and Focus Mode → Command Center and session recap → quick entry → memory quality → Knowledge Vault → Trust Center → personality depth | 0.4.2 presence foundation |
 | **0.6.0** Universal Companion | Workflow Studio, specialist agents, real integrations, cross-platform recognition | 0.5.0 scheduler and notification engine |
 | **0.7.0** Deeper Collaboration | File exchange with manifests, patch review, mission plans; remote only if the security work is complete | Coordinated change to `sibling_adapter.py` |

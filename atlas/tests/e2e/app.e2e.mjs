@@ -133,6 +133,9 @@ test("the introduction plays once on first launch, with the dedication exactly a
   await find(By.css("[data-first-launch='first']"), 30000);
   await driver.wait(() => isVisible("[data-dedication]"), 15000, "dedication shown");
   assert.equal(await textOf("[data-dedication]"), "Created with love.");
+  // Atlas's voice ring surrounds the globe. No voice is installed yet, so it rests: no sound, no movement from audio.
+  assert.equal(await (await find(By.css("[data-intro-ring]"))).getAttribute("data-intro-ring"), "idle");
+  assert.equal(Number(await (await find(By.css("[data-intro-ring] [data-voice-ring]"))).getAttribute("data-level")), 0, "the ring shows no audio when none is playing");
   await shot("00-introduction-dedication");
   await driver.wait(() => isVisible("[data-welcome]"), 10000, "welcome shown");
   assert.equal(await textOf("[data-welcome]"), "Welcome. I'm Atlas. It's good to finally meet you.");
@@ -484,9 +487,132 @@ test("voice: settings persist, offline speech still works but downloads are refu
   await click("Appearance");
   await (await find(exactButton("System"))).click();
 
+  // The guided setup walks through speakers and microphone (everything is already downloaded here).
+  await go(",");
+  await (await find(exactButton("Voice"))).click();
+  await driver.executeScript("arguments[0].click()", await find(By.css("[data-open-wizard]")));
+  await find(By.css('[data-audio-wizard][data-step="Welcome"]'));
+  await click("Continue");
+  await find(By.css('[data-audio-wizard][data-step="Speakers"]'));
+  await click("Play a test sentence");
+  await driver.wait(async () => (await voice("playback()")) === "speaking", 15000, "the test sentence plays");
+  await click("Yes");
+  await shot("17b-audio-wizard-speakers");
+  await click("Continue");
+  await find(By.css('[data-audio-wizard][data-step="Microphone"]'));
+  assert.equal(await voice("playback()"), "speaking", "moving on does not cut the sentence off");
+  await driver.actions().sendKeys(Key.ESCAPE).perform(); // Esc stops speech first, not the dialog
+  await driver.wait(async () => (await voice("playback()")) === "idle", 3000);
+  await find(By.css("[data-audio-wizard]"));
+  await click("Test the microphone");
+  await find(By.css('[data-mic-result="heard"]'), 10000);
+  assert.equal(await voice("capturing()"), false, "the microphone is released after the test");
+  await click("Continue");
+  await find(By.css('[data-audio-wizard][data-step="Done"]'));
+  await waitText("Speaking: ready");
+  await waitText("Listening: ready");
+  await click("Finish");
+  await driver.wait(() => gone("[data-audio-wizard]"), 5000);
+
+  // With a voice ready, Atlas speaks its welcome in the introduction and the ring shows that real sound.
+  await (await find(exactButton("About"))).click();
+  await click("Replay");
+  await find(By.css("[data-first-launch='replay']"));
+  assert.equal(await (await find(By.css("[data-intro-ring]"))).getAttribute("data-intro-ring"), "idle", "silent until Atlas actually speaks");
+  await find(By.css('[data-intro-ring="speaking"]'), 30000);
+  await driver.wait(async () => (await voice("level()")) > 0.01, 3000, "the introduction's ring reads the real playback signal");
+  await shot("17c-introduction-speaking");
+  await driver.actions().sendKeys(Key.ESCAPE).perform();
+  await driver.wait(introGone, 5000, "skipped with Esc");
+  await driver.wait(async () => (await voice("playback()")) === "idle", 3000, "skipping the introduction stops its speech");
+
   // Nothing recorded or synthesised was left on disk.
   assert.equal((await invoke("voice_status")).temp_audio_files, 0);
   if (process.env.ATLAS_DATA_DIR) assert.deepEqual(wavFiles(process.env.ATLAS_DATA_DIR), [], "no audio files in Atlas's data folder");
+});
+
+test("desktop presence: nothing is on by default, the shortcut is validated and never duplicated, notifications need permission, and the bell lists them", async () => {
+  const s0 = await invoke("settings_get");
+  assert.equal(s0.desktop.shortcut_enabled, false);
+  assert.equal(s0.desktop.notifications.system, false);
+  assert.equal(s0.desktop.close_to_tray, false);
+  const st0 = await invoke("desktop_status");
+  assert.equal(st0.shortcut_registered, null, "no system-wide shortcut until the owner enables it");
+  // The backend refuses a test notification while they are off, and refuses unsafe shortcuts.
+  assert.match(String((await invoke("notification_test")).__error?.message ?? ""), /system notifications are off/);
+  for (const bad of ["Ctrl+C", "Alt+F4", "Space", "Ctrl+Shift+Space"]) {
+    const r = await invoke("settings_update", { settings: { ...s0, desktop: { ...s0.desktop, shortcut: bad, shortcut_enabled: true } } });
+    assert.ok(r.__error, `${bad} must be refused`);
+  }
+  assert.equal((await invoke("desktop_status")).shortcut_registered, null, "a refused shortcut registers nothing");
+  // The window has no direct access to the desktop plugins: only the core's validated settings can reach them.
+  for (const [cmd, args] of [
+    ["plugin:global-shortcut|register", { shortcuts: ["Ctrl+Alt+J"], handler: 0 }],
+    ["plugin:notification|notify", { options: { title: "x", body: "y" } }],
+    ["plugin:notification|request_permission", {}],
+  ]) {
+    assert.ok((await invoke(cmd, args)).__error, `${cmd} must be refused from the window`);
+  }
+  assert.equal((await invoke("desktop_status")).shortcut_registered, null);
+  assert.equal((await invoke("desktop_status")).test_notifications_shown, 0, "no notification was shown behind the core's back");
+
+  await go(",");
+  await (await find(exactButton("Desktop"))).click();
+  await find(By.css("[data-desktop-settings]"));
+  assert.equal(await (await find(By.css("[data-shortcut-value]"))).getAttribute("data-shortcut-value"), "Ctrl+Alt+Space");
+
+  // Turn the shortcut on: it is either registered, or Atlas says plainly why not. Never silently missing.
+  await (await find(By.css('[role=switch][aria-label="Global shortcut"]'))).click();
+  await driver.wait(async () => (await invoke("settings_get")).desktop.shortcut_enabled === true, 5000);
+  const st1 = await invoke("desktop_status");
+  assert.ok(st1.shortcut_registered === "Ctrl+Alt+Space" || st1.shortcut_error, JSON.stringify(st1));
+  await find(By.css(st1.shortcut_registered ? "[data-shortcut-active]" : "[data-shortcut-error]"));
+  // Saving other settings does not register it again or change it.
+  await (await find(By.css('[role=switch][aria-label="Start listening when summoned"]'))).click();
+  await driver.wait(async () => (await invoke("settings_get")).desktop.shortcut_starts_listening === true, 5000);
+  assert.equal((await invoke("desktop_status")).shortcut_registered, st1.shortcut_registered);
+  // Change it with the keyboard: the next combination becomes the shortcut.
+  await click("Change…");
+  await driver.actions().keyDown(Key.CONTROL).keyDown(Key.ALT).sendKeys("k").keyUp(Key.ALT).keyUp(Key.CONTROL).perform();
+  await driver.wait(async () => (await invoke("settings_get")).desktop.shortcut === "Ctrl+Alt+K", 5000, "captured shortcut saved");
+  const st2 = await invoke("desktop_status");
+  assert.ok(st2.shortcut_registered === "Ctrl+Alt+K" || st2.shortcut_error);
+  // Turn it off: nothing stays registered.
+  await (await find(By.css('[role=switch][aria-label="Global shortcut"]'))).click();
+  await driver.wait(async () => (await invoke("desktop_status")).shortcut_registered === null, 5000);
+  assert.equal((await invoke("desktop_status")).shortcut_error, null);
+
+  // Tray: follows the setting where the system has one; hiding to it is refused when it is off.
+  const tray = await invoke("desktop_status");
+  if (tray.tray_supported) assert.equal(tray.tray_visible, true);
+  await (await find(By.css('[role=switch][aria-label="Tray icon"]'))).click();
+  await driver.wait(async () => (await invoke("desktop_status")).tray_visible === false, 5000);
+  assert.ok((await invoke("window_hide")).__error, "Atlas cannot hide in a tray that is off");
+  await (await find(By.css('[role=switch][aria-label="Tray icon"]'))).click();
+  await driver.wait(async () => (await invoke("settings_get")).desktop.tray === true, 5000);
+
+  // Notifications: with permission, the test is delivered once and listed under the bell.
+  await (await find(By.css('[role=switch][aria-label="System notifications"]'))).click();
+  await driver.wait(async () => (await invoke("settings_get")).desktop.notifications.system === true, 5000);
+  const shownBefore = (await invoke("desktop_status")).test_notifications_shown;
+  await click("Send a test notification");
+  await driver.wait(async () => (await invoke("desktop_status")).test_notifications_shown === shownBefore + 1, 5000, "exactly one system notification");
+  await driver.wait(async () => Number(await (await find(By.css("[data-bell]"))).getAttribute("data-unread")) >= 1, 5000);
+  await driver.executeScript("arguments[0].click()", await find(By.css("[data-bell]")));
+  await find(By.css("[data-notification-panel]"));
+  await waitText("Atlas notifications are working");
+  await shot("17d-desktop-notifications");
+  await click("Mark all read");
+  await driver.wait(async () => (await invoke("notifications_list", { limit: 10 })).unread === 0, 5000);
+  await driver.actions().sendKeys(Key.ESCAPE).perform();
+  await driver.wait(() => gone("[data-notification-panel]"), 3000);
+
+  // Leave the defaults as they were, and check they survived the round trip.
+  const s1 = await invoke("settings_get");
+  await invoke("settings_update", { settings: { ...s1, desktop: s0.desktop } });
+  await invoke("notifications_clear");
+  assert.deepEqual((await invoke("settings_get")).desktop, s0.desktop);
+  assert.equal((await invoke("desktop_status")).shortcut_registered, null);
 });
 
 test("Atlas Forge: explorer, approved edit with revertible snapshot, terminal", async () => {

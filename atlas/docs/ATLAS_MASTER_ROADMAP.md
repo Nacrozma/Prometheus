@@ -46,8 +46,8 @@ from earlier reports.
 |---|---|---|
 | Voice input (push-to-talk, transcription) | Implemented (0.4.0); hardware MANUAL | whisper.cpp 1.8.2 + Whisper models, on-device. Push-to-talk, transcript review/edit, cancel, single-flight, mic-loss handling. Real engines verified in CI; a real microphone only on the owner's PC |
 | Voice output (TTS for responses) | Implemented (0.4.0); hardware MANUAL | sherpa-onnx 1.12.40 + Piper voices, on-device. Progressive sentence playback, Markdown-aware, stop/pause/replay/mute. Real engines verified in CI; real speakers only on the owner's PC |
-| Compact window, tray, global shortcut, always-on-top | Missing | Tauri plugins exist (tray, global-shortcut); not used |
-| Desktop notifications | Missing | In-app toasts only |
+| Tray, global shortcut | Implemented (0.4.2); hardware MANUAL | `core/src/desktop.rs`, `src-tauri/src/presence.rs`. Off by default; see ATLAS_DESKTOP_PRESENCE.md. Compact window and quick entry: 0.5.0 |
+| Notifications | Implemented (0.4.2) | In-app list (bell) plus optional system notifications; the core decides; de-duplicated; generic wording by default |
 
 ### Atlas Forge
 

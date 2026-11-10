@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.4.2 — 2026-11-10
+
+Desktop presence and a guided voice setup. Voice accuracy, playback tuning and the default recognition
+model are **unchanged**: they wait for results from a real microphone and speakers.
+
+### Added
+- **Tray icon** with Open, Talk and Quit. Optional "keep running when the window is closed".
+- **Global shortcut** to bring Atlas forward from anywhere (off by default; Ctrl+Alt+Space once on;
+  changeable). Unsafe or system combinations are refused, a conflict with another app is reported, and
+  only one shortcut is ever registered.
+- **Notifications:** a bell with Atlas's own list (approvals, replies finished while you were away,
+  mission updates, failures), and optional system notifications with per-kind switches. System
+  notifications are off until you turn them on, and use generic wording unless you allow details.
+- **Guided voice setup** (Settings → Voice → Guided setup): downloads with sizes and progress, choosing
+  speakers and microphone, and a test of each.
+- **The voice ring in the introduction.** It surrounds the globe. When a voice is already set up, Atlas
+  speaks its welcome and the ring moves with that sound; otherwise it rests silently.
+- Settings → Desktop, with the limits of your system stated plainly.
+- A second launch returns to the running Atlas (Windows, macOS).
+
+### Security
+- The core decides whether a notification may reach the system; the window cannot call the tray,
+  shortcut or notification plugins directly.
+- Secrets are redacted from notifications. Turning on anything that reaches outside the window is
+  written to the audit log.
+
+### Not tested by a person yet
+- A real notification on a real desktop, pressing the shortcut from another app, and the tray icon.
+- macOS desktop presence. Linux: no global shortcut on Wayland; tray depends on the desktop.
+
 ## 0.4.1 — 2026-11-10 (released: atlas-v0.4.1)
 
 Voice groundwork for testing on real hardware. **A real microphone and real speakers have still not
