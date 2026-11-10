@@ -65,7 +65,7 @@ class FakeCtx {
 (globalThis as unknown as { AudioWorkletNode: unknown }).AudioWorkletNode = FakeWorkletNode;
 
 const { AudioEngine } = await import("@/features/voice/audioEngine");
-const { wordAccuracy, normaliseWords, micVerdict, formatReport, CHECK_PHRASE } = await import("@/features/voice/voiceCheck");
+const { wordAccuracy, normaliseWords, micVerdict, formatReport, CHECK_PHRASE } = await import("@/features/voice/checkReport");
 
 describe("microphone capture", () => {
   it("collects samples through the audio worklet, loads the module once, and releases it on stop", async () => {

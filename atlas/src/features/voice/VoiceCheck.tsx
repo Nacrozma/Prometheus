@@ -7,7 +7,7 @@ import { useAtlasQuery } from "@/lib/query";
 import type { Settings, VoiceStatus } from "@/lib/schemas";
 import { useVoice } from "@/state/voice";
 import { audio } from "./audioEngine";
-import { CHECK_PHRASE, CONDITIONS, SPEAKER_PHRASE, formatReport, micVerdict, wordAccuracy, type CheckResult, type Condition, type MicResult } from "./voiceCheck";
+import { CHECK_PHRASE, CONDITIONS, SPEAKER_PHRASE, formatReport, micVerdict, wordAccuracy, type CheckResult, type Condition, type MicResult } from "./checkReport";
 import { VoiceRing } from "./VoiceRing";
 
 const clock = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
