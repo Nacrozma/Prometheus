@@ -7,10 +7,13 @@ on:
     inputs:
       tag:
         description: "Release to test"
-        default: "atlas-v0.2.0"
+        default: "atlas-v0.4.2"
       upgrade_from:
         description: "Earlier release to upgrade from (empty to skip)"
-        default: "atlas-v0.1.0"
+        default: "atlas-v0.4.1"
+      schema:
+        description: "Database schema version the tested release must have"
+        default: "4"
   push:
     paths: [".github/workflows/atlas-install-test.yml"]
 
@@ -22,8 +25,9 @@ jobs:
     runs-on: windows-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      TAG: ${{ inputs.tag || 'atlas-v0.2.0' }}
-      FROM: ${{ inputs.upgrade_from || 'atlas-v0.1.0' }}
+      TAG: ${{ inputs.tag || 'atlas-v0.4.2' }}
+      FROM: ${{ inputs.upgrade_from || 'atlas-v0.4.1' }}
+      SCHEMA: ${{ inputs.schema || '4' }}
     defaults:
       run:
         shell: pwsh
@@ -101,7 +105,7 @@ jobs:
           "data folder: $DataDir"; Get-ChildItem $DataDir | Format-Table Name, Length
           Stop-Atlas $p
           $v = Sql 'PRAGMA user_version'; "schema version: $v"
-          if ($v -ne '[[3]]') { throw "expected schema v3, got $v" }
+          if ($v -ne "[[$env:SCHEMA]]") { throw "expected schema v$env:SCHEMA, got $v" }
           $qc = Sql 'PRAGMA quick_check'; "quick_check: $qc"
           if ($qc -ne '[["ok"]]') { throw 'database integrity check failed' }
           $tables = Sql "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"; "tables: $tables"
@@ -159,12 +163,12 @@ jobs:
           $p = Start-Atlas $i2
           Stop-Atlas $p
           $v2 = Sql 'PRAGMA user_version'; "new schema version: $v2"
-          if ($v2 -ne '[[3]]') { throw "expected v3 after upgrade, got $v2" }
+          if ($v2 -ne "[[$env:SCHEMA]]") { throw "expected v$env:SCHEMA after upgrade, got $v2" }
           $m = Sql "SELECT name FROM projects WHERE id='upgrade-marker'"; "marker after upgrade: $m"
           if ($m -notmatch 'Upgrade marker') { throw 'user data lost during upgrade' }
-          if ($v -ne '[[3]]') {
+          if ($v -ne "[[$env:SCHEMA]]") {
             # A schema migration ran: the old database must have been backed up first.
-            $bak = Get-ChildItem $DataDir -Filter 'atlas.pre-v3.bak' -ErrorAction SilentlyContinue
+            $bak = Get-ChildItem $DataDir -Filter "atlas.pre-v$env:SCHEMA.bak" -ErrorAction SilentlyContinue
             if (-not $bak) { Get-ChildItem $DataDir; throw 'no pre-upgrade backup of the database' }
             $bv = SqlAt $bak.FullName 'PRAGMA user_version'
             "pre-upgrade backup: $($bak.Name), schema v$bv, $($bak.Length) bytes"
