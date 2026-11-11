@@ -316,6 +316,7 @@ test("personality presets apply their settings, and the introduction replays as 
   assert.deepEqual([c.tone, c.verbosity, c.proactivity], ["precise", "concise", "reserved"]);
   await driver.findElement(By.xpath("//button[@role='radio'][.//span[normalize-space()='Professional']]")).click();
   await driver.wait(async () => (await invoke("settings_get")).companion.personality === "professional", 5000);
+  await shot("13b-personality-presets");
 
   await click("Appearance");
   await driver.findElement(exactButton("Reduced")).click();
@@ -387,6 +388,8 @@ test("voice: verified downloads, push-to-talk into an editable message, a spoken
   // The maintained capture API (an audio worklet) is what actually ran in this web view.
   assert.equal(await voice("backend()"), "worklet", "microphone capture uses the audio worklet");
   assert.equal(await voice("capturing()"), false);
+  await driver.executeScript("document.querySelector('[data-voice-check]').scrollIntoView({ block: 'center' })");
+  await driver.wait(async () => (await driver.executeScript("return document.querySelectorAll('[data-sonner-toast]').length")) === 0, 8000).catch(() => {});
   await shot("15b-voice-check");
 
   // Push-to-talk: the stand-in microphone is a test tone; the ring measures it.
@@ -506,11 +509,13 @@ test("voice: settings persist, offline speech still works but downloads are refu
   await find(By.css("[data-audio-wizard]"));
   await click("Test the microphone");
   await find(By.css('[data-mic-result="heard"]'), 10000);
+  await shot("17b2-audio-wizard-microphone");
   assert.equal(await voice("capturing()"), false, "the microphone is released after the test");
   await click("Continue");
   await find(By.css('[data-audio-wizard][data-step="Done"]'));
   await waitText("Speaking: ready");
   await waitText("Listening: ready");
+  await shot("17b3-audio-wizard-done");
   await click("Finish");
   await driver.wait(() => gone("[data-audio-wizard]"), 5000);
 
@@ -567,6 +572,7 @@ test("desktop presence: nothing is on by default, the shortcut is validated and 
   const st1 = await invoke("desktop_status");
   assert.ok(st1.shortcut_registered === "Ctrl+Alt+Space" || st1.shortcut_error, JSON.stringify(st1));
   await find(By.css(st1.shortcut_registered ? "[data-shortcut-active]" : "[data-shortcut-error]"));
+  await shot("17d0-desktop-settings");
   // Saving other settings does not register it again or change it.
   await (await find(By.css('[role=switch][aria-label="Start listening when summoned"]'))).click();
   await driver.wait(async () => (await invoke("settings_get")).desktop.shortcut_starts_listening === true, 5000);
@@ -671,6 +677,11 @@ async function audit(page) {
 }
 
 test("accessibility audit (axe-core) finds no serious or critical issues", async () => {
+  // Audit with an unread notification present, so the bell's badge is part of what is checked.
+  const before = await invoke("settings_get");
+  await invoke("settings_update", { settings: { ...before, desktop: { ...before.desktop, notifications: { ...before.desktop.notifications, system: true } } } });
+  await invoke("notification_test");
+  await driver.wait(async () => Number(await (await find(By.css("[data-bell]"))).getAttribute("data-unread")) >= 1, 5000);
   const failures = {};
   for (const [key, page] of [["1", "home"], ["2", "companion"], ["4", "forge"], ["siblings", "siblings"], ["5", "mission-control"], ["7", "memory"], ["9", "integrations"], [",", "settings"]]) {
     if (key === "siblings") await (await find(By.css('nav[aria-label="Main"] button[aria-label="Siblings"]'))).click();
@@ -679,5 +690,13 @@ test("accessibility audit (axe-core) finds no serious or critical issues", async
     const blocking = await audit(page);
     if (blocking.length) failures[page] = blocking;
   }
+  // The open notification list is audited too.
+  await driver.executeScript("arguments[0].click()", await find(By.css("[data-bell]")));
+  await find(By.css("[data-notification-panel]"));
+  const panel = await audit("notifications-panel");
+  if (panel.length) failures["notifications-panel"] = panel;
+  await driver.actions().sendKeys(Key.ESCAPE).perform();
+  await invoke("settings_update", { settings: { ...(await invoke("settings_get")), desktop: before.desktop } });
+  await invoke("notifications_clear");
   assert.deepEqual(failures, {});
 });

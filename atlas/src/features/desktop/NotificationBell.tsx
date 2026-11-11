@@ -73,13 +73,14 @@ export function NotificationBell() {
           className={cn("relative grid size-11 place-items-center rounded-md transition-colors", open ? "bg-accent-soft text-accent-strong" : "text-text-3 hover:bg-bg-3 hover:text-text-1")}
         >
           <Bell className="size-[1.15rem]" strokeWidth={1.75} aria-hidden />
-          {unread > 0 && (
-            <span aria-hidden className="absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-accent px-1 text-[0.625rem] font-bold leading-4 text-text-inverse">
-              {unread > 9 ? "9+" : unread}
-            </span>
-          )}
         </button>
       </Tooltip>
+      {/* The count sits beside the button, not inside it, so the button's name is exactly its label. */}
+      {unread > 0 && (
+        <span aria-hidden className="pointer-events-none absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-accent px-1 text-[0.625rem] font-bold leading-4 text-text-inverse">
+          {unread > 9 ? "9+" : unread}
+        </span>
+      )}
       {open && (
         <div
           role="dialog"

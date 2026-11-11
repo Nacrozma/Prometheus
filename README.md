@@ -1,7 +1,7 @@
 # Prometheus
 
 > **Looking for ATLAS Co-Pilot (the Windows desktop app)? → [How to install it](INSTALL.md)**
-> ([download the installer](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.1.0/ATLAS-Co-Pilot-Setup-x64.exe)).
+> ([download the installer](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.4.2/ATLAS-Co-Pilot-Setup-x64.exe)).
 > Its source is in [`atlas/`](atlas/) and does not share code with Prometheus.
 
 A local, terminal-based AI assistant written in Python. It talks to LLM providers through an

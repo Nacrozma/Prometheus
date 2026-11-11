@@ -5,7 +5,7 @@ provider you choose, remembers only what you approve, carries out tasks with a s
 tools, and shows everything it can reach on a live **Atlas Map**.
 
 > **Just want to use it on Windows? → [How to install ATLAS Co-Pilot](../INSTALL.md)**
-> ([download the installer](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.1.0/ATLAS-Co-Pilot-Setup-x64.exe))
+> ([download the installer](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.4.2/ATLAS-Co-Pilot-Setup-x64.exe))
 
 ![Atlas Map](docs/screenshots/09-map-inspector.png)
 
@@ -14,6 +14,13 @@ tools, and shows everything it can reach on a live **Atlas Map**.
 | ![Welcome](docs/screenshots/01-welcome.png) | ![Approval](docs/screenshots/06-approval.png) |
 | ![Home](docs/screenshots/14-home.png) | ![Integrations](docs/screenshots/11-integrations.png) |
 | ![Atlas Forge](docs/screenshots/15-forge.png) | ![Pair with Prometheus](docs/screenshots/17-siblings-pair.png) |
+
+**New in 0.3.0–0.4.2** (introduction, voice, Voice check, guided setup, tray, global shortcut,
+notifications): see [What's new, in pictures](docs/WHATS_NEW_SCREENSHOTS.md).
+
+| ![Introduction with the voice ring](docs/screenshots/17c-introduction-speaking.png) | ![Desktop settings](docs/screenshots/17d0-desktop-settings.png) |
+|---|---|
+| ![Guided voice setup](docs/screenshots/17b-audio-wizard-speakers.png) | ![Notifications](docs/screenshots/17d-desktop-notifications.png) |
 
 *All screenshots are captured from the real desktop app by the end-to-end test suite (with its scripted test provider).*
 
@@ -89,5 +96,7 @@ atlas/
 [Setup](docs/SETUP.md) · [Windows](docs/WINDOWS.md) · [Providers](docs/PROVIDERS.md) · [Tool development](docs/TOOL_DEVELOPMENT.md) ·
 [Integrations](docs/INTEGRATIONS.md) · [Memory](docs/MEMORY.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) ·
 [Release](docs/RELEASE.md) · [Testing](docs/TESTING.md) · [Test report](docs/TEST_REPORT.md) · [Decisions](docs/adr/) · [Changelog](CHANGELOG.md)
+
+**New in 0.4.x:** [Voice](docs/ATLAS_VOICE_ARCHITECTURE.md) · [Desktop presence](docs/ATLAS_DESKTOP_PRESENCE.md) · [What's new, in pictures](docs/WHATS_NEW_SCREENSHOTS.md)
 
 **New in 0.2.0:** [Atlas Forge](docs/FORGE.md) · [Pairing with Prometheus](docs/PAIRING.md) · [Sibling Protocol v1](docs/SIBLING_PROTOCOL.md)
