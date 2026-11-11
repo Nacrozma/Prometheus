@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.2 — 2026-11-10
+## 0.4.2 — 2026-11-11 (released: atlas-v0.4.2)
 
 Desktop presence and a guided voice setup. Voice accuracy, playback tuning and the default recognition
 model are **unchanged**: they wait for results from a real microphone and speakers.
