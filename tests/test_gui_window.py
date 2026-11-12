@@ -194,7 +194,9 @@ class WindowTests(unittest.TestCase):
         self.assertIn("created", self.last_entry(w))
         self.assertTrue(os.path.exists(os.path.join(vault, "Prometheus", "Entities", "Prometheus.md")))
         self.assertTrue(w.handle_gui_slash_command("/obsidian status"))
-        self.assertIn(os.path.realpath(vault).replace("/", "/"), self.last_entry(w).replace("&#x27;", "'"))
+        # The status is JSON shown as HTML: compare with the vault path as JSON writes it (Windows doubles backslashes).
+        shown = self.last_entry(w).replace("&#x27;", "'").replace("&quot;", '"')
+        self.assertTrue(any(json.dumps(v)[1:-1] in shown for v in (os.path.realpath(vault), vault)), shown)
         self.assertTrue(w.handle_gui_slash_command("/obsidian bogus"))
         self.assertIn("Usage: /obsidian", self.last_entry(w))
 

@@ -382,7 +382,9 @@ class SandboxModeTests(unittest.TestCase):
         finally:
             os.environ["PATH"] = old_path
         self.assertFalse(res["ok"])
-        self.assertIn("could not start", res["error"])
+        # With PATH empty, Linux cannot find docker at all ("could not start"); Windows still finds it
+        # through its own search rules, and the CLI then exits with an error. Either way: reported, not raised.
+        self.assertTrue("could not start" in res["error"] or "exit code" in res["error"], res["error"])
 
     def test_auto_mode_needs_a_working_daemon_not_just_the_cli(self):
         saved = dict(sf._docker_probe)

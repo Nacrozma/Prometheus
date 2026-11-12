@@ -25,6 +25,8 @@ DEFAULTS: Dict[str, Any] = {
     "auto_approve": False,
     "global_shortcut": "",
     "window_geometry": [],
+    #: A folder to import data from at the next start (before the core loads its state).
+    "pending_import": "",
 }
 
 TYPES = {k: type(v) for k, v in DEFAULTS.items()}

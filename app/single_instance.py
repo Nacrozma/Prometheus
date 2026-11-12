@@ -42,6 +42,8 @@ class SingleInstance(QObject):
 
     def listen(self) -> bool:
         self.server = QLocalServer(self)
+        # Only this user may connect (named-pipe / socket permissions).
+        self.server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
         if not self.server.listen(self.name):
             # A stale socket from a crash: remove it and try once more.
             QLocalServer.removeServer(self.name)
@@ -56,10 +58,11 @@ class SingleInstance(QObject):
             conn = self.server.nextPendingConnection()
             if conn is None:
                 break
-            conn.waitForReadyRead(300)
-            if bytes(conn.readAll().data()).startswith(b"activate"):
-                self.activated.emit()
+            # Any connection to this per-user server is a second launch asking us to come forward.
+            # (Not reading the message first: on Windows a named pipe can close before it is read.)
+            self.activated.emit()
             conn.disconnectFromServer()
+            conn.deleteLater()
 
     def close(self) -> None:
         if self.server is not None:

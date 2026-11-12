@@ -367,7 +367,8 @@ class SafetyTests(VaultCase):
         rep = self.export()
         self.assertTrue(rep.ok, rep.errors)
         for path in all_files(self.vault):  # nothing was written outside <vault>/Prometheus (besides the .obsidian marker)
-            self.assertTrue(path.startswith(self.root) or ".obsidian" in path, path)
+            # realpath on both sides: Windows may report the temp folder by its 8.3 short name.
+            self.assertTrue(os.path.realpath(path).startswith(os.path.realpath(self.root)) or ".obsidian" in path, path)
         self.assertEqual(set(all_files(self.tmp)) - set(all_files(self.vault)), before_outside)
         for name in ("evil.md", "CON_.md", "Index (2).md"):
             self.assertTrue(os.path.exists(os.path.join(self.root, "Entities", name)), name)

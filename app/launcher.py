@@ -34,8 +34,12 @@ def _child_python(argv) -> int | None:
 
 
 def run() -> int:
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if root not in sys.path:  # started as a script (e.g. from a login entry) rather than with -m
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(here)
+    # Started as a script (e.g. from a login entry) rather than with -m: Python put app/ first on the
+    # path, where app/platform would hide the standard library's `platform`. Use the repository root.
+    sys.path[:] = [p for p in sys.path if os.path.abspath(p or os.curdir) != here]
+    if root not in sys.path:
         sys.path.insert(0, root)
     # A windowed executable has no console: give print() somewhere harmless to write.
     for name in ("stdout", "stderr"):

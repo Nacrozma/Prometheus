@@ -46,6 +46,23 @@ def _crash_log(data_dir: str, text: str) -> str:
     return path
 
 
+def _run_pending_import(settings, data_dir: str) -> str:
+    """Import queued in Settings → Data. Runs before the core is imported, so nothing it holds in
+    memory can overwrite the imported files."""
+    source = settings.get("pending_import")
+    if not source:
+        return ""
+    settings.set("pending_import", "")  # one attempt only, whatever happens
+    from . import migration
+
+    try:
+        plan = migration.plan(source, data_dir)
+        backup = migration.apply(plan)
+    except migration.MigrationError as e:
+        return f"Data import from {source} did not run: {e}"
+    return f"Imported {len(plan.files)} files from {source}." + (f" Replaced files were backed up to {backup}." if backup else "")
+
+
 def _self_test(app, win, core, paths, out_path: str) -> int:
     import json
 
@@ -115,6 +132,7 @@ def main(argv=None) -> int:
     first = bootstrap.resolve_paths(platform)
     settings = DesktopSettings(first.data_dir)
     paths = bootstrap.resolve_paths(platform, settings.get("workspace"))
+    import_note = _run_pending_import(settings, paths.data_dir)
     bootstrap.apply(paths)
     try:
         faulthandler.enable(open(os.path.join(paths.data_dir, "desktop_faults.log"), "a"))
@@ -140,12 +158,20 @@ def main(argv=None) -> int:
         text = traceback.format_exc()
         log = _crash_log(paths.data_dir, text)
         splash.close()
+        if self_test:  # no dialogs in a headless check: report and exit
+            import json
+
+            with open(self_test, "w", encoding="utf-8") as f:
+                json.dump({"ok": False, "error": text.strip().splitlines()[-1], "log": log}, f, indent=2)
+            return 1
         QMessageBox.critical(None, f"{APP_NAME} could not start", f"{text.strip().splitlines()[-1]}\n\nDetails were written to {log}.")
         return 1
 
     if self_test:
         return _self_test(app, win, core, paths, self_test)
     instance.activated.connect(win.show_and_raise)
+    if import_note:
+        win.statusBar().showMessage(import_note, 0)
     if settings.load_error:
         win.statusBar().showMessage(f"Desktop settings were unreadable and were reset: {settings.load_error}", 0)
     win.show()

@@ -220,6 +220,72 @@ class TestSingleInstance(unittest.TestCase):
         self.assertEqual(hits, [1])
 
 
+class TestImport(unittest.TestCase):
+    def setUp(self):
+        from app import migration
+
+        self.m = migration
+        self.src, self.dst = tempfile.mkdtemp(), tempfile.mkdtemp()
+        files = {"memory_graph.json": '{"facts": [1]}', "audit.jsonl": '{"a":1}\n', "sessions/s1.json": "[]", "skills.json": "{broken", ".env": "GROQ_API_KEY=secret"}
+        for rel, body in files.items():
+            os.makedirs(os.path.dirname(os.path.join(self.src, rel)), exist_ok=True)
+            with open(os.path.join(self.src, rel), "w") as f:
+                f.write(body)
+        with open(os.path.join(self.dst, "memory_graph.json"), "w") as f:
+            f.write('{"facts": ["old"]}')
+
+    def snapshot(self, root):
+        out = {}
+        for d, _, names in os.walk(root):
+            for n in names:
+                with open(os.path.join(d, n)) as f:
+                    out[os.path.relpath(os.path.join(d, n), root)] = f.read()
+        return out
+
+    def test_import_backs_up_copies_verifies_and_leaves_source_alone(self):
+        before = self.snapshot(self.src)
+        plan = self.m.plan(self.src, self.dst)
+        self.assertIn("skills.json", plan.invalid)
+        self.assertTrue(plan.skipped_env)
+        self.assertEqual(plan.replaces, ["memory_graph.json"])
+        backup = self.m.apply(plan)
+        with open(os.path.join(backup, "memory_graph.json")) as f:
+            self.assertIn("old", f.read())
+        after = self.snapshot(self.dst)
+        self.assertEqual(after["memory_graph.json"], '{"facts": [1]}')
+        self.assertIn(os.path.join("sessions", "s1.json"), after)
+        self.assertNotIn(".env", after, "keys are never copied")
+        self.assertNotIn("skills.json", after, "unreadable state is not imported")
+        self.assertEqual(self.snapshot(self.src), before, "the source is never changed")
+
+    def test_failed_copy_rolls_back(self):
+        plan = self.m.plan(self.src, self.dst)
+        real = self.m._sha
+        calls = {"n": 0}
+
+        def flaky(path):
+            calls["n"] += 1
+            if path.endswith(".importing") and calls["n"] > 4:
+                return "mismatch"
+            return real(path)
+
+        self.m._sha = flaky
+        try:
+            with self.assertRaises(self.m.MigrationError):
+                self.m.apply(plan)
+        finally:
+            self.m._sha = real
+        after = self.snapshot(self.dst)
+        self.assertEqual(after["memory_graph.json"], '{"facts": ["old"]}')
+        self.assertFalse([k for k in after if k.endswith(".importing") or k.startswith("sessions")])
+
+    def test_refuses_same_folder_and_empty_folder(self):
+        with self.assertRaises(self.m.MigrationError):
+            self.m.plan(self.dst, self.dst)
+        with self.assertRaises(self.m.MigrationError):
+            self.m.plan(tempfile.mkdtemp(), self.dst)
+
+
 class TestChildPython(unittest.TestCase):
     """The packaged exe must act as Python for the core's child processes (run_code, Forge tests)."""
 
@@ -241,6 +307,25 @@ class TestChildPython(unittest.TestCase):
             self.assertEqual(_child_python(["Prometheus.exe", "-m", "json.tool", "--help"]), 0)
         finally:
             sys.argv = saved
+
+
+@unittest.skipUnless(HAVE_QT, "PyQt6 not installed")
+class TestLauncherScript(unittest.TestCase):
+    def test_launcher_run_as_a_script_passes_its_self_test(self):
+        # The source-mode "start at sign-in" entry runs app/launcher.py directly; app/platform must
+        # not hide the standard library's platform module, and the self-test must never block.
+        tmp = tempfile.mkdtemp()
+        env = dict(os.environ, PROMETHEUS_HOME=os.path.join(tmp, "h"), PROMETHEUS_WORKSPACE=os.path.join(tmp, "w"))
+        for k in KNOWN_KEYS:
+            env.pop(k, None)
+        report = os.path.join(tmp, "r.json")
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "app", "launcher.py"), f"--self-test={report}"], env=env, capture_output=True, text=True, timeout=180, cwd=tmp)
+        self.assertTrue(os.path.exists(report), r.stderr[-2000:])
+        with open(report) as f:
+            out = json.load(f)
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(out["calc"]["results"]["value"], 25.4)
 
 
 SMOKE = textwrap.dedent(

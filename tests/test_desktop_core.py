@@ -44,7 +44,7 @@ class DataAndWorkspaceFolders(unittest.TestCase):
             )
             for name, path in r["files"].items():
                 self.assertTrue(os.path.realpath(path).startswith(os.path.realpath(home)), (name, path))
-            self.assertEqual(r["ws"], os.path.realpath(ws))
+            self.assertEqual(os.path.realpath(r["ws"]), os.path.realpath(ws))
             self.assertEqual(r["inside"], "success")
             self.assertEqual(open(os.path.join(ws, "notes", "a.txt")).read(), "hi")
             self.assertNotEqual(r["outside"], "success", "the source folder is outside the workspace")

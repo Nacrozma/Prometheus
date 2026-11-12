@@ -133,6 +133,13 @@ class SettingsPage(Page):
         open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(paths.data_dir)))
         dt.body.addWidget(open_btn)
         dt.body.addWidget(label("Back up by copying this folder while Prometheus is closed. Keys are not in it (they are in the credential store).", "faint"))
+        imp = QPushButton("Import data from another Prometheus folder…")
+        imp.clicked.connect(self._import)
+        dt.body.addWidget(imp)
+        self.import_lbl = label("", "faint")
+        dt.body.addWidget(self.import_lbl)
+        if settings.get("pending_import"):
+            self.import_lbl.setText(f"Import from {settings.get('pending_import')} will run the next time Prometheus starts.")
         col.addWidget(dt)
 
         ab = Card("About")
@@ -207,6 +214,23 @@ class SettingsPage(Page):
                 self.auto.blockSignals(False)
                 return
         self._set("auto_approve", on)
+
+    def _import(self) -> None:
+        from ...migration import MigrationError, plan
+
+        d = QFileDialog.getExistingDirectory(self, "Folder that holds your existing Prometheus data")
+        if not d:
+            return
+        try:
+            p = plan(d, self.paths.data_dir)
+        except MigrationError as e:
+            QMessageBox.warning(self, "Nothing to import", str(e))
+            return
+        msg = p.summary() + "\n\nThe other folder is only read, never changed. The import runs the next time Prometheus starts, before it loads its memory. Queue it?"
+        if QMessageBox.question(self, "Import data", msg) != QMessageBox.StandardButton.Yes:
+            return
+        self.settings.set("pending_import", os.path.realpath(d))
+        self.import_lbl.setText(f"Import from {os.path.realpath(d)} will run the next time Prometheus starts. Quit and reopen Prometheus to import.")
 
     def _pick_workspace(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Choose the workspace folder")
