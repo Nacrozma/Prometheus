@@ -25,6 +25,8 @@ pub struct Settings {
     pub voice: VoiceSettings,
     /// Tray, global shortcut and notifications.
     pub desktop: crate::desktop::DesktopSettings,
+    /// Reminders, "due today" notices and the global pause.
+    pub schedule: crate::scheduler::ScheduleSettings,
     pub default_project_id: Option<String>,
     pub forge: ForgeSettings,
     /// The one-time introduction. Owned by the core: `settings_update` cannot change it.
@@ -522,6 +524,7 @@ impl Settings {
             }
         }
         self.desktop.validate()?;
+        self.schedule.validate()?;
         for (what, id) in [("microphone", &v.input_device), ("speaker", &v.output_device)] {
             if id.as_ref().is_some_and(|d| d.len() > 512 || d.chars().any(char::is_control)) {
                 return Err(AtlasError::Validation(format!("{what} id is not valid")));

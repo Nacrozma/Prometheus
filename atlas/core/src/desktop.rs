@@ -56,11 +56,17 @@ pub struct NotificationSettings {
     pub replies: bool,
     pub missions: bool,
     pub errors: bool,
+    /// Reminders the owner set on tasks.
+    pub reminders: bool,
+    /// "Due today" notices for tasks without a reminder.
+    pub deadlines: bool,
+    /// The daily briefing.
+    pub briefings: bool,
 }
 
 impl Default for NotificationSettings {
     fn default() -> Self {
-        Self { system: false, only_when_away: true, show_details: false, approvals: true, replies: true, missions: true, errors: true }
+        Self { system: false, only_when_away: true, show_details: false, approvals: true, replies: true, missions: true, errors: true, reminders: true, deadlines: true, briefings: true }
     }
 }
 
@@ -71,6 +77,9 @@ impl NotificationSettings {
             Category::Reply => self.replies,
             Category::Mission => self.missions,
             Category::Error => self.errors,
+            Category::Reminder => self.reminders,
+            Category::Deadline => self.deadlines,
+            Category::Briefing => self.briefings,
             Category::Test => true,
         }
     }
@@ -193,6 +202,9 @@ pub enum Category {
     Reply,
     Mission,
     Error,
+    Reminder,
+    Deadline,
+    Briefing,
     Test,
 }
 
@@ -203,6 +215,9 @@ impl Category {
             Category::Reply => "reply",
             Category::Mission => "mission",
             Category::Error => "error",
+            Category::Reminder => "reminder",
+            Category::Deadline => "deadline",
+            Category::Briefing => "briefing",
             Category::Test => "test",
         }
     }
@@ -212,6 +227,9 @@ impl Category {
             "reply" => Category::Reply,
             "mission" => Category::Mission,
             "error" => Category::Error,
+            "reminder" => Category::Reminder,
+            "deadline" => Category::Deadline,
+            "briefing" => Category::Briefing,
             _ => Category::Test,
         }
     }
@@ -315,7 +333,8 @@ impl NotificationCenter {
         let allowed = s.system && s.category_on(n.category);
         if allowed
             && let Some(nf) = notifier
-            && !(s.only_when_away && nf.in_front())
+            // A reminder is shown even while Atlas is in front: the owner asked for that moment.
+            && !(s.only_when_away && n.category != Category::Reminder && nf.in_front())
         {
             out.shown_by_system = nf.show(&Self::system_notice(&out, s));
         }

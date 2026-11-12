@@ -27,6 +27,7 @@ pub mod tasks;
 pub mod tools;
 pub mod usage;
 pub mod desktop;
+pub mod scheduler;
 pub mod todos;
 pub mod voice;
 pub mod when;

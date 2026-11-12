@@ -61,6 +61,8 @@ pub struct Atlas {
     pub(crate) voice_http: reqwest::Client,
     /// Notifications: the in-app list, and system notifications when the owner allows them.
     pub notifications: Arc<crate::desktop::NotificationCenter>,
+    pub(crate) schedule_dirty: Arc<std::sync::atomic::AtomicBool>,
+    pub(crate) schedule_synced_at: Mutex<Option<std::time::Instant>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -79,6 +81,11 @@ impl Atlas {
         let registry = Arc::new(ToolRegistry::default());
         crate::tools::builtin::register_all(&registry)?;
         let recovered = tasks::recover_after_restart(&db)?;
+        // Scheduled jobs a crash left half-run: finish or retry them (never run twice).
+        let jobs_recovered = crate::scheduler::recover(&db)?;
+        if jobs_recovered > 0 {
+            audit::record(&db, "scheduler.recovered", "warn", None, None, json!({ "jobs": jobs_recovered }));
+        }
         if recovered > 0 {
             audit::record(&db, "tasks.recovered", "warn", None, None, json!({"interrupted": recovered}));
         }
@@ -124,6 +131,8 @@ impl Atlas {
                 .build()
                 .unwrap_or_default(),
             notifications,
+            schedule_dirty: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            schedule_synced_at: Mutex::new(None),
             me: me.clone(),
             recovered_tasks: recovered,
         }))
@@ -134,7 +143,7 @@ impl Atlas {
     }
 
     pub fn dispatcher(&self) -> Dispatcher {
-        Dispatcher { registry: self.registry.clone(), db: self.db.clone(), broker: self.broker.clone(), bus: self.bus.clone(), notifications: self.notifications.clone() }
+        Dispatcher { registry: self.registry.clone(), db: self.db.clone(), broker: self.broker.clone(), bus: self.bus.clone(), notifications: self.notifications.clone(), schedule_dirty: self.schedule_dirty.clone() }
     }
 
     pub fn tool_context(&self, settings: Settings, task_id: Option<String>, project_id: Option<String>, cancel: CancellationToken) -> ToolContext {
@@ -185,11 +194,12 @@ impl Atlas {
             providers::get(&self.db, pid)?;
         }
         new.desktop.shortcut = crate::desktop::parse_shortcut(&new.desktop.shortcut)?;
+        self.schedule_dirty.store(true, std::sync::atomic::Ordering::SeqCst);
         new.save(&self.db)?;
         audit::record(&self.db, "settings.updated", "info", None, None, json!({}));
         // Turning on something that reaches outside the window is recorded by name.
         let (a, b) = (&current.desktop, &new.desktop);
-        for (what, was, is) in [("system_notifications", a.notifications.system, b.notifications.system), ("global_shortcut", a.shortcut_enabled, b.shortcut_enabled), ("close_to_tray", a.close_to_tray, b.close_to_tray)] {
+        for (what, was, is) in [("system_notifications", a.notifications.system, b.notifications.system), ("global_shortcut", a.shortcut_enabled, b.shortcut_enabled), ("close_to_tray", a.close_to_tray, b.close_to_tray), ("proactive_paused", current.schedule.paused, new.schedule.paused)] {
             if was != is {
                 audit::record(&self.db, "desktop.permission_changed", "info", None, None, json!({ "setting": what, "enabled": is }));
             }
@@ -206,7 +216,49 @@ impl Atlas {
     }
 
     fn todos_changed(&self, id: Option<&str>) {
+        self.schedule_dirty.store(true, std::sync::atomic::Ordering::SeqCst);
         notify(&self.bus, Topic::Todos, id);
+    }
+
+    /// Snooze a task's reminder for a few minutes.
+    pub fn todo_snooze(&self, id: &str, minutes: i64) -> Result<crate::todos::Todo> {
+        if !(1..=1440).contains(&minutes) {
+            return Err(AtlasError::Validation("snooze for 1 minute to 24 hours".into()));
+        }
+        let at = (chrono::Utc::now() + chrono::Duration::minutes(minutes)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        self.todo_update(id, crate::todos::TodoPatch { remind_at: Some(Some(at)), ..Default::default() })
+    }
+
+    // ----- scheduler -----
+
+    /// One scheduler step: re-sync reminders when the task list changed (and at least every
+    /// 30 s, which also catches a new day or time zone), then run due jobs. Called by the
+    /// desktop shell's upkeep loop; safe to call from several places at once.
+    pub fn scheduler_tick(&self) -> Result<crate::scheduler::TickReport> {
+        let s = self.settings()?;
+        let stale = self.schedule_synced_at.lock().map(|t| t.is_none_or(|t| t.elapsed() > Duration::from_secs(30))).unwrap_or(true);
+        if self.schedule_dirty.swap(false, std::sync::atomic::Ordering::SeqCst) || stale {
+            crate::scheduler::sync(&self.db, &s.schedule, Self::local_now())?;
+            if let Ok(mut t) = self.schedule_synced_at.lock() {
+                *t = Some(std::time::Instant::now());
+            }
+            let _ = crate::scheduler::prune(&self.db, chrono::Utc::now(), 30);
+        }
+        let r = crate::scheduler::tick(&self.db, &self.notifications, &s.schedule, &s.desktop.notifications, chrono::Utc::now(), Self::local_now())?;
+        if r.delivered + r.missed + r.failed > 0 {
+            audit::record(&self.db, "scheduler.ran", if r.failed > 0 { "warn" } else { "info" }, None, None, json!(r));
+            notify(&self.bus, Topic::Todos, None);
+        }
+        Ok(r)
+    }
+
+    pub fn scheduler_jobs(&self, limit: u32) -> Result<serde_json::Value> {
+        let s = self.settings()?.schedule;
+        Ok(json!({
+            "paused": s.paused,
+            "summary": crate::scheduler::summary(&self.db)?,
+            "jobs": crate::scheduler::list(&self.db, Self::local_now(), limit)?,
+        }))
     }
 
     pub fn todos_list(&self, filter: &crate::todos::Filter) -> Result<Vec<crate::todos::Todo>> {

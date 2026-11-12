@@ -44,6 +44,8 @@ pub struct Dispatcher {
     pub broker: Arc<Broker>,
     pub bus: SharedBus,
     pub notifications: Arc<crate::desktop::NotificationCenter>,
+    /// Set when the task list changes, so the scheduler re-syncs its reminders.
+    pub schedule_dirty: Arc<std::sync::atomic::AtomicBool>,
 }
 
 fn failed(tool_id: &str, step_id: Option<String>, status: &str, msg: String) -> DispatchResult {
@@ -191,6 +193,7 @@ impl Dispatcher {
             Ok(output) => {
                 registry::record_use(&self.db, tool_id, false);
                 if d.category == "planner" && d.permission != crate::tools::PermissionClass::ReadOnly {
+                    self.schedule_dirty.store(true, std::sync::atomic::Ordering::SeqCst);
                     notify(&self.bus, Topic::Todos, None);
                 }
                 let mut content = output.to_string();

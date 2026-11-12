@@ -94,6 +94,10 @@ pub fn run() {
             let bg = atlas.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
+                    // Reminders and notices; failures are recorded and never stop the loop.
+                    if let Err(e) = bg.scheduler_tick() {
+                        eprintln!("[atlas] scheduler: {e}");
+                    }
                     bg.sibling_sync_once().await;
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
