@@ -209,13 +209,14 @@ class IntegrationTests(unittest.TestCase):
         class Case(Base):
             def runTest(inner):
                 import prometheus as p
-                saved = (p.BASE_DIR, p.UNDO_DIR)
+                saved = (p.BASE_DIR, p.WORKSPACE_DIR, p.UNDO_DIR)
                 p.BASE_DIR = inner.tmp
+                p.WORKSPACE_DIR = inner.tmp  # the workspace tools are confined to WORKSPACE_DIR
                 p.UNDO_DIR = os.path.join(inner.tmp, ".undo")
                 try:
                     body(inner, p)
                 finally:
-                    p.BASE_DIR, p.UNDO_DIR = saved
+                    p.BASE_DIR, p.WORKSPACE_DIR, p.UNDO_DIR = saved
 
         import io
         res = unittest.TextTestRunner(stream=io.StringIO()).run(Case())

@@ -60,6 +60,9 @@ except RuntimeError as err:
     # provider key is configured - say so plainly instead of a raw traceback.
     raise SystemExit(f"Prometheus could not start: {err}")
 
+if not llm_router.configured:  # same behaviour as before: no provider, no HUD
+    raise SystemExit(f"Prometheus could not start: {llm_router.error}")
+
 import prometheus as _prometheus_core  # PROVIDER_PRIORITY / default models are adjusted from the saved settings
 from gui_config import AppConfig, parse_csv, parse_model_overrides
 from gui_session import (
@@ -70,10 +73,11 @@ from gui_birth import BirthTimeline, BIRTH_VERTEX_SHADER, BIRTH_FRAGMENT_SHADER
 
 # Constants
 _HERE = os.path.dirname(os.path.abspath(__file__))
-THOUGHT_FILE = os.path.join(_HERE, "prom_thought.txt")  # absolute: a relative name depended on the launch directory
+_DATA = os.environ.get("PROMETHEUS_HOME", "").strip() or _HERE  # personal state, like prometheus.DATA_DIR
+THOUGHT_FILE = os.path.join(_DATA, "prom_thought.txt")  # absolute: a relative name depended on the launch directory
 DEFAULT_VOICE = "en-US-ChristopherNeural"
 MAX_TOOL_ITERATIONS = 8  # hard cap so a tool-calling loop can't run forever
-SESSION_FILE = os.path.join(_HERE, "session.json")
+SESSION_FILE = os.path.join(_DATA, "session.json")
 MAX_SESSION_MESSAGES = 80       # history kept on disk and re-sent each turn (never cuts a tool exchange)
 MAX_CONSOLE_TOOL_CHARS = 4000   # one huge tool result must not freeze the console (it re-renders as a whole)
 MAX_RESPONSE_TOKENS = 2000      # 1200 truncated long tool-call arguments mid-JSON
@@ -122,7 +126,7 @@ def install_crash_handler(app: QApplication):
     """A crash anywhere otherwise kills the window with no message at all. This
     logs the full traceback to gui_crash.log and shows a copyable dialog instead
     of a silent disappearance - for the Qt thread AND for background threads."""
-    log_path = os.path.join(_HERE, "gui_crash.log")
+    log_path = os.path.join(_DATA, "gui_crash.log")
     relay = _CrashRelay(app)
     showing = []  # one dialog at a time: a repeating error must not stack dialogs
 

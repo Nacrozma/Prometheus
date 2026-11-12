@@ -106,22 +106,43 @@ except ImportError:
 # ==============================================================================
 THIS_FILE = os.path.abspath(__file__)
 BASE_DIR = os.path.dirname(THIS_FILE)
-MEMORY_FILE = os.path.join(BASE_DIR, "memory.json")
-VECTOR_STORE_FILE = os.path.join(BASE_DIR, "vector_store.json")
-DYNAMIC_TOOLS_DIR = os.path.join(BASE_DIR, "dynamic_tools")
-LOG_FILE = os.path.join(BASE_DIR, "prometheus.log")
-TASK_STATE_FILE = os.path.join(BASE_DIR, "task_state.json")
-PENDING_PATCHES_DIR = os.path.join(BASE_DIR, "pending_patches")
-SANDBOX_DIR = os.path.join(BASE_DIR, "sandbox_runs")
-MEMORY_GRAPH_FILE = os.path.join(BASE_DIR, "memory_graph.json")
-SKILLS_FILE = os.path.join(BASE_DIR, "skills.json")
-TOOL_STATS_FILE = os.path.join(BASE_DIR, "tool_stats.json")
-PERMISSIONS_FILE = os.path.join(BASE_DIR, "permissions.json")
-AUDIT_FILE = os.path.join(BASE_DIR, "audit.jsonl")
-UNDO_DIR = os.path.join(BASE_DIR, ".prometheus_undo")
 
-SESSIONS_DIR = os.path.join(BASE_DIR, "sessions")
-SCHEDULE_FILE = os.path.join(BASE_DIR, "schedule.json")
+
+def _dir_from_env(var: str, default: str) -> str:
+    """A folder named by an environment variable, else `default`. Created if needed."""
+    raw = os.environ.get(var, "").strip()
+    path = os.path.abspath(os.path.expanduser(raw)) if raw else default
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+# Where personal state lives (memory, sessions, audit log, settings...). Defaults to the source folder,
+# as it always has; the desktop app points it at the per-user data folder (PROMETHEUS_HOME).
+DATA_DIR = _dir_from_env("PROMETHEUS_HOME", BASE_DIR)
+# The folder the workspace tools (read/write/edit file, shell) are confined to. Defaults to the source
+# folder, as it always has; the desktop app uses a folder the operator chooses (PROMETHEUS_WORKSPACE).
+WORKSPACE_DIR = _dir_from_env("PROMETHEUS_WORKSPACE", BASE_DIR)
+if DATA_DIR != BASE_DIR:
+    try:  # keys may also live in a .env in the data folder (environment and the source .env win)
+        load_dotenv(os.path.join(DATA_DIR, ".env"), override=False)  # noqa: F821 - defined when python-dotenv is installed
+    except NameError:
+        pass
+MEMORY_FILE = os.path.join(DATA_DIR, "memory.json")
+VECTOR_STORE_FILE = os.path.join(DATA_DIR, "vector_store.json")
+DYNAMIC_TOOLS_DIR = os.path.join(DATA_DIR, "dynamic_tools")
+LOG_FILE = os.path.join(DATA_DIR, "prometheus.log")
+TASK_STATE_FILE = os.path.join(DATA_DIR, "task_state.json")
+PENDING_PATCHES_DIR = os.path.join(DATA_DIR, "pending_patches")
+SANDBOX_DIR = os.path.join(DATA_DIR, "sandbox_runs")
+MEMORY_GRAPH_FILE = os.path.join(DATA_DIR, "memory_graph.json")
+SKILLS_FILE = os.path.join(DATA_DIR, "skills.json")
+TOOL_STATS_FILE = os.path.join(DATA_DIR, "tool_stats.json")
+PERMISSIONS_FILE = os.path.join(DATA_DIR, "permissions.json")
+AUDIT_FILE = os.path.join(DATA_DIR, "audit.jsonl")
+UNDO_DIR = os.path.join(DATA_DIR, ".prometheus_undo")
+
+SESSIONS_DIR = os.path.join(DATA_DIR, "sessions")
+SCHEDULE_FILE = os.path.join(DATA_DIR, "schedule.json")
 
 os.makedirs(DYNAMIC_TOOLS_DIR, exist_ok=True)
 os.makedirs(PENDING_PATCHES_DIR, exist_ok=True)
@@ -2745,7 +2766,7 @@ APPROX_COST_PER_MILLION_TOKENS = {
     "ollama": 0.0,         # local, no metered cost
 }
 
-USAGE_LOG_FILE = os.path.join(BASE_DIR, "usage_log.jsonl")
+USAGE_LOG_FILE = os.path.join(DATA_DIR, "usage_log.jsonl")
 
 
 class RotatingLLMRouter:
@@ -2919,7 +2940,63 @@ class RotatingLLMRouter:
         return response.choices[0].message.content or ""
 
 
-llm_router = RotatingLLMRouter()
+class _UnconfiguredRouter:
+    """Stands in for the router while no provider is configured, so the desktop app can open and
+    let the operator add a key. Status queries answer honestly; any attempt to call a model raises
+    the same error the router would have raised at start-up."""
+
+    configured = False
+    _clients: Dict[str, Any] = {}
+    active_providers: List[str] = []
+    last_used_provider: Optional[str] = None
+    last_used_model: Optional[str] = None
+    provider = "none"
+    default_model = ""
+
+    def __init__(self, error: str):
+        self.error = error
+
+    def _ranked_candidates(self) -> List[str]:
+        return []
+
+    def cooldowns_remaining(self) -> Dict[str, float]:
+        return {}
+
+    def usage_summary(self) -> Dict[str, Any]:
+        return {}
+
+    def __getattr__(self, name: str):
+        raise RuntimeError(self.error)
+
+
+class RouterHandle:
+    """The one `llm_router` everyone imports. It forwards to the real router, or to an
+    `_UnconfiguredRouter` when no provider key is set. `reload()` rebuilds it after the operator adds
+    or removes a key, and every module holding `llm_router` sees the change."""
+
+    def __init__(self):
+        object.__setattr__(self, "_inner", None)
+        self.reload()
+
+    def reload(self) -> bool:
+        try:
+            inner: Any = RotatingLLMRouter()
+            inner.configured = True
+            inner.error = ""
+        except RuntimeError as e:
+            inner = _UnconfiguredRouter(str(e))
+            logger.warning(f"[ROTATOR] not configured: {e}")
+        object.__setattr__(self, "_inner", inner)
+        return inner.configured
+
+    def __getattr__(self, name: str):
+        return getattr(object.__getattribute__(self, "_inner"), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(object.__getattribute__(self, "_inner"), name, value)
+
+
+llm_router = RouterHandle()
 
 
 # ==============================================================================
@@ -3347,14 +3424,14 @@ MAX_SHELL_OUTPUT_CHARS = 8000
 
 def _resolve_workspace_path(path: str) -> str:
     """Resolve to an absolute path and reject path-traversal escapes outside
-    BASE_DIR. This is a guardrail for the model, not a security sandbox —
+    WORKSPACE_DIR. This is a guardrail for the model, not a security sandbox —
     but it stops the obvious "oops, wrote over a system directory" class of
     mistake. Protected self-source files are rejected by the callers below."""
     expanded = os.path.expanduser(path)
     if not os.path.isabs(expanded):
-        expanded = os.path.join(BASE_DIR, expanded)  # relative paths mean "inside the workspace"
+        expanded = os.path.join(WORKSPACE_DIR, expanded)  # relative paths mean "inside the workspace"
     resolved = os.path.realpath(expanded)  # follows symlinks, so they can't point outside
-    base = os.path.realpath(BASE_DIR)
+    base = os.path.realpath(WORKSPACE_DIR)
     try:
         inside_base = os.path.commonpath([resolved, base]) == base
     except ValueError:  # e.g. a different drive on Windows
@@ -3378,7 +3455,7 @@ def _guard_protected(path: str) -> None:
             or os.path.realpath(path).startswith(os.path.realpath(UNDO_DIR) + os.sep):
         raise PermissionError(f"'{os.path.basename(path)}' is Prometheus's own safety/state data and is off-limits to the workspace tools.")
     if policy.write_scopes:
-        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(BASE_DIR))
+        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(WORKSPACE_DIR))
         if not policy.path_allowed(rel):
             raise PermissionError(f"permissions.json only allows writing under: {', '.join(policy.write_scopes)}")
     if os.path.basename(path).lower() in WORKSPACE_PROTECTED_FILES:
@@ -3458,7 +3535,7 @@ def tool_execute_shell(command: str, timeout_seconds: int = 30) -> dict:
     try:
         res = subprocess.run(
             command, shell=True, capture_output=True, text=True,
-            timeout=timeout_seconds, cwd=BASE_DIR,
+            timeout=timeout_seconds, cwd=WORKSPACE_DIR,
         )
         stdout = (res.stdout or "")[:MAX_SHELL_OUTPUT_CHARS]
         stderr = (res.stderr or "")[:MAX_SHELL_OUTPUT_CHARS]
@@ -4550,6 +4627,8 @@ def main():
         sys.stdout.reconfigure(errors="replace")
     except (AttributeError, ValueError):
         pass
+    if not llm_router.configured:
+        raise SystemExit(f"Prometheus could not start: {llm_router.error}")
     print_boot_sequence()
     print_banner()
     print(f" {tag('STATE', Color.NEON_GREEN)} Prometheus Sovereign Matrix Initialized.")

@@ -323,7 +323,7 @@ class PrometheusBackend(Backend):
         name = safe_mission_dir_name(mission_id)
         if not name:
             raise ValueError("invalid mission id for a workspace folder")
-        ws = os.path.realpath(os.path.join(self.P.BASE_DIR, "sibling_missions", name))
+        ws = os.path.realpath(os.path.join(getattr(self.P, "DATA_DIR", self.P.BASE_DIR), "sibling_missions", name))
         os.makedirs(ws, exist_ok=True)
         if context:
             with open(os.path.join(ws, "atlas_context.md"), "w", encoding="utf-8") as f:

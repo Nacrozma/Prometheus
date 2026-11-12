@@ -23,7 +23,7 @@ from typing import Any, Dict, List
 
 from gui_session import atomic_write_json, quarantine_file
 
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prometheus_config.json")
+CONFIG_FILE = os.path.join(os.environ.get("PROMETHEUS_HOME", "").strip() or os.path.dirname(os.path.abspath(__file__)), "prometheus_config.json")
 
 DEFAULTS: Dict[str, Any] = {
     "version": 1,
