@@ -39,7 +39,7 @@ export const SettingsSchema = z.object({
     standard: TierModelSchema.nullable(),
     heavy: TierModelSchema.nullable(),
   }),
-  permissions: z.object({ local_write: gate, network_tools: gate }),
+  permissions: z.object({ local_write: gate, network_tools: gate, planner: gate.default("allow") }),
   memory: z.object({ enabled: z.boolean(), max_retrieved: z.number() }),
   workspace_dir: z.string().nullable(),
   appearance: z.object({
@@ -501,6 +501,7 @@ export const TOPICS = [
   "siblings",
   "missions",
   "notifications",
+  "todos",
 ] as const;
 export type Topic = (typeof TOPICS)[number];
 export const ChangeEventSchema = z.object({ topic: z.enum(TOPICS), id: z.string().nullable() });
@@ -741,3 +742,73 @@ export const DesktopStatusSchema = z.object({
   test_notifications_shown: z.number().nullable(),
 });
 export type DesktopStatus = z.infer<typeof DesktopStatusSchema>;
+
+// ---------- the owner's tasks (to-dos) ----------
+export const TodoSchema = z.object({
+  id: z.string(),
+  parent_id: z.string().nullable(),
+  project_id: z.string().nullable(),
+  title: z.string(),
+  notes: z.string(),
+  status: z.enum(["open", "in_progress", "done", "cancelled"]),
+  priority: z.enum(["low", "normal", "high", "urgent"]),
+  category: z.string(),
+  due_date: z.string().nullable(),
+  due_time: z.string().nullable(),
+  remind_at: z.string().nullable(),
+  recurrence: z.enum(["none", "daily", "weekdays", "weekly", "monthly", "yearly"]),
+  recur_interval: z.number(),
+  source: z.enum(["user", "atlas"]),
+  conversation_id: z.string().nullable(),
+  postponed_count: z.number(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  completed_at: z.string().nullable(),
+  overdue: z.boolean(),
+  subtasks_total: z.number(),
+  subtasks_done: z.number(),
+});
+export type Todo = z.infer<typeof TodoSchema>;
+export const TodoDetailSchema = z.object({
+  task: TodoSchema,
+  subtasks: z.array(TodoSchema),
+  history: z.array(z.object({ at: z.string(), kind: z.string(), detail: z.string() })),
+});
+export type TodoDetail = z.infer<typeof TodoDetailSchema>;
+export const TodoOverviewSchema = z.object({
+  counts: z.object({ open: z.number(), overdue: z.number(), today: z.number(), week: z.number(), done_today: z.number(), done_week: z.number() }),
+  categories: z.array(z.string()),
+  today: z.string(),
+});
+export type TodoOverview = z.infer<typeof TodoOverviewSchema>;
+export const QuickPreviewSchema = z.object({
+  title: z.string(),
+  due_date: z.string().nullable(),
+  due_time: z.string().nullable(),
+  priority: z.string().nullable(),
+  category: z.string().nullable(),
+  recurrence: z.string().nullable(),
+  remind: z.boolean(),
+});
+export type QuickPreview = z.infer<typeof QuickPreviewSchema>;
+export type TodoView = "today" | "week" | "overdue" | "upcoming" | "someday" | "open" | "done" | "all";
+export interface TodoFilter {
+  view: TodoView;
+  project_id?: string | null;
+  category?: string | null;
+  priority?: string | null;
+  search?: string | null;
+}
+/** A change to a task: `null` clears a value, a missing key leaves it alone. */
+export interface TodoPatch {
+  title?: string;
+  notes?: string;
+  priority?: Todo["priority"];
+  category?: string;
+  project_id?: string | null;
+  due_date?: string | null;
+  due_time?: string | null;
+  remind_at?: string | null;
+  recurrence?: Todo["recurrence"];
+  status?: Todo["status"];
+}

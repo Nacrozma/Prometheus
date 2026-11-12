@@ -11,6 +11,7 @@ import { MemoryPage } from "@/features/memory/Memory";
 import { MissionControlPage } from "@/features/mission-control/MissionControl";
 import { ProjectsPage } from "@/features/projects/Projects";
 import { SettingsPage } from "@/features/settings/Settings";
+import { TasksPage } from "@/features/tasks/Tasks";
 import { VoicePage } from "@/features/voice/Voice";
 import { PresenceProvider } from "@/features/desktop/PresenceProvider";
 import { VoiceProvider } from "@/features/voice/VoiceProvider";
@@ -63,6 +64,7 @@ export function Shell() {
         <div className="h-full anim-fade">
           {route === "home" && <HomePage />}
           {route === "companion" && <CompanionPage />}
+          {route === "tasks" && <TasksPage />}
           {route === "map" && (
             <Suspense fallback={<div className="grid h-full place-items-center"><Spinner label="Loading the Atlas Map" /></div>}>
               <AtlasMapPage />

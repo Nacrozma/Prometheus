@@ -485,7 +485,10 @@ function PermissionsSection({ s, save }: { s: Settings; save: (n: Settings) => P
         <Row title={`${permissionLabel.local_write} — create files and memories`} desc={byClass("local_write")}>
           <Segmented label="Local writes" value={s.permissions.local_write} onChange={(v) => save({ ...s, permissions: { ...s.permissions, local_write: v } })} options={[{ value: "ask", label: "Ask first" }, { value: "allow", label: "Allow" }]} />
         </Row>
-        <Row title={`${permissionLabel.consequential} — send, publish, purchase, modify external records`} desc="Cannot be changed. No built-in tool in this version is consequential.">
+        <Row title="Your task list — Atlas adding, changing or completing tasks when you ask in a conversation" desc="Local and reversible, with a history on each task. Deleting a task always asks.">
+          <Segmented label="Task list changes" value={s.permissions.planner} onChange={(v) => save({ ...s, permissions: { ...s.permissions, planner: v } })} options={[{ value: "ask", label: "Ask first" }, { value: "allow", label: "Allow" }]} />
+        </Row>
+        <Row title={`${permissionLabel.consequential} — send, publish, purchase, modify external records`} desc="Cannot be changed. Includes deleting a task.">
           <Badge tone="warn">Always asks</Badge>
         </Row>
         <Row title={`${permissionLabel.destructive} — delete, privileged or unrestricted operations`} desc="Cannot be changed.">

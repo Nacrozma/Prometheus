@@ -53,6 +53,17 @@ export const api = {
   saveTextViaDialog: (suggestedName: string, extension: "json" | "md" | "txt" | "csv", content: string) =>
     call("save_text_via_dialog", { suggestedName, extension, content }, Opt(z.string())),
 
+  todos: (filter: S.TodoFilter) => call("todos_list", { filter }, z.array(S.TodoSchema)),
+  todoDetail: (id: string) => call("todo_detail", { id }, S.TodoDetailSchema),
+  todoCreate: (task: { title: string; parent_id?: string | null; project_id?: string | null }) => call("todo_create", { task }, S.TodoSchema),
+  todoQuickAdd: (line: string, projectId: string | null = null) => call("todo_quick_add", { line, projectId }, S.TodoSchema),
+  todoQuickPreview: (line: string) => call("todo_quick_preview", { line }, S.QuickPreviewSchema),
+  todoUpdate: (id: string, patch: S.TodoPatch) => call("todo_update", { id, patch }, S.TodoSchema),
+  todoSetStatus: (id: string, status: S.Todo["status"]) => call("todo_set_status", { id, status }, S.TodoSchema),
+  todoPostpone: (id: string, days: number) => call("todo_postpone", { id, days }, S.TodoSchema),
+  todoDelete: (id: string) => call("todo_delete", { id }, z.number()),
+  todoOverview: () => call("todo_overview", {}, S.TodoOverviewSchema),
+
   desktopStatus: () => call("desktop_status", {}, S.DesktopStatusSchema),
   notifications: (limit = 50) => call("notifications_list", { limit }, S.NotificationListSchema),
   notificationsMarkRead: (opts: { id?: string; target?: string } = {}) => call("notifications_mark_read", { id: opts.id ?? null, target: opts.target ?? null }, Void),

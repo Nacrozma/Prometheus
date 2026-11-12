@@ -3,6 +3,7 @@ import { create } from "zustand";
 export type Route =
   | "home"
   | "companion"
+  | "tasks"
   | "map"
   | "forge"
   | "siblings"

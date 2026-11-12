@@ -72,6 +72,12 @@ impl ChatProvider for Scripted {
         if let Some(expr) = lower.split("calculate").nth(1) {
             return Ok(call("calc_evaluate", json!({"expression": expr.trim()})));
         }
+        // "Remind me to <something> tomorrow …": add it to the owner's task list.
+        if let Some(rest) = text.strip_prefix("Remind me to ")
+            && let Some(i) = rest.find(" tomorrow")
+        {
+            return Ok(call("todo_add", json!({"title": &rest[..i], "when": rest[i..].trim(), "remind": true})));
+        }
         if lower.contains("create a note") {
             return Ok(call("files_create", json!({"path": "e2e/hello.md", "content": "# Hello from Atlas\n"})));
         }
