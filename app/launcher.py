@@ -38,9 +38,11 @@ def run() -> int:
     root = os.path.dirname(here)
     # Started as a script (e.g. from a login entry) rather than with -m: Python put app/ first on the
     # path, where app/platform would hide the standard library's `platform`. Use the repository root.
-    sys.path[:] = [p for p in sys.path if os.path.abspath(p or os.curdir) != here]
-    if root not in sys.path:
-        sys.path.insert(0, root)
+    # (Never in the packaged app: there this folder is the bundle itself and must stay on the path.)
+    if not getattr(sys, "frozen", False):
+        sys.path[:] = [p for p in sys.path if os.path.abspath(p or os.curdir) != here]
+        if root not in sys.path:
+            sys.path.insert(0, root)
     # A windowed executable has no console: give print() somewhere harmless to write.
     for name in ("stdout", "stderr"):
         if getattr(sys, name) is None:

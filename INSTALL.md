@@ -1,3 +1,7 @@
+> **Looking for Prometheus Desktop instead?** It is a different application (the solar orb).
+> See [docs/desktop-evolution/WINDOWS_INSTALLATION.md](docs/desktop-evolution/WINDOWS_INSTALLATION.md).
+> Everything below is about ATLAS Co-Pilot.
+
 # How to install ATLAS Co-Pilot (Windows)
 
 ATLAS Co-Pilot is a desktop AI companion. This page gets it running on a Windows PC in about 10 minutes.

@@ -9,6 +9,7 @@ Pillow
 
 # GUI (gui_orb.py). openai-whisper pulls in PyTorch, which is a large download.
 PyQt6
+keyring          # Prometheus Desktop: provider keys in the OS credential store
 PyOpenGL
 PyOpenGL_accelerate
 numpy

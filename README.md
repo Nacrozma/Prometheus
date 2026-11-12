@@ -4,6 +4,12 @@
 > ([download the installer](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.4.2/ATLAS-Co-Pilot-Setup-x64.exe)).
 > Its source is in [`atlas/`](atlas/) and does not share code with Prometheus.
 
+> **Prometheus Desktop (new, 0.1.0):** the same Prometheus as an installable Windows app with the
+> solar orb, approval cards, memory, engineering, Forge, reminders, Obsidian, arm simulation and a
+> Trust page. Start it from a checkout with `python -m app`; installing and the unsigned Windows
+> installer: [docs/desktop-evolution/WINDOWS_INSTALLATION.md](docs/desktop-evolution/WINDOWS_INSTALLATION.md).
+> Not yet validated on a physical Windows PC: see [KNOWN_LIMITATIONS](docs/desktop-evolution/KNOWN_LIMITATIONS.md).
+
 A local, terminal-based AI assistant written in Python. It talks to LLM providers through an
 OpenAI-compatible router, keeps persistent memory and task state in JSON files, and can call a
 set of tools (files, shell, web search, scheduling, sandboxed code execution).
@@ -28,6 +34,7 @@ pip install -r requirements.txt
 cp .env.example .env      # then fill in at least one key, or run Ollama locally
 python prometheus.py      # terminal
 python gui_orb.py         # desktop HUD
+python -m app             # Prometheus Desktop (the full desktop app; needs pip install keyring)
 ```
 
 `.env` is git-ignored. Never commit API keys; if one is ever pasted or committed, rotate it.
@@ -180,6 +187,24 @@ dangerous tool runs, and a settings dialog. Supporting modules:
 - `gui_session.py` - session save/load, history repair and trimming (no Qt, fully testable)
 
 Needs an OpenGL 3.3 capable display. Settings, session and crash logs are local files and git-ignored.
+
+## Prometheus Desktop (`app/`)
+
+An installable desktop application around the same core (nothing in the core is duplicated: the UI
+calls `dispatch_tool`, so policy, audit log and undo apply as in the terminal). Sidebar sections:
+Companion (the orb, streaming chat, inline approval cards, voice where installed), Memory,
+Engineering, Forge, Workspace, Reminders & tasks, Obsidian, Robot arm (simulation), Reflection,
+Trust & safety, Settings. Ctrl+K command palette, tray, single instance, start at sign-in (optional).
+
+* Data: a source checkout that already has Prometheus data keeps using it in place; the installed app
+  uses `%APPDATA%\Prometheus`. Override with `PROMETHEUS_HOME` / `PROMETHEUS_WORKSPACE`.
+* Keys: saved from Settings into Windows Credential Manager (via `keyring`); `.env` still works and wins.
+* Auto-approve: off by default, warns before turning on, shown in the status bar while on.
+* Packaging: `packaging/` (PyInstaller + Inno Setup) and `.github/workflows/prometheus-desktop.yml`,
+  which builds, self-tests, installs, upgrades and uninstalls on a Windows VM and uploads an
+  **unsigned** installer as a workflow artifact (no release is published automatically).
+
+Design, security review, tests, limits and screenshots: [`docs/desktop-evolution/`](docs/desktop-evolution/).
 
 ## Tests
 

@@ -327,6 +327,26 @@ class TestLauncherScript(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         self.assertEqual(out["calc"]["results"]["value"], 25.4)
 
+    def test_queued_import_runs_at_start_before_the_core_loads(self):
+        tmp = tempfile.mkdtemp()
+        home, src = os.path.join(tmp, "h"), os.path.join(tmp, "old")
+        os.makedirs(home)
+        os.makedirs(os.path.join(src, "sessions"))
+        with open(os.path.join(src, "memory_graph.json"), "w") as f:
+            json.dump({"facts": [], "marker": "imported"}, f)
+        with open(os.path.join(src, "sessions", "s.json"), "w") as f:
+            f.write("[]")
+        with open(os.path.join(home, "desktop_settings.json"), "w") as f:
+            json.dump({"pending_import": src}, f)
+        env = dict(os.environ, PROMETHEUS_HOME=home, PROMETHEUS_WORKSPACE=os.path.join(tmp, "w"))
+        r = subprocess.run([sys.executable, "-m", "app.launcher", f"--self-test={os.path.join(tmp, 'r.json')}"], env=env, capture_output=True, text=True, timeout=180, cwd=ROOT)
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        with open(os.path.join(home, "memory_graph.json")) as f:
+            self.assertIn("imported", f.read(), "the core kept the imported memory")
+        self.assertTrue(os.path.exists(os.path.join(home, "sessions", "s.json")))
+        with open(os.path.join(home, "desktop_settings.json")) as f:
+            self.assertEqual(json.load(f)["pending_import"], "", "an import is attempted once")
+
 
 SMOKE = textwrap.dedent(
     """

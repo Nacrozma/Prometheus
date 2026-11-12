@@ -18,12 +18,18 @@ on:
 permissions:
   contents: read
 
+# A newer push replaces a run still in progress.
+concurrency:
+  group: prometheus-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   APP_VERSION: "0.1.0"
 
 jobs:
   tests-windows:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,6 +44,7 @@ jobs:
 
   build-and-verify:
     runs-on: windows-latest
+    timeout-minutes: 40
     defaults:
       run:
         shell: pwsh
@@ -62,15 +69,22 @@ jobs:
       - name: Packaged app self-test (throwaway folders)
         run: |
           $ErrorActionPreference = 'Stop'
+          $ErrorActionPreference = 'Stop'
+          function Run-App($exe, $argList) {
+            # A windowed app that hangs (e.g. on an error dialog) must fail the job, not stall it.
+            $p = Start-Process $exe -ArgumentList $argList -PassThru
+            if (-not $p.WaitForExit(180000)) { Stop-Process -Id $p.Id -Force; throw "$exe $argList did not exit within 3 minutes" }
+            return $p.ExitCode
+          }
           $env:PROMETHEUS_HOME = "$env:RUNNER_TEMP\st-home"; $env:PROMETHEUS_WORKSPACE = "$env:RUNNER_TEMP\st-ws"
-          $p = Start-Process dist\Prometheus\Prometheus.exe -ArgumentList "--self-test=$env:RUNNER_TEMP\selftest-folder.json" -Wait -PassThru
-          Get-Content "$env:RUNNER_TEMP\selftest-folder.json"
-          if ($p.ExitCode -ne 0) { throw "self-test exit $($p.ExitCode)" }
+          $code = Run-App "dist\Prometheus\Prometheus.exe" "--self-test=$env:RUNNER_TEMP\selftest-folder.json"
+          Get-Content "$env:RUNNER_TEMP\selftest-folder.json" -ErrorAction SilentlyContinue
+          if ($code -ne 0) { throw "self-test exit $code" }
           # The core's child processes (run_code, Forge tests) call the executable as Python.
           Set-Content "$env:RUNNER_TEMP\child.py" 'import sys, json; open(sys.argv[1], "w").write(json.dumps({"ok": True, "py": sys.version.split()[0]}))'
-          $c = Start-Process dist\Prometheus\Prometheus.exe -ArgumentList "-I","$env:RUNNER_TEMP\child.py","$env:RUNNER_TEMP\child.json" -Wait -PassThru
+          $code = Run-App "dist\Prometheus\Prometheus.exe" @("-I","$env:RUNNER_TEMP\child.py","$env:RUNNER_TEMP\child.json")
           Get-Content "$env:RUNNER_TEMP\child.json"
-          if ($c.ExitCode -ne 0 -or -not (Get-Content "$env:RUNNER_TEMP\child.json" | Select-String '"ok": true')) { throw "child python mode failed" }
+          if ($code -ne 0 -or -not (Get-Content "$env:RUNNER_TEMP\child.json" | Select-String '"ok": true')) { throw "child python mode failed" }
 
       - name: Build installers (an older build to upgrade from, and this version)
         run: |
@@ -84,13 +98,19 @@ jobs:
       - name: Install, upgrade with data kept, uninstall
         run: |
           $ErrorActionPreference = 'Stop'
+          function Run-App($exe, $argList) {
+            # A windowed app that hangs (e.g. on an error dialog) must fail the job, not stall it.
+            $p = Start-Process $exe -ArgumentList $argList -PassThru
+            if (-not $p.WaitForExit(180000)) { Stop-Process -Id $p.Id -Force; throw "$exe $argList did not exit within 3 minutes" }
+            return $p.ExitCode
+          }
           $app = "$env:LOCALAPPDATA\Programs\Prometheus"
           $data = "$env:APPDATA\Prometheus"
           # 1) fresh install of the older build
           $p = Start-Process "dist\Prometheus-Setup-0.0.9-x64-unsigned.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER" -Wait -PassThru
           if ($p.ExitCode -ne 0 -or -not (Test-Path "$app\Prometheus.exe")) { throw "install failed" }
-          $s = Start-Process "$app\Prometheus.exe" -ArgumentList "--self-test=$env:RUNNER_TEMP\selftest-installed-old.json" -Wait -PassThru
-          if ($s.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\selftest-installed-old.json"; throw "installed self-test failed" }
+          $code = Run-App "$app\Prometheus.exe" "--self-test=$env:RUNNER_TEMP\selftest-installed-old.json"
+          if ($code -ne 0) { Get-Content "$env:RUNNER_TEMP\selftest-installed-old.json"; throw "installed self-test failed" }
           if (-not (Test-Path "$data\prometheus.log")) { Get-ChildItem $data -ErrorAction SilentlyContinue; throw "data folder not used in %APPDATA%" }
           if (Test-Path "$app\prometheus.log") { throw "the app wrote state into its program folder" }
           # 2) user data the upgrade must keep
@@ -101,9 +121,9 @@ jobs:
           $reg = Get-ChildItem HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall | Get-ItemProperty | Where-Object DisplayName -like "Prometheus*"
           if (@($reg).Count -ne 1 -or $reg.DisplayVersion -ne $env:APP_VERSION) { $reg | Format-List; throw "expected one Prometheus $env:APP_VERSION entry" }
           if ((Get-Content "$data\upgrade-marker.txt") -ne "keep me") { throw "data lost on upgrade" }
-          $s = Start-Process "$app\Prometheus.exe" -ArgumentList "--self-test=$env:RUNNER_TEMP\selftest-installed.json" -Wait -PassThru
+          $code = Run-App "$app\Prometheus.exe" "--self-test=$env:RUNNER_TEMP\selftest-installed.json"
           Get-Content "$env:RUNNER_TEMP\selftest-installed.json"
-          if ($s.ExitCode -ne 0) { throw "self-test after upgrade failed" }
+          if ($code -ne 0) { throw "self-test after upgrade failed" }
           # 4) uninstall: program removed, data kept
           & "$app\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART | Out-Null
           Start-Sleep -Seconds 5
