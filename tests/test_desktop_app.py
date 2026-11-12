@@ -139,6 +139,18 @@ class TestCredentials(EnvGuard):
         os.environ.pop("OPENROUTER_API_KEY")
         self.assertEqual(CredentialStore(kr).load_into_environ(), ["OPENROUTER_API_KEY"])
 
+    def test_dotenv_in_data_folder_wins_over_store_at_start(self):
+        from app.application import load_keys
+
+        kr = FakeKeyring()
+        kr.store[(SERVICE, "GROQ_API_KEY")] = "stored-key-000000000"
+        kr.store[(SERVICE, "CEREBRAS_API_KEY")] = "stored-cerebras-0000"
+        with open(os.path.join(self.tmp, ".env"), "w") as f:
+            f.write("GROQ_API_KEY=dotenv-key-111111111\n")
+        load_keys(self.tmp, CredentialStore(kr))
+        self.assertEqual(os.environ["GROQ_API_KEY"], "dotenv-key-111111111")
+        self.assertEqual(os.environ["CEREBRAS_API_KEY"], "stored-cerebras-0000", "the store fills gaps")
+
     def test_rejects_bad_input_unknown_names_and_reports_unavailable_store(self):
         c = CredentialStore(FakeKeyring())
         for bad in ("", "has space", "x" * 600):

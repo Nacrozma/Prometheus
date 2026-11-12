@@ -36,6 +36,20 @@ def make_icon():
     return icon
 
 
+def load_keys(data_dir: str, creds, source_dir: str = "") -> None:
+    """Keys into the environment: .env files first (the same ones the core reads), so a key there
+    wins over the credential store; stored keys only fill the gaps."""
+    try:
+        from dotenv import load_dotenv
+
+        for env_file in dict.fromkeys([os.path.join(data_dir, ".env")] + ([os.path.join(source_dir, ".env")] if source_dir else [])):
+            if os.path.isfile(env_file):
+                load_dotenv(env_file, override=False)
+    except ImportError:
+        pass
+    creds.load_into_environ()
+
+
 def _crash_log(data_dir: str, text: str) -> str:
     path = os.path.join(data_dir or os.path.expanduser("~"), "desktop_crash.log")
     try:
@@ -140,7 +154,7 @@ def main(argv=None) -> int:
         pass
 
     creds = CredentialStore()
-    creds.load_into_environ()
+    load_keys(paths.data_dir, creds, bootstrap.SOURCE_DIR if not bootstrap.frozen() else "")
 
     splash = QSplashScreen(icon.pixmap(256, 256))
     splash.showMessage(f"{APP_NAME} is waking up…", Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter, Qt.GlobalColor.white)
