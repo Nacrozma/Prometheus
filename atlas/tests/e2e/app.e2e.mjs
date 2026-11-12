@@ -536,6 +536,103 @@ test("voice: settings persist, offline speech still works but downloads are refu
   if (process.env.ATLAS_DATA_DIR) assert.deepEqual(wavFiles(process.env.ATLAS_DATA_DIR), [], "no audio files in Atlas's data folder");
 });
 
+test("tasks: plain-language entry, day views, overdue, steps and history, completion, a task added from a conversation, and deletion that asks first", async () => {
+  const navTasks = async () => (await find(By.css('nav[aria-label="Main"] button[aria-label="Tasks"]'))).click();
+  const row = (title) => By.css(`[data-task=${JSON.stringify(title)}]`);
+  await navTasks();
+  await find(By.css("[data-tasks-page]"));
+  await waitText("Nothing due today");
+
+  // A plain-language line is shown as it will be understood, then saved.
+  const entry = await find(By.css('input[aria-label="New task"]'));
+  await entry.sendKeys("Call the dentist tomorrow 9am !high #health");
+  await find(By.css("[data-quick-preview]"));
+  await waitText("Tomorrow 09:00");
+  await shot("18-tasks-quick-entry");
+  await entry.sendKeys(Key.ENTER);
+  const dentist = await find(row("Call the dentist"));
+  assert.equal(await dentist.getAttribute("data-overdue"), "false");
+  await find(By.css('[data-task-group="Tomorrow"]'));
+  const saved = (await invoke("todos_list", { filter: { view: "open" } })).find((t) => t.title === "Call the dentist");
+  assert.equal(saved.due_time, "09:00");
+  assert.equal(saved.priority, "high");
+  assert.equal(saved.category, "health");
+  assert.ok(saved.remind_at, "a timed task gets a reminder");
+
+  // An undated task, a weekly one, and one that was due last week.
+  await (await find(By.css('input[aria-label="New task"]'))).sendKeys("Buy milk", Key.ENTER);
+  await find(row("Buy milk"));
+  await (await find(By.css('input[aria-label="New task"]'))).sendKeys("Water the plants every week", Key.ENTER);
+  const lastWeek = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  await invoke("todo_create", { task: { title: "Renew the car insurance", due_date: lastWeek, priority: "urgent" } });
+  await (await find(exactButton("Today"))).click();
+  const late = await find(row("Renew the car insurance"));
+  assert.equal(await late.getAttribute("data-overdue"), "true");
+  await find(By.css('[data-task-group="Overdue"]'));
+  await waitText("1 overdue");
+  await shot("18b-tasks-today");
+
+  // Steps and history live inside the task.
+  await driver.executeScript("arguments[0].click()", await find(By.css('[data-task="Renew the car insurance"] [data-open]')));
+  await find(By.css("[data-task-dialog]"));
+  // No time was given, so no time is shown (only a way to add one).
+  await find(By.css("[data-add-time]"));
+  assert.equal(await gone('input[aria-label="Due time"]'), true);
+  await (await find(By.css('input[aria-label="New step"]'))).sendKeys("Compare three quotes", Key.ENTER);
+  await find(By.css('[data-task-dialog] [data-task="Compare three quotes"]'));
+  await (await find(By.css('input[aria-label="New step"]'))).sendKeys("Call the broker", Key.ENTER);
+  await find(By.css('[data-task-dialog] [data-task="Call the broker"]'));
+  await driver.executeScript("arguments[0].click()", await find(By.css('[data-task-dialog] button[aria-label="Complete Compare three quotes"]')));
+  await driver.wait(async () => (await invoke("todos_list", { filter: { view: "open", search: "insurance" } }))[0]?.subtasks_done === 1, 5000);
+  await shot("18c-task-details");
+  await driver.executeScript("arguments[0].click()", await find(By.xpath("//div[@role='dialog']//button[normalize-space()='Done']")));
+  await driver.wait(() => gone("[data-task-dialog]"), 5000);
+  await waitText("1 of 2 steps");
+
+  // Completing a repeating task brings its next occurrence; the finished one is kept under Done.
+  await (await find(exactButton("All open"))).click();
+  await driver.executeScript("arguments[0].click()", await find(By.css('button[aria-label="Complete Water the plants"]')));
+  await driver.wait(async () => (await invoke("todos_list", { filter: { view: "done" } })).some((t) => t.title === "Water the plants"), 5000);
+  const plants = (await invoke("todos_list", { filter: { view: "open", search: "plants" } }));
+  assert.equal(plants.length, 1, "exactly one next occurrence");
+  assert.equal(plants[0].recurrence, "weekly");
+  assert.ok(plants[0].due_date > new Date().toISOString().slice(0, 10) || plants[0].due_date >= lastWeek);
+
+  // Asking in a conversation adds a real task, without an approval prompt.
+  await go("2");
+  await driver.actions().keyDown(Key.CONTROL).sendKeys("n").keyUp(Key.CONTROL).perform();
+  await driver.sleep(400);
+  await send("Remind me to book the flights tomorrow at 8am");
+  await waitText("Done. Tool result:", 20000);
+  assert.equal((await invoke("approvals_pending")).length, 0, "adding a task does not ask");
+  const flights = (await invoke("todos_list", { filter: { view: "open", search: "flights" } }))[0];
+  assert.equal(flights.title, "book the flights");
+  assert.equal(flights.source, "atlas");
+  assert.equal(flights.due_time, "08:00");
+  await navTasks();
+  await (await find(exactButton("This week"))).click();
+  await find(row("book the flights"));
+  await waitText("added by Atlas");
+  await shot("18d-task-from-conversation");
+
+  // Deleting asks first; Cancel keeps the task.
+  await driver.executeScript("arguments[0].click()", await find(By.css('button[aria-label="Delete book the flights"]')));
+  await waitText("Delete this task?");
+  await click("Cancel");
+  await driver.sleep(300);
+  assert.equal((await invoke("todos_list", { filter: { view: "open", search: "flights" } })).length, 1);
+  await driver.executeScript("arguments[0].click()", await find(By.css('button[aria-label="Delete book the flights"]')));
+  await waitText("Delete this task?");
+  await driver.executeScript("arguments[0].click()", await find(By.xpath("//div[@role='dialog']//button[normalize-space()='Delete']")));
+  await driver.wait(async () => (await invoke("todos_list", { filter: { view: "open", search: "flights" } })).length === 0, 5000);
+
+  // The core refuses what the page would never send.
+  assert.ok((await invoke("todo_create", { task: { title: "   " } })).__error);
+  assert.ok((await invoke("todo_create", { task: { title: "x", due_date: "2026-02-31" } })).__error);
+  assert.ok((await invoke("todo_set_status", { id: saved.id, status: "sideways" })).__error);
+  assert.ok((await invoke("todo_postpone", { id: saved.id, days: 100000 })).__error);
+});
+
 test("desktop presence: nothing is on by default, the shortcut is validated and never duplicated, notifications need permission, and the bell lists them", async () => {
   const s0 = await invoke("settings_get");
   assert.equal(s0.desktop.shortcut_enabled, false);
@@ -610,6 +707,10 @@ test("desktop presence: nothing is on by default, the shortcut is validated and 
   await shot("17d-desktop-notifications");
   await click("Mark all read");
   await driver.wait(async () => (await invoke("notifications_list", { limit: 10 })).unread === 0, 5000);
+  // Esc stops Atlas speaking before it closes anything else; wait until nothing is being read aloud.
+  const speaking = await voice("playback()");
+  if (speaking && speaking !== "idle") console.log(`# note: voice playback was "${speaking}" when the panel was closed`);
+  await driver.wait(async () => ["idle", null].includes(await voice("playback()")), 20000, "speech finished");
   await driver.actions().sendKeys(Key.ESCAPE).perform();
   await driver.wait(() => gone("[data-notification-panel]"), 3000);
 
@@ -683,8 +784,8 @@ test("accessibility audit (axe-core) finds no serious or critical issues", async
   await invoke("notification_test");
   await driver.wait(async () => Number(await (await find(By.css("[data-bell]"))).getAttribute("data-unread")) >= 1, 5000);
   const failures = {};
-  for (const [key, page] of [["1", "home"], ["2", "companion"], ["4", "forge"], ["siblings", "siblings"], ["5", "mission-control"], ["7", "memory"], ["9", "integrations"], [",", "settings"]]) {
-    if (key === "siblings") await (await find(By.css('nav[aria-label="Main"] button[aria-label="Siblings"]'))).click();
+  for (const [key, page] of [["1", "home"], ["2", "companion"], ["tasks", "tasks"], ["4", "forge"], ["siblings", "siblings"], ["5", "mission-control"], ["7", "memory"], ["9", "integrations"], [",", "settings"]]) {
+    if (key === "siblings" || key === "tasks") await (await find(By.css(`nav[aria-label="Main"] button[aria-label="${key === "tasks" ? "Tasks" : "Siblings"}"]`))).click();
     else await go(key);
     await driver.sleep(500);
     const blocking = await audit(page);

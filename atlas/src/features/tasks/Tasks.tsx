@@ -36,7 +36,7 @@ function TaskRow({ t, today, onOpen, onDelete }: { t: Todo; today: string; onOpe
       >
         {done && <Check className="size-3.5" strokeWidth={3} aria-hidden />}
       </button>
-      <button onClick={onOpen} className="min-w-0 flex-1 text-left" aria-label={`Open ${t.title}`}>
+      <button onClick={onOpen} className="min-w-0 flex-1 text-left" data-open>
         <span className={cn("block text-sm", done ? "text-text-3 line-through" : "text-text-1")}>{t.title}</span>
         <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem] text-text-3">
           {due && (
@@ -70,7 +70,7 @@ function TaskRow({ t, today, onOpen, onDelete }: { t: Todo; today: string; onOpe
       {t.priority !== "normal" && !done && <Badge tone={PRIORITY_TONE[t.priority]}>{t.priority}</Badge>}
       <span className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
         {!done && (
-          <Button size="sm" variant="ghost" onClick={() => void api.todoPostpone(t.id, 1).catch((e) => fail(e, "The task could not be moved"))} aria-label={`Move ${t.title} to the next day`}>
+          <Button size="sm" variant="ghost" onClick={() => void api.todoPostpone(t.id, 1).catch((e) => fail(e, "The task could not be moved"))} aria-label={`+1 day: ${t.title}`}>
             +1 day
           </Button>
         )}
@@ -87,6 +87,7 @@ function TaskDialog({ id, today, onClose }: { id: string; today: string; onClose
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [step, setStep] = useState("");
+  const [timeOpen, setTimeOpen] = useState(false);
   const t = detail.data?.task;
   useEffect(() => {
     if (t) {
@@ -122,10 +123,32 @@ function TaskDialog({ id, today, onClose }: { id: string; today: string; onClose
               Due date
               <Input type="date" aria-label="Due date" value={t.due_date ?? ""} onChange={(e) => patch({ due_date: e.target.value || null })} />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-text-2">
-              Time (optional)
-              <Input type="time" aria-label="Due time" value={t.due_time ?? ""} disabled={!t.due_date} onChange={(e) => patch({ due_time: e.target.value || null })} />
-            </label>
+            {/* An empty time box shows a made-up placeholder time in some web views, so it only appears once asked for. */}
+            {t.due_time || timeOpen ? (
+              <label className="flex flex-col gap-1 text-xs text-text-2">
+                Time (optional)
+                <span className="flex items-center gap-2">
+                  <Input type="time" aria-label="Due time" value={t.due_time ?? ""} disabled={!t.due_date} onChange={(e) => patch({ due_time: e.target.value || null })} className="flex-1" />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setTimeOpen(false);
+                      if (t.due_time) patch({ due_time: null });
+                    }}
+                  >
+                    No time
+                  </Button>
+                </span>
+              </label>
+            ) : (
+              <div className="flex flex-col gap-1 text-xs text-text-2">
+                Time (optional)
+                <Button size="sm" disabled={!t.due_date} onClick={() => setTimeOpen(true)} data-add-time>
+                  {t.due_date ? "Add a time" : "Needs a due date"}
+                </Button>
+              </div>
+            )}
             <label className="flex flex-col gap-1 text-xs text-text-2">
               Priority
               <Select aria-label="Priority" value={t.priority} onChange={(e) => patch({ priority: e.target.value as Todo["priority"] })}>

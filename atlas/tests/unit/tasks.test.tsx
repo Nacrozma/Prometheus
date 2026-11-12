@@ -81,7 +81,7 @@ describe("Tasks page", () => {
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Complete Call the dentist" }));
     expect(setStatus).toHaveBeenCalledWith("Call the dentist", "done");
-    fireEvent.click(screen.getByRole("button", { name: "Move Pay rent to the next day" }));
+    fireEvent.click(screen.getByRole("button", { name: "+1 day: Pay rent" }));
     expect(postpone).toHaveBeenCalledWith("Pay rent", 1);
 
     // Deleting asks first, and Cancel deletes nothing.
