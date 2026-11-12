@@ -199,6 +199,86 @@ impl Atlas {
         Ok(new)
     }
 
+    // ----- the owner's tasks (to-dos) -----
+
+    fn local_now() -> chrono::NaiveDateTime {
+        chrono::Local::now().naive_local()
+    }
+
+    fn todos_changed(&self, id: Option<&str>) {
+        notify(&self.bus, Topic::Todos, id);
+    }
+
+    pub fn todos_list(&self, filter: &crate::todos::Filter) -> Result<Vec<crate::todos::Todo>> {
+        crate::todos::list(&self.db, filter, Self::local_now())
+    }
+
+    pub fn todo_detail(&self, id: &str) -> Result<serde_json::Value> {
+        let now = Self::local_now();
+        Ok(json!({
+            "task": crate::todos::get(&self.db, id, now)?,
+            "subtasks": crate::todos::subtasks(&self.db, id, now)?,
+            "history": crate::todos::history(&self.db, id)?,
+        }))
+    }
+
+    pub fn todo_create(&self, new: crate::todos::NewTodo) -> Result<crate::todos::Todo> {
+        let t = crate::todos::create(&self.db, new, Self::local_now())?;
+        self.todos_changed(Some(&t.id));
+        Ok(t)
+    }
+
+    /// Create a task from one plain-language line ("Call the dentist friday 9am !high").
+    pub fn todo_quick_add(&self, line: &str, project_id: Option<String>) -> Result<crate::todos::Todo> {
+        let t = crate::todos::quick_add(&self.db, line, project_id, "user", None, Self::local_now())?;
+        self.todos_changed(Some(&t.id));
+        Ok(t)
+    }
+
+    /// What a quick-entry line would become, without saving it (for a live preview).
+    pub fn todo_quick_preview(&self, line: &str) -> serde_json::Value {
+        let q = crate::when::parse_quick(line, Self::local_now());
+        json!({
+            "title": q.title, "due_date": q.due_date.map(|d| d.to_string()), "due_time": q.due_time.map(|t| t.format("%H:%M").to_string()),
+            "priority": q.priority, "category": q.category, "recurrence": q.recurrence, "remind": q.remind,
+        })
+    }
+
+    pub fn todo_update(&self, id: &str, patch: crate::todos::TodoPatch) -> Result<crate::todos::Todo> {
+        let t = crate::todos::update(&self.db, id, patch, Self::local_now())?;
+        self.todos_changed(Some(id));
+        Ok(t)
+    }
+
+    pub fn todo_set_status(&self, id: &str, status: &str) -> Result<crate::todos::Todo> {
+        let t = crate::todos::set_status(&self.db, id, status, Self::local_now())?;
+        self.todos_changed(Some(id));
+        Ok(t)
+    }
+
+    pub fn todo_postpone(&self, id: &str, days: i64) -> Result<crate::todos::Todo> {
+        let t = crate::todos::postpone(&self.db, id, days, Self::local_now())?;
+        self.todos_changed(Some(id));
+        Ok(t)
+    }
+
+    pub fn todo_delete(&self, id: &str) -> Result<usize> {
+        let title = crate::todos::get(&self.db, id, Self::local_now())?.title;
+        let n = crate::todos::delete(&self.db, id)?;
+        audit::record(&self.db, "todo.deleted", "info", None, None, json!({ "rows": n, "title_chars": title.chars().count() }));
+        self.todos_changed(None);
+        Ok(n)
+    }
+
+    pub fn todo_overview(&self) -> Result<serde_json::Value> {
+        let now = Self::local_now();
+        Ok(json!({
+            "counts": crate::todos::counts(&self.db, now)?,
+            "categories": crate::todos::categories(&self.db)?,
+            "today": now.date().to_string(),
+        }))
+    }
+
     // ----- notifications -----
 
     /// Raise a notification under the current settings. Failures never disturb the caller.

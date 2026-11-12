@@ -1,6 +1,10 @@
 # Voice: validation on real hardware
 
-**Status: NOT DONE.** No microphone or speaker has been tested on any machine. Everything proven so
+**Status: PARTLY DONE.** On 2026-11-12 the owner reported, on their own PC with 0.4.2: voice "running
+perfectly", "so smooth", with "a slight delay in the answer". That is a real-hardware pass for basic use.
+It came without measurements, so the delay is not quantified and nothing has been tuned.
+
+Before that report, no microphone or speaker had been tested on any machine. Everything proven so
 far ran on cloud machines without audio devices (real engines, but the "speech" was synthetic).
 
 This page is the checklist for the owner's PC. Atlas measures what it can; the rest is your judgement.

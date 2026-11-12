@@ -23,6 +23,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
     tauri::generate_handler![
         app_info, diagnostics, recent_errors, open_external, save_text_via_dialog,
         settings_get, settings_update, first_launch_complete,
+        todos_list, todo_detail, todo_create, todo_quick_add, todo_quick_preview, todo_update, todo_set_status, todo_postpone, todo_delete, todo_overview,
         desktop_status, notifications_list, notifications_mark_read, notifications_clear, notification_test, window_hide, workspace_pick, workspace_use_default, workspace_add_sample, workspace_browse, workspace_preview, workspace_reveal,
         provider_templates, providers_list, provider_add, provider_update, provider_delete, provider_set_key, provider_clear_key, provider_test,
         integrations_list, integration_set_key, integration_clear_key, integration_set_enabled, integration_test,
@@ -184,6 +185,59 @@ fn settings_update(app: AppHandle, state: State<'_, AppState>, settings: Setting
         p.apply(&app, &saved.desktop);
     }
     Ok(saved)
+}
+
+// ----- the owner's tasks (to-dos) -----
+
+#[tauri::command]
+fn todos_list(state: State<'_, AppState>, filter: atlas_core::todos::Filter) -> R<Vec<atlas_core::todos::Todo>> {
+    state.atlas.todos_list(&filter)
+}
+
+#[tauri::command]
+fn todo_detail(state: State<'_, AppState>, id: String) -> R<Value> {
+    state.atlas.todo_detail(&id)
+}
+
+#[tauri::command]
+fn todo_create(state: State<'_, AppState>, task: atlas_core::todos::NewTodo) -> R<atlas_core::todos::Todo> {
+    // From the window a task is always the owner's own.
+    state.atlas.todo_create(atlas_core::todos::NewTodo { source: Some("user".into()), conversation_id: None, ..task })
+}
+
+#[tauri::command]
+fn todo_quick_add(state: State<'_, AppState>, line: String, project_id: Option<String>) -> R<atlas_core::todos::Todo> {
+    state.atlas.todo_quick_add(&line, project_id)
+}
+
+#[tauri::command]
+fn todo_quick_preview(state: State<'_, AppState>, line: String) -> R<Value> {
+    Ok(state.atlas.todo_quick_preview(&line))
+}
+
+#[tauri::command]
+fn todo_update(state: State<'_, AppState>, id: String, patch: atlas_core::todos::TodoPatch) -> R<atlas_core::todos::Todo> {
+    state.atlas.todo_update(&id, patch)
+}
+
+#[tauri::command]
+fn todo_set_status(state: State<'_, AppState>, id: String, status: String) -> R<atlas_core::todos::Todo> {
+    state.atlas.todo_set_status(&id, &status)
+}
+
+#[tauri::command]
+fn todo_postpone(state: State<'_, AppState>, id: String, days: i64) -> R<atlas_core::todos::Todo> {
+    state.atlas.todo_postpone(&id, days)
+}
+
+#[tauri::command]
+fn todo_delete(state: State<'_, AppState>, id: String) -> R<usize> {
+    state.atlas.todo_delete(&id)
+}
+
+#[tauri::command]
+fn todo_overview(state: State<'_, AppState>) -> R<Value> {
+    state.atlas.todo_overview()
 }
 
 /// What the desktop presence is actually doing right now (tray shown, shortcut registered or why not).

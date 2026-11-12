@@ -894,3 +894,71 @@ async fn desktop_settings_validate_normalise_and_survive_old_documents() {
         .unwrap();
     assert!(!n.title.contains("AAAAAAAA"), "{}", n.title);
 }
+
+// ----- the owner's task list through a conversation (0.5.0) -----
+
+fn open_tasks(h: &Harness) -> Vec<atlas_core::todos::Todo> {
+    h.atlas.todos_list(&atlas_core::todos::Filter { view: "open".into(), ..Default::default() }).unwrap()
+}
+
+#[tokio::test]
+async fn atlas_adds_and_completes_tasks_without_a_prompt_but_deleting_always_asks() {
+    let h = harness(vec![
+        MockProvider::tool_call("c1", "todo_add", json!({"title": "Call the dentist", "when": "tomorrow 9am", "remind": true, "priority": "high"})),
+        MockProvider::text("Added."),
+    ]);
+    let (r, ev) = send(&h, "Remind me to call the dentist tomorrow at 9").await;
+    assert_eq!(r.unwrap().outcome, "completed");
+    assert!(!ev.iter().any(|e| matches!(e, TurnEvent::Tool { event: atlas_core::tools::dispatch::DispatchEvent::ApprovalRequired { .. } })), "adding a task does not interrupt the owner");
+    let tasks = open_tasks(&h);
+    assert_eq!(tasks.len(), 1);
+    let t = &tasks[0];
+    assert_eq!((t.title.as_str(), t.priority.as_str(), t.source.as_str(), t.due_time.as_deref()), ("Call the dentist", "high", "atlas", Some("09:00")));
+    assert!(t.due_date.is_some() && t.remind_at.is_some());
+
+    // Completing is also unprompted; deleting needs an approval tied to that exact task.
+    h.mock.scripts.lock().unwrap().push_back(MockProvider::tool_call("c2", "todo_delete", json!({"id": t.id})));
+    h.mock.scripts.lock().unwrap().push_back(MockProvider::text("I did not delete it."));
+    let (r, _) = send_and_decide(&h, "delete that task", false).await;
+    assert_eq!(r.outcome, "completed");
+    assert_eq!(open_tasks(&h).len(), 1, "a declined deletion deletes nothing");
+
+    h.mock.scripts.lock().unwrap().push_back(MockProvider::tool_call("c3", "todo_delete", json!({"id": t.id})));
+    h.mock.scripts.lock().unwrap().push_back(MockProvider::text("Deleted."));
+    let (_, ev) = send_and_decide(&h, "yes, delete it", true).await;
+    assert!(ev.iter().any(|e| matches!(e, TurnEvent::Tool { event: atlas_core::tools::dispatch::DispatchEvent::ApprovalRequired { .. } })));
+    assert!(open_tasks(&h).is_empty());
+}
+
+#[tokio::test]
+async fn the_owner_can_make_task_changes_ask_first_and_bad_requests_change_nothing() {
+    let h = harness(vec![
+        MockProvider::tool_call("c1", "todo_add", json!({"title": "Quiet change"})),
+        MockProvider::text("Not added."),
+    ]);
+    let mut s = h.atlas.settings().unwrap();
+    s.permissions.planner = atlas_core::settings::GatePolicy::Ask;
+    h.atlas.update_settings(s).unwrap();
+    let (r, ev) = send_and_decide(&h, "add a task", false).await;
+    assert_eq!(r.outcome, "completed");
+    assert!(ev.iter().any(|e| matches!(e, TurnEvent::Tool { event: atlas_core::tools::dispatch::DispatchEvent::ApprovalRequired { .. } })));
+    assert!(open_tasks(&h).is_empty(), "declined: nothing was added");
+
+    let mut s = h.atlas.settings().unwrap();
+    s.permissions.planner = atlas_core::settings::GatePolicy::Allow;
+    h.atlas.update_settings(s).unwrap();
+    // An invalid date, an unknown id and an unknown status are refused by the core.
+    for (i, call) in [
+        ("todo_add", json!({"title": "Bad date", "due_date": "2026-02-31"})),
+        ("todo_update", json!({"id": "no-such-task", "title": "x"})),
+        ("todo_complete", json!({"id": "no-such-task"})),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        h.mock.scripts.lock().unwrap().push_back(MockProvider::tool_call(&format!("e{i}"), call.0, call.1));
+        h.mock.scripts.lock().unwrap().push_back(MockProvider::text("That did not work."));
+        send(&h, "try").await.0.unwrap();
+    }
+    assert!(open_tasks(&h).is_empty());
+}

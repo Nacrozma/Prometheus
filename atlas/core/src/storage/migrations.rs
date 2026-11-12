@@ -325,6 +325,77 @@ pub const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_notifications_unread ON notifications(read_at, created_at);
     CREATE INDEX idx_notifications_dedupe ON notifications(dedupe_key, read_at);
     "#,
+    // v0.5.0: the owner's tasks (to-dos), the scheduler, and more notification kinds.
+    // "tasks" (above) are records of tool-using turns; the owner's to-do list is "todos".
+    r#"
+    CREATE TABLE todos (
+        id TEXT PRIMARY KEY,
+        parent_id TEXT REFERENCES todos(id) ON DELETE CASCADE,
+        project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+        title TEXT NOT NULL,
+        notes TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','in_progress','done','cancelled')),
+        priority TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low','normal','high','urgent')),
+        category TEXT NOT NULL DEFAULT '',
+        due_date TEXT,
+        due_time TEXT,
+        remind_at TEXT,
+        recurrence TEXT NOT NULL DEFAULT 'none' CHECK (recurrence IN ('none','daily','weekdays','weekly','monthly','yearly')),
+        recur_interval INTEGER NOT NULL DEFAULT 1 CHECK (recur_interval BETWEEN 1 AND 365),
+        source TEXT NOT NULL DEFAULT 'user' CHECK (source IN ('user','atlas')),
+        conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+        postponed_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+    );
+    CREATE INDEX idx_todos_status_due ON todos(status, due_date);
+    CREATE INDEX idx_todos_parent ON todos(parent_id);
+    CREATE INDEX idx_todos_project ON todos(project_id);
+    CREATE TABLE todo_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+        at TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX idx_todo_events ON todo_events(todo_id, id);
+
+    CREATE TABLE scheduled_jobs (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        subject TEXT NOT NULL DEFAULT '',
+        run_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','running','done','missed','cancelled','failed')),
+        attempts INTEGER NOT NULL DEFAULT 0,
+        payload TEXT NOT NULL DEFAULT '{}',
+        result TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        UNIQUE (kind, subject, run_at)
+    );
+    CREATE INDEX idx_jobs_due ON scheduled_jobs(status, run_at);
+
+    -- Notifications gain kinds (reminder, deadline, briefing, focus). The list of kinds is
+    -- enforced in the core, so the table no longer repeats it. Existing rows are kept.
+    CREATE TABLE notifications_v5 (
+        id TEXT PRIMARY KEY,
+        category TEXT NOT NULL,
+        title TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT '',
+        target TEXT NOT NULL DEFAULT '',
+        dedupe_key TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        read_at TEXT,
+        shown_by_system INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO notifications_v5 SELECT id, category, title, detail, target, dedupe_key, created_at, read_at, shown_by_system FROM notifications;
+    DROP TABLE notifications;
+    ALTER TABLE notifications_v5 RENAME TO notifications;
+    CREATE INDEX idx_notifications_unread ON notifications(read_at, created_at);
+    CREATE INDEX idx_notifications_dedupe ON notifications(dedupe_key, read_at);
+    "#,
 ];
 
 pub const CURRENT_SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

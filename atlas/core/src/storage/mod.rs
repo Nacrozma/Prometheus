@@ -1,7 +1,7 @@
 //! Local SQLite persistence. One connection guarded by a mutex: every operation is short and
 //! synchronous, and callers never hold the lock across an `.await`.
 
-mod migrations;
+pub mod migrations;
 
 pub use migrations::{CURRENT_SCHEMA_VERSION, MIGRATIONS};
 

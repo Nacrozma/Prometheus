@@ -138,7 +138,7 @@ impl Dispatcher {
         }
 
         let mut approval_id: Option<String> = None;
-        match policy::decide(d.permission, d.network, &ctx.settings) {
+        match policy::decide_tool(&d.category, d.permission, d.network, &ctx.settings) {
             Decision::Deny { reason } => return failed(tool_id, None, "denied", format!("permission denied: {reason}")),
             Decision::Allow => {}
             Decision::Ask => {
@@ -190,6 +190,9 @@ impl Dispatcher {
         match res {
             Ok(output) => {
                 registry::record_use(&self.db, tool_id, false);
+                if d.category == "planner" && d.permission != crate::tools::PermissionClass::ReadOnly {
+                    notify(&self.bus, Topic::Todos, None);
+                }
                 let mut content = output.to_string();
                 if content.len() > d.max_output_bytes {
                     content = crate::ai::truncate(&content, d.max_output_bytes);
@@ -233,7 +236,7 @@ impl Dispatcher {
             .validate_input(tool_id, input)
             .map_err(|e| AtlasError::Validation(e.join("; ")))?;
         let hash = action_hash(tool_id, input);
-        match policy::decide(d.permission, d.network, &ctx.settings) {
+        match policy::decide_tool(&d.category, d.permission, d.network, &ctx.settings) {
             Decision::Deny { reason } => return Err(AtlasError::PermissionDenied(reason)),
             Decision::Allow => {}
             Decision::Ask => {

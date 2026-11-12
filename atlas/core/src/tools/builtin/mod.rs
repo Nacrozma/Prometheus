@@ -5,6 +5,7 @@ pub mod data;
 pub mod files;
 pub mod forge_tools;
 pub mod memory_tools;
+pub mod planner;
 pub mod sibling_tools;
 pub mod system;
 #[cfg(any(test, feature = "test-support"))]
@@ -78,6 +79,11 @@ pub fn register_all(reg: &ToolRegistry) -> crate::error::Result<()> {
         Arc::new(forge_tools::RunCommand::new()),
         Arc::new(forge_tools::GitCommit::new()),
         Arc::new(sibling_tools::Consult::new()),
+        Arc::new(planner::AddTask::new()),
+        Arc::new(planner::ListTasks::new()),
+        Arc::new(planner::UpdateTask::new()),
+        Arc::new(planner::CompleteTask::new()),
+        Arc::new(planner::DeleteTask::new()),
     ];
     for t in tools {
         reg.register(t)?;

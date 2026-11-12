@@ -281,11 +281,14 @@ pub struct PermissionSettings {
     pub local_write: GatePolicy,
     /// Tools that send data to an external service (e.g. web search).
     pub network_tools: GatePolicy,
+    /// Atlas adding, editing or completing entries in the owner's task list during a
+    /// conversation. Reversible and local, so allowed by default. Deleting always asks.
+    pub planner: GatePolicy,
 }
 
 impl Default for PermissionSettings {
     fn default() -> Self {
-        Self { local_write: GatePolicy::Ask, network_tools: GatePolicy::Ask }
+        Self { local_write: GatePolicy::Ask, network_tools: GatePolicy::Ask, planner: GatePolicy::Allow }
     }
 }
 

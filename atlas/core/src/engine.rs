@@ -257,7 +257,7 @@ impl Atlas {
                     in_session
                         && tool_states.get(&d.id).map(|s| s.enabled).unwrap_or(true)
                         && t.availability(&probe_ctx) == Availability::Available
-                        && !matches!(policy::decide(d.permission, d.network, &settings), Decision::Deny { .. })
+                        && !matches!(policy::decide_tool(&d.category, d.permission, d.network, &settings), Decision::Deny { .. })
                 })
                 .map(|t| {
                     let d = t.descriptor();
