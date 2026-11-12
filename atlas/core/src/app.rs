@@ -238,18 +238,31 @@ impl Atlas {
         let s = self.settings()?;
         let stale = self.schedule_synced_at.lock().map(|t| t.is_none_or(|t| t.elapsed() > Duration::from_secs(30))).unwrap_or(true);
         if self.schedule_dirty.swap(false, std::sync::atomic::Ordering::SeqCst) || stale {
-            crate::scheduler::sync(&self.db, &s.schedule, Self::local_now(), chrono::Utc::now())?;
+            crate::scheduler::sync(&self.db, &s.schedule, &s.briefing, Self::local_now(), chrono::Utc::now())?;
             if let Ok(mut t) = self.schedule_synced_at.lock() {
                 *t = Some(std::time::Instant::now());
             }
             let _ = crate::scheduler::prune(&self.db, chrono::Utc::now(), 30);
         }
-        let r = crate::scheduler::tick(&self.db, &self.notifications, &s.schedule, &s.desktop.notifications, chrono::Utc::now(), Self::local_now())?;
+        let r = crate::scheduler::tick(&self.db, &self.notifications, &s.schedule, &s.briefing, &s.desktop.notifications, chrono::Utc::now(), Self::local_now())?;
         if r.delivered + r.missed + r.failed > 0 {
             audit::record(&self.db, "scheduler.ran", if r.failed > 0 { "warn" } else { "info" }, None, None, json!(r));
             notify(&self.bus, Topic::Todos, None);
         }
         Ok(r)
+    }
+
+    /// Everything the Command Center shows, from real data, plus today's briefing as text.
+    pub fn command_center(&self) -> Result<serde_json::Value> {
+        let s = self.settings()?;
+        let b = crate::briefing::build(&self.db, Self::local_now())?;
+        Ok(json!({
+            "briefing_text": crate::briefing::text(&b, &s.briefing),
+            "briefing": b,
+            "schedule": crate::scheduler::summary(&self.db)?,
+            "paused": s.schedule.paused,
+            "unread_notifications": self.notifications.unread()?,
+        }))
     }
 
     pub fn scheduler_jobs(&self, limit: u32) -> Result<serde_json::Value> {

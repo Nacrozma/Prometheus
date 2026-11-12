@@ -89,7 +89,7 @@ fn parse_ts(s: &str) -> Option<DateTime<Utc>> {
 /// created after its notice time, or a reminder set further in the past than the grace period,
 /// would only produce noise. (Jobs that already existed and fell due while Atlas was closed are
 /// handled by `tick`.)
-pub fn sync(db: &Db, s: &ScheduleSettings, now_local: NaiveDateTime, now_utc: DateTime<Utc>) -> Result<()> {
+pub fn sync(db: &Db, s: &ScheduleSettings, briefing: &crate::briefing::BriefingSettings, now_local: NaiveDateTime, now_utc: DateTime<Utc>) -> Result<()> {
     let open = todos::list(db, &todos::Filter { view: "open".into(), ..Default::default() }, now_local)?;
     let mut want: Vec<(String, String, String)> = Vec::new(); // (kind, subject, run_at)
     let mut collect = |t: &todos::Todo| {
@@ -111,17 +111,22 @@ pub fn sync(db: &Db, s: &ScheduleSettings, now_local: NaiveDateTime, now_utc: Da
             }
         }
     }
+    if briefing.enabled
+        && let Some(at) = briefing.next_run(now_local)
+    {
+        want.push(("briefing".into(), "daily".into(), at));
+    }
     let conn = db.conn()?;
     let tx = conn.unchecked_transaction()?;
     // Cancel pending task jobs that no longer match (task finished, deleted, date or reminder changed).
     let pending: Vec<(String, String, String, String)> = {
-        let mut st = tx.prepare("SELECT id, kind, subject, run_at FROM scheduled_jobs WHERE status = 'pending' AND kind IN ('reminder','deadline')")?;
+        let mut st = tx.prepare("SELECT id, kind, subject, run_at FROM scheduled_jobs WHERE status = 'pending' AND kind IN ('reminder','deadline','briefing')")?;
         let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
         rows.collect::<std::result::Result<_, _>>()?
     };
     for (id, kind, subject, run_at) in &pending {
         if !want.iter().any(|(k, sj, at)| k == kind && sj == subject && at == run_at) {
-            tx.execute("UPDATE scheduled_jobs SET status = 'cancelled', finished_at = ?1, result = 'the task changed' WHERE id = ?2 AND status = 'pending'", rusqlite::params![now(), id])?;
+            tx.execute("UPDATE scheduled_jobs SET status = 'cancelled', finished_at = ?1, result = 'no longer wanted (the task or setting changed)' WHERE id = ?2 AND status = 'pending'", rusqlite::params![now(), id])?;
         }
     }
     // Add what is missing. The UNIQUE (kind, subject, run_at) key makes a repeat insert a no-op,
@@ -137,6 +142,12 @@ pub fn sync(db: &Db, s: &ScheduleSettings, now_local: NaiveDateTime, now_utc: Da
         if exists == 0 && passed {
             continue;
         }
+        // Wanted again after being cancelled (a reminder removed and re-added, the briefing turned
+        // off and on): bring it back. Delivered or missed jobs are never revived.
+        tx.execute(
+            "UPDATE scheduled_jobs SET status = 'pending', finished_at = NULL, result = '' WHERE kind = ?1 AND subject = ?2 AND run_at = ?3 AND status = 'cancelled'",
+            rusqlite::params![kind, subject, run_at],
+        )?;
         tx.execute(
             "INSERT OR IGNORE INTO scheduled_jobs (id, kind, subject, run_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![new_id(), kind, subject, run_at, now()],
@@ -177,7 +188,15 @@ fn finish(db: &Db, id: &str, status: &str, result: &str) -> Result<()> {
 
 /// Run every due job once. `notify_settings` decides what reaches the system; the in-app list
 /// always records it.
-pub fn tick(db: &Db, center: &NotificationCenter, s: &ScheduleSettings, notify_settings: &crate::desktop::NotificationSettings, now_utc: DateTime<Utc>, now_local: NaiveDateTime) -> Result<TickReport> {
+pub fn tick(
+    db: &Db,
+    center: &NotificationCenter,
+    s: &ScheduleSettings,
+    briefing: &crate::briefing::BriefingSettings,
+    notify_settings: &crate::desktop::NotificationSettings,
+    now_utc: DateTime<Utc>,
+    now_local: NaiveDateTime,
+) -> Result<TickReport> {
     let mut report = TickReport::default();
     if s.paused {
         return Ok(report);
@@ -195,6 +214,20 @@ pub fn tick(db: &Db, center: &NotificationCenter, s: &ScheduleSettings, notify_s
             continue; // someone else has it
         }
         let late = parse_ts(&run_at).is_none_or(|r| now_utc - r > grace);
+        if kind == "briefing" {
+            // A briefing more than two hours late is not worth sending; skip it quietly.
+            if parse_ts(&run_at).is_none_or(|r| now_utc - r > chrono::Duration::hours(2)) {
+                finish(db, &id, "missed", "Atlas was closed or paused at briefing time")?;
+                report.missed += 1;
+                continue;
+            }
+            let b = crate::briefing::build(db, now_local)?;
+            let body = crate::briefing::text(&b, briefing);
+            center.raise(notify_settings, NewNotification { category: Category::Briefing, title: "Your daily briefing", detail: &body, target: "home", dedupe_key: &format!("job:{id}"), only_if_away: false })?;
+            finish(db, &id, "done", "listed in Atlas")?;
+            report.delivered += 1;
+            continue;
+        }
         let task = todos::get(db, &subject, now_local).ok().filter(|t| matches!(t.status.as_str(), "open" | "in_progress"));
         let Some(task) = task else {
             finish(db, &id, "cancelled", "the task was finished or removed")?;

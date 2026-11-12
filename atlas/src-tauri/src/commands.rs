@@ -23,7 +23,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
     tauri::generate_handler![
         app_info, diagnostics, recent_errors, open_external, save_text_via_dialog,
         settings_get, settings_update, first_launch_complete,
-        todos_list, todo_detail, todo_create, todo_quick_add, todo_quick_preview, todo_update, todo_set_status, todo_postpone, todo_delete, todo_overview, todo_snooze, schedule_jobs,
+        todos_list, todo_detail, todo_create, todo_quick_add, todo_quick_preview, todo_update, todo_set_status, todo_postpone, todo_delete, todo_overview, todo_snooze, schedule_jobs, command_center,
         desktop_status, notifications_list, notifications_mark_read, notifications_clear, notification_test, window_hide, workspace_pick, workspace_use_default, workspace_add_sample, workspace_browse, workspace_preview, workspace_reveal,
         provider_templates, providers_list, provider_add, provider_update, provider_delete, provider_set_key, provider_clear_key, provider_test,
         integrations_list, integration_set_key, integration_clear_key, integration_set_enabled, integration_test,
@@ -249,6 +249,12 @@ fn todo_snooze(state: State<'_, AppState>, id: String, minutes: i64) -> R<atlas_
 #[tauri::command]
 fn schedule_jobs(state: State<'_, AppState>, limit: Option<u32>) -> R<Value> {
     state.atlas.scheduler_jobs(limit.unwrap_or(100))
+}
+
+/// The Command Center: today's priorities and the briefing, from real data only.
+#[tauri::command]
+fn command_center(state: State<'_, AppState>) -> R<Value> {
+    state.atlas.command_center()
 }
 
 /// What the desktop presence is actually doing right now (tray shown, shortcut registered or why not).
