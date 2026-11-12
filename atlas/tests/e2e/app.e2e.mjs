@@ -697,6 +697,8 @@ test("Command Center: today's briefing and priorities come from real tasks, tick
     const d = new Date(Date.now() + offset * 86400000);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   };
+  // Start from an empty list (earlier tests leave tasks behind; this data folder is a throwaway).
+  for (const t of await invoke("todos_list", { filter: { view: "open" } })) await invoke("todo_delete", { id: t.id });
   const made = [];
   for (const task of [
     { title: "Send the invoice to Marta", due_date: ymd(-2), priority: "high" },
