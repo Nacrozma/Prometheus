@@ -40,3 +40,7 @@ tool_stats.json
 audit.jsonl
 .prometheus_undo/
 permissions.json
+
+# Desktop build output
+dist/
+build/

@@ -220,6 +220,29 @@ class TestSingleInstance(unittest.TestCase):
         self.assertEqual(hits, [1])
 
 
+class TestChildPython(unittest.TestCase):
+    """The packaged exe must act as Python for the core's child processes (run_code, Forge tests)."""
+
+    def test_script_and_module_forms(self):
+        from app.launcher import _child_python
+
+        tmp = tempfile.mkdtemp()
+        script = os.path.join(tmp, "child.py")
+        out = os.path.join(tmp, "out.txt")
+        with open(script, "w") as f:
+            f.write("import sys\nopen(sys.argv[1], 'w').write('ran')\nsys.exit(3)\n")
+        saved = list(sys.argv)
+        try:
+            self.assertEqual(_child_python(["Prometheus.exe", "-I", script, out]), 3)
+            with open(out) as f:
+                self.assertEqual(f.read(), "ran")
+            self.assertIsNone(_child_python(["Prometheus.exe"]))
+            self.assertIsNone(_child_python(["Prometheus.exe", "--self-test=x"]))
+            self.assertEqual(_child_python(["Prometheus.exe", "-m", "json.tool", "--help"]), 0)
+        finally:
+            sys.argv = saved
+
+
 SMOKE = textwrap.dedent(
     """
     import json, os, sys

@@ -176,9 +176,13 @@ class SettingsPage(Page):
         self.behaviour_changed.emit()
 
     def _login(self, on: bool) -> None:
-        exe = sys.executable if getattr(sys, "frozen", False) else f'"{sys.executable}" -m app'
+        if getattr(sys, "frozen", False):
+            command = f'"{sys.executable}"'
+        else:
+            launcher = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "launcher.py")
+            command = f'"{sys.executable}" "{launcher}"'
         try:
-            self.platform.set_launch_at_login(on, f'"{exe}"' if getattr(sys, "frozen", False) else exe)
+            self.platform.set_launch_at_login(on, command)
             self.settings.set("launch_at_login", on)
             self.login_msg.setText("Prometheus will start when you sign in." if on else "Prometheus will not start by itself.")
         except Exception as e:

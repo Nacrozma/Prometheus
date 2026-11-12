@@ -46,8 +46,35 @@ def _crash_log(data_dir: str, text: str) -> str:
     return path
 
 
+def _self_test(app, win, core, paths, out_path: str) -> int:
+    import json
+
+    report = {"version": __version__, "frozen": bool(getattr(sys, "frozen", False)), "pages": {}, "data_dir": paths.data_dir}
+    for name in win.pages:
+        win.go(name)
+        app.processEvents()
+        msg = win.statusBar().currentMessage()
+        report["pages"][name] = "error: " + msg if msg.startswith("Could not refresh") else "ok"
+    report["tools"] = len(core.tool_names())
+    report["dangerous_gated"] = all(core.is_dangerous(t) for t in ("write_file", "execute_shell", "run_code_forge", "apply_pending_patch"))
+    report["calc"] = core.dispatch("engineering_calc", calc="convert_units", params={"value": 1, "from_unit": "in", "to_unit": "mm"})
+    report["router_configured"] = bool(core.router.configured)
+    report["ok"] = all(v == "ok" for v in report["pages"].values()) and report["dangerous_gated"]
+    win.quit()
+    core.shutdown()
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, default=str)
+    return 0 if report["ok"] else 2
+
+
 def main(argv=None) -> int:
     argv = list(sys.argv if argv is None else argv)
+    # --self-test=RESULT.json: start everything offscreen, check it, write a report and exit.
+    # Used by the installer CI to prove the packaged app starts; touches only the folders given
+    # by PROMETHEUS_HOME / PROMETHEUS_WORKSPACE (the CI sets throwaway ones).
+    self_test = next((a.split("=", 1)[1] for a in argv if a.startswith("--self-test=")), "")
+    if self_test:
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
     from PyQt6.QtCore import Qt
     from PyQt6.QtGui import QSurfaceFormat
     from PyQt6.QtWidgets import QApplication, QMessageBox, QSplashScreen
@@ -67,7 +94,7 @@ def main(argv=None) -> int:
 
     from .single_instance import SingleInstance
 
-    instance = SingleInstance()
+    instance = SingleInstance(None if not self_test else f"prometheus-self-test-{os.getpid()}")
     if instance.already_running():
         return 0  # the running window was asked to come forward
     instance.listen()
@@ -116,6 +143,8 @@ def main(argv=None) -> int:
         QMessageBox.critical(None, f"{APP_NAME} could not start", f"{text.strip().splitlines()[-1]}\n\nDetails were written to {log}.")
         return 1
 
+    if self_test:
+        return _self_test(app, win, core, paths, self_test)
     instance.activated.connect(win.show_and_raise)
     if settings.load_error:
         win.statusBar().showMessage(f"Desktop settings were unreadable and were reset: {settings.load_error}", 0)
