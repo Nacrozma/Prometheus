@@ -12,10 +12,28 @@ import io
 import traceback
 import html as _html
 import numpy as np
-import sounddevice as sd
-import soundfile as sf
-import edge_tts
-import whisper
+
+# Voice is optional: without these packages Prometheus runs with voice turned off and says why,
+# instead of refusing to start. (Whisper pulls in PyTorch, a multi-gigabyte download.)
+VOICE_MISSING: dict = {}
+try:
+    import sounddevice as sd
+    import soundfile as sf
+except Exception as _e:  # missing package, or PortAudio not installed
+    sd = sf = None
+    VOICE_MISSING["audio"] = f"sounddevice/soundfile unavailable ({type(_e).__name__}: {_e})"
+try:
+    import edge_tts
+except Exception as _e:
+    edge_tts = None
+    VOICE_MISSING["speech_output"] = f"edge-tts unavailable ({type(_e).__name__})"
+try:
+    import whisper
+except Exception as _e:
+    whisper = None
+    VOICE_MISSING["speech_input"] = f"openai-whisper unavailable ({type(_e).__name__}); install it with: pip install openai-whisper"
+VOICE_INPUT_AVAILABLE = whisper is not None and sd is not None
+VOICE_OUTPUT_AVAILABLE = edge_tts is not None and sd is not None and sf is not None
 
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.window=false"
 
@@ -715,6 +733,8 @@ class WhisperVoiceThread(QThread):
     def _get_model(self):
         with self._model_lock:
             if self._model is None:
+                if not VOICE_INPUT_AVAILABLE:
+                    raise RuntimeError("voice input is unavailable: " + "; ".join(v for k, v in VOICE_MISSING.items() if k in ("audio", "speech_input")))
                 self.status_signal.emit("LOADING WHISPER MODEL...")
                 self._model = whisper.load_model("base")
             return self._model
@@ -731,6 +751,9 @@ class WhisperVoiceThread(QThread):
     def start_recording(self) -> bool:
         """False if the previous recording is still being transcribed: start() on a
         running QThread does nothing, so the UI would show REC while recording nothing."""
+        if not VOICE_INPUT_AVAILABLE:
+            self.status_signal.emit("VOICE INPUT UNAVAILABLE - SEE SETTINGS")
+            return False
         if self.isRunning():
             self.status_signal.emit("STILL TRANSCRIBING - TRY AGAIN IN A MOMENT")
             return False
@@ -900,6 +923,8 @@ class TTSManager:
         samplerate), or (None, None) on failure. float32 specifically —
         sounddevice/PortAudio doesn't accept float64, which is what
         soundfile.read() returns by default."""
+        if not VOICE_OUTPUT_AVAILABLE:
+            return None, None  # voice output is off on this install; the text is still shown
         communicate = edge_tts.Communicate(text, self.voice, rate=self._rate_str())
         audio_bytes = bytearray()
         async for chunk in communicate.stream():
