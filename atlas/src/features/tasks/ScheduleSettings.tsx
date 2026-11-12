@@ -1,6 +1,6 @@
 import { PauseCircle } from "lucide-react";
 import type { ReactNode } from "react";
-import { Badge, Button, EmptyState, Panel, Select, Switch } from "@/components/ui/primitives";
+import { Badge, Button, EmptyState, Input, Panel, Select, Switch } from "@/components/ui/primitives";
 import { api } from "@/lib/bridge";
 import { useAtlasQuery } from "@/lib/query";
 import type { Job, Settings } from "@/lib/schemas";
@@ -33,6 +33,8 @@ const when = (iso: string) => new Date(iso).toLocaleString([], { weekday: "short
 export function ScheduleSettingsSection({ s, save }: { s: Settings; save: (n: Settings) => Promise<void> }) {
   const sc = s.schedule;
   const set = (patch: Partial<Settings["schedule"]>) => save({ ...s, schedule: { ...sc, ...patch } });
+  const b = s.briefing;
+  const setB = (patch: Partial<Settings["briefing"]>) => save({ ...s, briefing: { ...b, ...patch } });
   const jobs = useAtlasQuery("schedule-jobs", () => api.scheduleJobs(60), ["todos", "settings", "notifications"]);
   const d = jobs.data;
   return (
@@ -75,6 +77,39 @@ export function ScheduleSettingsSection({ s, save }: { s: Settings; save: (n: Se
           <Button size="sm" onClick={() => useUi.getState().openSettings("desktop")}>
             Notification settings
           </Button>
+        </Row>
+      </Panel>
+
+      <Panel className="px-5" data-briefing-settings>
+        <Row title="Daily briefing" desc="A short summary of today's tasks, overdue items, reminders, approvals and missions, as a notification each day. Home always shows today's briefing, whether or not this is on.">
+          <div className="flex items-center gap-3">
+            <Input
+              type="time"
+              aria-label="Briefing time"
+              value={b.time}
+              disabled={!b.enabled}
+              onChange={(e) => e.target.value && void setB({ time: e.target.value })}
+              className="w-28"
+            />
+            <Switch checked={b.enabled} label="Daily briefing" onChange={(enabled) => void setB({ enabled })} />
+          </div>
+        </Row>
+        <Row title="Include" desc="Today's tasks and reminders are always included. Appointments are not, because no calendar is connected.">
+          <div className="flex flex-col items-end gap-2 text-xs text-text-2">
+            {(
+              [
+                ["include_overdue", "Overdue tasks"],
+                ["include_upcoming", "This week's deadlines"],
+                ["include_missions", "Active missions"],
+                ["include_recent", "What I finished this week"],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="flex items-center gap-3">
+                {label}
+                <Switch checked={b[key]} label={label} onChange={(v) => void setB({ [key]: v })} />
+              </label>
+            ))}
+          </div>
         </Row>
       </Panel>
 

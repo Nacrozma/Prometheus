@@ -20,6 +20,15 @@
   - Reminders that fall due while Atlas is closed are reported once, together, not as a burst.
   - **Global pause** for everything Atlas does on its own.
   - A history of what was scheduled, delivered, missed or cancelled.
+- **Command Center** (Home): today's date, a written briefing, today's priorities (overdue first) with a
+  tick to complete each, what's coming up this week and today's reminders, active missions, recent
+  conversations, what you finished in the last 7 days, approvals waiting, and system status. Built only
+  from Atlas's own data; it says plainly that no calendar is connected. **Customize** chooses which
+  parts Home shows.
+- **Daily briefing** (Settings → Reminders & schedule): off by default; once on, a short summary arrives
+  as a notification at the time you choose, with switches for overdue tasks, this week's deadlines,
+  missions and recent progress. Respects the global pause; a briefing more than two hours late is
+  skipped. "Read aloud" on Home when voice is set up.
 
 ### Changed
 - Database schema 5 (tasks, scheduled jobs; notifications accept new kinds). The database is copied to

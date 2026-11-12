@@ -82,3 +82,14 @@ Asked in a conversation ("Remind me to book the flights tomorrow at 8am"), Atlas
 The global pause holds everything Atlas does on its own:
 
 ![Paused](screenshots/19b-schedule-settings-paused.png)
+
+## 0.5.0 (in progress, not released): Command Center and the daily briefing
+
+Home is now a Command Center: today's briefing, priorities (overdue first, tick to complete), what's
+coming up, recently finished work and system status, all from Atlas's own data:
+
+![Command Center](screenshots/20-command-center.png)
+
+| Customize what Home shows | Daily briefing settings (off until turned on) |
+|---|---|
+| ![Customize Home](screenshots/20b-customize-home.png) | ![Briefing settings](screenshots/20c-briefing-settings.png) |

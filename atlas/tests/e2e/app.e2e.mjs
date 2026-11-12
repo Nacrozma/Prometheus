@@ -692,6 +692,92 @@ test("scheduler: a reminder arrives on time with Done and Snooze, a missed one i
   await driver.wait(() => gone("[data-sonner-toast]"), 40000).catch(() => {});
 });
 
+test("Command Center: today's briefing and priorities come from real tasks, ticking one completes it, Home can be customized, and the daily briefing arrives on time", async () => {
+  const ymd = (offset) => {
+    const d = new Date(Date.now() + offset * 86400000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const made = [];
+  for (const task of [
+    { title: "Send the invoice to Marta", due_date: ymd(-2), priority: "high" },
+    { title: "Water the plants", due_date: ymd(0) },
+    { title: "Call the dentist", due_date: ymd(0), priority: "urgent" },
+    { title: "Renew the passport", due_date: ymd(3) },
+  ]) {
+    const t = await invoke("todo_create", { task });
+    assert.ok(t.id, JSON.stringify(t));
+    made.push(t);
+  }
+  const finished = await invoke("todo_create", { task: { title: "Back up the laptop" } });
+  await invoke("todo_set_status", { id: finished.id, status: "done" });
+  made.push(finished);
+
+  // The core's view, which the page shows as it is.
+  const cc = await invoke("command_center");
+  assert.equal(cc.briefing.overdue.length, 1);
+  assert.equal(cc.briefing.today.length, 2);
+  assert.ok(cc.briefing.upcoming.some((t) => t.title === "Renew the passport"));
+  assert.ok(cc.briefing_text.startsWith("2 tasks are due today"), cc.briefing_text);
+  assert.ok(cc.briefing_text.includes("No calendar is connected"), "says what it cannot see");
+
+  await go("1");
+  await find(By.css("[data-command-center]"));
+  await waitText("2 tasks are due today");
+  await find(By.css('[data-priorities] [data-cc-task="Send the invoice to Marta"]'));
+  await find(By.css('[data-priorities] [data-cc-task="Call the dentist"]'));
+  await find(By.css('[data-coming-up] [data-cc-task="Renew the passport"]'));
+  await find(By.css("[data-accomplished]"));
+  await waitText("Back up the laptop");
+  await shot("20-command-center");
+
+  // Ticking a priority completes the real task and the briefing updates.
+  await driver.executeScript("arguments[0].click()", await find(By.css('button[aria-label="Complete Water the plants"]')));
+  await driver.wait(async () => (await invoke("todo_detail", { id: made[1].id })).task.status === "done", 5000, "the task is done");
+  await waitText("Due today: Call the dentist.");
+
+  // Customize: hiding the briefing is saved in settings and removes it from Home.
+  await click("Customize");
+  await find(By.css("[data-customize-home]"));
+  await shot("20b-customize-home");
+  await (await find(By.css('[data-customize-home] [role=switch][aria-label="Today\'s briefing"]'))).click();
+  await driver.wait(async () => (await invoke("settings_get")).home.show_briefing === false, 5000);
+  await click("Done");
+  await driver.wait(() => gone("[data-briefing]"), 5000);
+  const s1 = await invoke("settings_get");
+  await invoke("settings_update", { settings: { ...s1, home: { ...s1.home, show_briefing: true } } });
+  await find(By.css("[data-briefing]"));
+
+  // The daily briefing: off by default; on, at a time a minute away, it is scheduled and delivered.
+  assert.equal(s1.briefing.enabled, false, "off until the owner turns it on");
+  await go(",");
+  await (await find(exactButton("Reminders & schedule"))).click();
+  await find(By.css("[data-briefing-settings]"));
+  await (await find(By.css('[data-briefing-settings] [role=switch][aria-label="Daily briefing"]'))).click();
+  await driver.wait(async () => (await invoke("settings_get")).briefing.enabled === true, 5000);
+  await shot("20c-briefing-settings");
+  const next = new Date(Date.now() + 65000);
+  const hhmm = `${String(next.getHours()).padStart(2, "0")}:${String(next.getMinutes()).padStart(2, "0")}`;
+  const s2 = await invoke("settings_get");
+  await invoke("settings_update", { settings: { ...s2, briefing: { ...s2.briefing, time: hhmm } } });
+  const jobs = async () => (await invoke("schedule_jobs", { limit: 100 })).jobs;
+  await driver.wait(async () => (await jobs()).some((j) => j.kind === "briefing" && j.status === "pending"), 40000, "the briefing is scheduled");
+  await driver.wait(async () => (await jobs()).some((j) => j.kind === "briefing" && j.status === "done"), 150000, "the briefing is delivered at its time");
+  const notes = (await invoke("notifications_list", { limit: 20 })).items;
+  const brief = notes.find((n) => n.category === "briefing");
+  assert.ok(brief, JSON.stringify(notes.map((n) => [n.category, n.title])));
+  assert.ok(brief.detail.includes("Call the dentist"), brief.detail);
+
+  // The core refuses a briefing time that is not a time.
+  assert.ok((await invoke("settings_update", { settings: { ...s2, briefing: { ...s2.briefing, time: "25:99" } } })).__error);
+
+  // Tidy up so later tests start quiet.
+  const s3 = await invoke("settings_get");
+  await invoke("settings_update", { settings: { ...s3, briefing: { ...s3.briefing, enabled: false } } });
+  for (const t of made) await invoke("todo_delete", { id: t.id });
+  await invoke("notifications_clear");
+  await driver.wait(() => gone("[data-sonner-toast]"), 40000).catch(() => {});
+});
+
 test("desktop presence: nothing is on by default, the shortcut is validated and never duplicated, notifications need permission, and the bell lists them", async () => {
   const s0 = await invoke("settings_get");
   assert.equal(s0.desktop.shortcut_enabled, false);

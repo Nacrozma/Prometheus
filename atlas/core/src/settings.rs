@@ -29,10 +29,28 @@ pub struct Settings {
     pub schedule: crate::scheduler::ScheduleSettings,
     /// The daily briefing.
     pub briefing: crate::briefing::BriefingSettings,
+    /// What the Command Center (Home) shows.
+    pub home: HomeSettings,
     pub default_project_id: Option<String>,
     pub forge: ForgeSettings,
     /// The one-time introduction. Owned by the core: `settings_update` cannot change it.
     pub first_launch: FirstLaunchState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct HomeSettings {
+    pub show_briefing: bool,
+    pub show_missions: bool,
+    pub show_conversations: bool,
+    pub show_accomplished: bool,
+    pub show_status: bool,
+}
+
+impl Default for HomeSettings {
+    fn default() -> Self {
+        Self { show_briefing: true, show_missions: true, show_conversations: true, show_accomplished: true, show_status: true }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
