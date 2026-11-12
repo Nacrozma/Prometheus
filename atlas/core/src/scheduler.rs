@@ -84,7 +84,12 @@ fn parse_ts(s: &str) -> Option<DateTime<Utc>> {
 
 /// Make the pending jobs match the task list: one reminder per open task with a reminder, and
 /// (if enabled) one "due today" notice per open dated task without one. Idempotent.
-pub fn sync(db: &Db, s: &ScheduleSettings, now_local: NaiveDateTime) -> Result<()> {
+///
+/// A moment that has already passed is never scheduled anew: a "due today" notice for a task
+/// created after its notice time, or a reminder set further in the past than the grace period,
+/// would only produce noise. (Jobs that already existed and fell due while Atlas was closed are
+/// handled by `tick`.)
+pub fn sync(db: &Db, s: &ScheduleSettings, now_local: NaiveDateTime, now_utc: DateTime<Utc>) -> Result<()> {
     let open = todos::list(db, &todos::Filter { view: "open".into(), ..Default::default() }, now_local)?;
     let mut want: Vec<(String, String, String)> = Vec::new(); // (kind, subject, run_at)
     let mut collect = |t: &todos::Todo| {
@@ -121,7 +126,17 @@ pub fn sync(db: &Db, s: &ScheduleSettings, now_local: NaiveDateTime) -> Result<(
     }
     // Add what is missing. The UNIQUE (kind, subject, run_at) key makes a repeat insert a no-op,
     // so a reminder already delivered (or cancelled) for that exact moment is never re-created.
+    let grace = chrono::Duration::minutes(i64::from(s.missed_grace_minutes));
     for (kind, subject, run_at) in want {
+        let exists: i64 = tx.query_row("SELECT COUNT(*) FROM scheduled_jobs WHERE kind = ?1 AND subject = ?2 AND run_at = ?3", rusqlite::params![kind, subject, run_at], |r| r.get(0))?;
+        let at = parse_ts(&run_at);
+        let passed = match kind.as_str() {
+            "deadline" => at.is_some_and(|a| a <= now_utc),
+            _ => at.is_some_and(|a| now_utc - a > grace),
+        };
+        if exists == 0 && passed {
+            continue;
+        }
         tx.execute(
             "INSERT OR IGNORE INTO scheduled_jobs (id, kind, subject, run_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![new_id(), kind, subject, run_at, now()],
@@ -229,7 +244,7 @@ pub fn tick(db: &Db, center: &NotificationCenter, s: &ScheduleSettings, notify_s
         if n > 5 {
             detail.push_str(&format!(" and {} more", n - 5));
         }
-        let title = if n == 1 { "1 reminder was missed while Atlas was closed".to_string() } else { format!("{n} reminders were missed while Atlas was closed") };
+        let title = if n == 1 { "1 reminder was missed while Atlas was closed or paused".to_string() } else { format!("{n} reminders were missed while Atlas was closed or paused") };
         center.raise(notify_settings, NewNotification { category: Category::Reminder, title: &title, detail: &detail, target: "tasks", dedupe_key: &format!("missed:{}", ts(now_utc)), only_if_away: false })?;
     }
     Ok(report)

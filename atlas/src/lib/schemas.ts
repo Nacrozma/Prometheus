@@ -93,8 +93,14 @@ export const SettingsSchema = z.object({
       replies: z.boolean(),
       missions: z.boolean(),
       errors: z.boolean(),
+      reminders: z.boolean().default(true),
+      deadlines: z.boolean().default(true),
+      briefings: z.boolean().default(true),
     }),
   }),
+  schedule: z
+    .object({ paused: z.boolean(), deadline_notices: z.boolean(), deadline_hour: z.number(), missed_grace_minutes: z.number() })
+    .default({ paused: false, deadline_notices: true, deadline_hour: 9, missed_grace_minutes: 720 }),
   default_project_id: z.string().nullable(),
   forge: z.object({ command_timeout_secs: z.number(), max_output_kb: z.number() }),
   first_launch: z.object({ completed_at: z.string().nullable() }),
@@ -719,7 +725,7 @@ export type Benchmark = z.infer<typeof BenchmarkSchema>;
 // ---------- desktop presence ----------
 export const NotificationSchema = z.object({
   id: z.string(),
-  category: z.enum(["approval", "reply", "mission", "error", "test"]),
+  category: z.enum(["approval", "reply", "mission", "error", "reminder", "deadline", "briefing", "test"]),
   title: z.string(),
   detail: z.string(),
   target: z.string(),
@@ -812,3 +818,24 @@ export interface TodoPatch {
   recurrence?: Todo["recurrence"];
   status?: Todo["status"];
 }
+
+// ---------- scheduler ----------
+export const JobSchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  subject: z.string(),
+  run_at: z.string(),
+  status: z.enum(["pending", "running", "done", "missed", "cancelled", "failed"]),
+  attempts: z.number(),
+  result: z.string(),
+  created_at: z.string(),
+  finished_at: z.string().nullable(),
+  label: z.string(),
+});
+export type Job = z.infer<typeof JobSchema>;
+export const ScheduleSchema = z.object({
+  paused: z.boolean(),
+  summary: z.object({ pending: z.number(), done: z.number(), missed: z.number(), failed: z.number(), next_run_at: z.string().nullable() }),
+  jobs: z.array(JobSchema),
+});
+export type Schedule = z.infer<typeof ScheduleSchema>;

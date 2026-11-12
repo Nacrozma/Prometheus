@@ -134,6 +134,8 @@ export function App() {
         position="bottom-center"
         toastOptions={{
           style: { background: "var(--bg-3)", color: "var(--text-1)", border: "1px solid var(--line-2)", fontFamily: "var(--font-body)" },
+          // Sonner's default description colour is too faint on Atlas's surfaces (axe: contrast).
+          classNames: { description: "!text-text-2", actionButton: "!bg-accent !text-text-inverse", cancelButton: "!bg-bg-4 !text-text-1" },
         }}
       />
     </RadixTooltip.Provider>

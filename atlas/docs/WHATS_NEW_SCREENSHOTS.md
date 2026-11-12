@@ -1,4 +1,4 @@
-# What's new, in pictures (0.3.0 → 0.4.2)
+# What's new, in pictures (0.3.0 → 0.5.0 in progress)
 
 Every screenshot here was taken by the automated end-to-end run of the real desktop app, on Linux, at
 version 0.4.2.
@@ -57,3 +57,28 @@ When a voice is already set up, Atlas speaks its welcome and the ring moves with
 | ![Desktop settings](screenshots/17d0-desktop-settings.png) | ![Notifications](screenshots/17d-desktop-notifications.png) |
 
 The tray icon and system notifications live outside the window, so they cannot be captured by this run.
+
+## 0.5.0 (in progress, not released): tasks
+
+Plain-language entry shows how a line will be understood before it is saved:
+
+![Quick entry](screenshots/18-tasks-quick-entry.png)
+
+| Today: overdue first, then each day | A task: date, time, priority, repeat, reminder, steps, history |
+|---|---|
+| ![Tasks today](screenshots/18b-tasks-today.png) | ![Task details](screenshots/18c-task-details.png) |
+
+Asked in a conversation ("Remind me to book the flights tomorrow at 8am"), Atlas adds a real task, marked
+"added by Atlas":
+
+![Task from a conversation](screenshots/18d-task-from-conversation.png)
+
+## 0.5.0 (in progress, not released): reminders and the scheduler
+
+| A reminder arriving, with Done and Snooze | Reminders & schedule: what is scheduled and what happened |
+|---|---|
+| ![Reminder](screenshots/19-reminder-toast.png) | ![Schedule history](screenshots/19c-schedule-history.png) |
+
+The global pause holds everything Atlas does on its own:
+
+![Paused](screenshots/19b-schedule-settings-paused.png)

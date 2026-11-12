@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5.0 — in progress (not released)
+
+### Added
+- **Tasks** (new Tasks page): deadlines with optional times, priorities, categories, steps, repeats
+  (daily, weekdays, weekly, monthly, yearly), postpone, search, Today / This week / Later / No date /
+  Done views, and a history on every task.
+  - **Plain-language entry:** "Call the dentist friday 9am !high #health", "Gym every monday",
+    "in 3 days", "next friday". The line is shown as it will be understood before it is saved. Dates are
+    understood on this computer, without a model.
+  - **From a conversation:** "Remind me to … tomorrow at 8" adds a real task. Adding, changing and
+    completing follow a new "task list" permission (allowed by default; can be set to ask). Deleting a
+    task always asks.
+- **Reminders and a scheduler** (Settings → Reminders & schedule):
+  - A reminder arrives at its time, in Atlas's notification list and as an in-app toast with **Done**
+    and **Snooze 10 min**; as a system notification too if allowed.
+  - Optional "due today" notices for dated tasks without a reminder.
+  - Every job is delivered exactly once, also across restarts and crashes.
+  - Reminders that fall due while Atlas is closed are reported once, together, not as a burst.
+  - **Global pause** for everything Atlas does on its own.
+  - A history of what was scheduled, delivered, missed or cancelled.
+
+### Changed
+- Database schema 5 (tasks, scheduled jobs; notifications accept new kinds). The database is copied to
+  `atlas.pre-v5.bak` before upgrading. All existing data is kept (tested).
+- Toast descriptions use a higher-contrast colour (accessibility audit).
+
 ## 0.4.2 — 2026-11-11 (released: atlas-v0.4.2)
 
 Desktop presence and a guided voice setup. Voice accuracy, playback tuning and the default recognition

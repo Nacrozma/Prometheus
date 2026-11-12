@@ -122,6 +122,9 @@ export function DesktopSettingsSection({ s, save }: { s: Settings; save: (n: Set
                 ["replies", "Replies that finish while I'm away"],
                 ["missions", "Missions that need me or are ready"],
                 ["errors", "Failures"],
+                ["reminders", "Reminders I set on tasks"],
+                ["deadlines", "Tasks due today"],
+                ["briefings", "My daily briefing"],
               ] as const
             ).map(([key, label]) => (
               <label key={key} className="flex items-center gap-3">

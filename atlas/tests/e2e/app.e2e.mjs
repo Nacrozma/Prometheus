@@ -633,6 +633,65 @@ test("tasks: plain-language entry, day views, overdue, steps and history, comple
   assert.ok((await invoke("todo_postpone", { id: saved.id, days: 100000 })).__error);
 });
 
+test("scheduler: a reminder arrives on time with Done and Snooze, a missed one is reported once, and the global pause holds", async () => {
+  const soon = (sec) => new Date(Date.now() + sec * 1000).toISOString();
+  const jobs = async () => (await invoke("schedule_jobs", { limit: 100 })).jobs;
+  const toastOf = (title) => By.xpath(`//li[@data-sonner-toast][.//*[contains(normalize-space(.), ${JSON.stringify(title)})]]`);
+  await (await find(By.css('nav[aria-label="Main"] button[aria-label="Tasks"]'))).click();
+
+  // A reminder a few seconds away: delivered at its time, shown in Atlas with Done and Snooze.
+  const t = await invoke("todo_create", { task: { title: "Stretch and drink water", remind_at: soon(4) } });
+  assert.ok(t.id, JSON.stringify(t));
+  const toast = await find(toastOf("Stretch and drink water"), 30000);
+  await shot("19-reminder-toast");
+  const delivered = (await jobs()).find((j) => j.subject === t.id);
+  assert.equal(delivered.status, "done");
+  assert.equal(delivered.kind, "reminder");
+  await driver.executeScript("arguments[0].click()", await toast.findElement(By.xpath(".//button[normalize-space()='Snooze 10 min']")));
+  await driver.wait(async () => {
+    const r = (await invoke("todo_detail", { id: t.id })).task.remind_at;
+    return r && Date.parse(r) - Date.now() > 8 * 60 * 1000;
+  }, 5000, "snoozed ten minutes");
+  await driver.wait(async () => (await jobs()).some((j) => j.subject === t.id && j.status === "pending"), 10000, "the snoozed reminder is scheduled again");
+
+  // A reminder set for three days ago was never "missed": no job, no notice, no noise.
+  // (Reminders that fall due while Atlas is closed are grouped into one notice: covered by the core tests.)
+  const old = await invoke("todo_create", { task: { title: "Return the library books", remind_at: new Date(Date.now() - 3 * 86400000).toISOString() } });
+  await driver.sleep(5000);
+  assert.equal((await jobs()).some((j) => j.subject === old.id), false, "nothing scheduled for a moment long past");
+  const notices = (await invoke("notifications_list", { limit: 20 })).items;
+  assert.equal(notices.some((n) => n.detail.startsWith("Return the library books") || n.title.includes("missed")), false);
+
+  // The global pause holds a due reminder; resuming delivers it (it is within the grace period).
+  await go(",");
+  await (await find(exactButton("Reminders & schedule"))).click();
+  await find(By.css("[data-schedule-settings]"));
+  await (await find(By.css('[role=switch][aria-label="Pause proactive activity"]'))).click();
+  await driver.wait(async () => (await invoke("settings_get")).schedule.paused === true, 5000);
+  const held = await invoke("todo_create", { task: { title: "Held while paused", remind_at: soon(2) } });
+  await driver.sleep(6000);
+  assert.equal((await jobs()).find((j) => j.subject === held.id)?.status, "pending", "nothing runs while paused");
+  await waitText("Paused");
+  await shot("19b-schedule-settings-paused");
+  await (await find(By.css('[role=switch][aria-label="Pause proactive activity"]'))).click();
+  await driver.wait(async () => (await jobs()).find((j) => j.subject === held.id)?.status === "done", 15000, "delivered after resuming");
+  await find(By.css('[data-job="reminder"][data-job-status="done"]'));
+  await find(By.css('[data-job="reminder"][data-job-status="pending"]'));
+  await shot("19c-schedule-history");
+  const audit = await invoke("recent_errors", { limit: 50 });
+  assert.ok(Array.isArray(audit));
+
+  // The core refuses bad schedule settings.
+  const s = await invoke("settings_get");
+  assert.ok((await invoke("settings_update", { settings: { ...s, schedule: { ...s.schedule, deadline_hour: 30 } } })).__error);
+  assert.ok((await invoke("todo_snooze", { id: t.id, minutes: 0 })).__error);
+
+  // Tidy up so later tests start quiet.
+  for (const x of [t, old, held]) await invoke("todo_delete", { id: x.id });
+  await invoke("notifications_clear");
+  await driver.wait(() => gone("[data-sonner-toast]"), 40000).catch(() => {});
+});
+
 test("desktop presence: nothing is on by default, the shortcut is validated and never duplicated, notifications need permission, and the bell lists them", async () => {
   const s0 = await invoke("settings_get");
   assert.equal(s0.desktop.shortcut_enabled, false);

@@ -7,6 +7,7 @@ import { api, AtlasError } from "@/lib/bridge";
 import { cn } from "@/lib/format";
 import { useAtlasQuery } from "@/lib/query";
 import type { QuickPreview, Todo, TodoDetail, TodoPatch, TodoView } from "@/lib/schemas";
+import { useUi } from "@/state/ui";
 import { dueLabel, groupByDay, REPEAT_LABEL } from "./dates";
 
 const VIEWS: { value: TodoView; label: string }[] = [
@@ -243,6 +244,14 @@ export function TasksPage() {
   const [line, setLine] = useState("");
   const [preview, setPreview] = useState<QuickPreview | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  // Opened from a reminder or the bell: show that task.
+  const focus = useUi((u) => u.focusTodoId);
+  useEffect(() => {
+    if (focus) {
+      setOpenId(focus);
+      useUi.setState({ focusTodoId: null });
+    }
+  }, [focus]);
   const [deleting, setDeleting] = useState<Todo | null>(null);
   const entry = useRef<HTMLInputElement>(null);
 

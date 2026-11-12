@@ -63,6 +63,8 @@ export const api = {
   todoPostpone: (id: string, days: number) => call("todo_postpone", { id, days }, S.TodoSchema),
   todoDelete: (id: string) => call("todo_delete", { id }, z.number()),
   todoOverview: () => call("todo_overview", {}, S.TodoOverviewSchema),
+  todoSnooze: (id: string, minutes: number) => call("todo_snooze", { id, minutes }, S.TodoSchema),
+  scheduleJobs: (limit = 100) => call("schedule_jobs", { limit }, S.ScheduleSchema),
 
   desktopStatus: () => call("desktop_status", {}, S.DesktopStatusSchema),
   notifications: (limit = 50) => call("notifications_list", { limit }, S.NotificationListSchema),

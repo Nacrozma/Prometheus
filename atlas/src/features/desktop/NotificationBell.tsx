@@ -7,7 +7,7 @@ import { useAtlasQuery } from "@/lib/query";
 import type { AtlasNotification } from "@/lib/schemas";
 import { useUi } from "@/state/ui";
 
-const CATEGORY: Record<AtlasNotification["category"], string> = { approval: "Approval", reply: "Reply", mission: "Mission", error: "Problem", test: "Test" };
+const CATEGORY: Record<AtlasNotification["category"], string> = { approval: "Approval", reply: "Reply", mission: "Mission", error: "Problem", reminder: "Reminder", deadline: "Due today", briefing: "Briefing", test: "Test" };
 
 function when(iso: string): string {
   const t = new Date(iso);
@@ -25,6 +25,8 @@ export function openTarget(target: string) {
   if (target.startsWith("conversation:")) ui.openConversation(target.slice("conversation:".length));
   else if (target.startsWith("mission:")) ui.navigate("siblings");
   else if (target === "approvals") ui.navigate("mission");
+  else if (target.startsWith("todo:")) ui.openTodo(target.slice("todo:".length));
+  else if (target === "tasks") ui.navigate("tasks");
 }
 
 /** The bell in the rail: Atlas's own notification list. It works whether or not system notifications are on. */

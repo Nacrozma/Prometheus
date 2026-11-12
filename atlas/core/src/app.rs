@@ -238,7 +238,7 @@ impl Atlas {
         let s = self.settings()?;
         let stale = self.schedule_synced_at.lock().map(|t| t.is_none_or(|t| t.elapsed() > Duration::from_secs(30))).unwrap_or(true);
         if self.schedule_dirty.swap(false, std::sync::atomic::Ordering::SeqCst) || stale {
-            crate::scheduler::sync(&self.db, &s.schedule, Self::local_now())?;
+            crate::scheduler::sync(&self.db, &s.schedule, Self::local_now(), chrono::Utc::now())?;
             if let Ok(mut t) = self.schedule_synced_at.lock() {
                 *t = Some(std::time::Instant::now());
             }

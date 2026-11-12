@@ -1,7 +1,9 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect } from "react";
+import { toast } from "sonner";
 import { audio } from "@/features/voice/audioEngine";
 import { api } from "@/lib/bridge";
+import { onChange } from "@/lib/events";
 import { useUi } from "@/state/ui";
 import { useVoice } from "@/state/voice";
 
@@ -42,6 +44,38 @@ export function PresenceProvider() {
       gone = true;
       off?.();
     };
+  }, []);
+
+  // A reminder that arrives while Atlas is open is shown right here, with Done and Snooze.
+  useEffect(() => {
+    const since = new Date().toISOString();
+    const shown = new Set<string>();
+    const check = () =>
+      void api
+        .notifications(10)
+        .then(({ items }) => {
+          for (const n of items) {
+            if (n.read_at || n.created_at < since || shown.has(n.id) || (n.category !== "reminder" && n.category !== "deadline")) continue;
+            shown.add(n.id);
+            const id = n.target.startsWith("todo:") ? n.target.slice(5) : null;
+            const read = () => void api.notificationsMarkRead({ id: n.id }).catch(() => {});
+            toast(n.title, {
+              id: `reminder-${n.id}`,
+              description: n.detail,
+              duration: 30_000,
+              ...(id
+                ? {
+                    action: { label: "Done", onClick: () => (read(), void api.todoSetStatus(id, "done").catch(() => toast.error("The task could not be completed"))) },
+                    cancel: { label: "Snooze 10 min", onClick: () => (read(), void api.todoSnooze(id, 10).catch(() => toast.error("The reminder could not be snoozed"))) },
+                  }
+                : { action: { label: "Open tasks", onClick: () => (read(), useUi.getState().navigate("tasks")) } }),
+            });
+          }
+        })
+        .catch(() => {});
+    return onChange((topic) => {
+      if (topic === "notifications") check();
+    });
   }, []);
 
   // Opening a conversation clears the notices about it.

@@ -19,6 +19,7 @@ export type SettingsSection =
   | "companion"
   | "voice"
   | "desktop"
+  | "schedule"
   | "models"
   | "routing"
   | "forge"
@@ -42,6 +43,9 @@ interface UiState {
   focusTaskId: string | null;
   focusMapNode: string | null;
   forgeProjectId: string | null;
+  /** A task to open on the Tasks page (from a reminder). */
+  focusTodoId: string | null;
+  openTodo: (id: string | null) => void;
   setForgeProject: (id: string | null) => void;
   navigate: (route: Route) => void;
   openSettings: (section: SettingsSection) => void;
@@ -62,6 +66,8 @@ export const useUi = create<UiState>((set) => ({
   focusTaskId: null,
   focusMapNode: null,
   forgeProjectId: null,
+  focusTodoId: null,
+  openTodo: (focusTodoId) => set({ route: "tasks", focusTodoId, paletteOpen: false }),
   introReplay: false,
   setIntroReplay: (introReplay) => set({ introReplay }),
   setForgeProject: (forgeProjectId) => set({ forgeProjectId }),
