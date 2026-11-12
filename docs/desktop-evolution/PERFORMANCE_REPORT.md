@@ -25,7 +25,8 @@ including PowerShell overhead; individual timings were not separated.
 | Artifact | Size |
 |---|---|
 | Linux one-folder build (local) | 318 MB (unstripped; includes Qt) |
-| Windows installer / installed folder | see RELEASE_CHECKLIST (from the CI build report) |
+| Windows installer | 49.4 MB (LZMA2) |
+| Windows installed folder | 164.8 MB |
 
 ## Notes and next steps
 * Software GL is the worst case. On machines without a usable GPU, Settings → Reduce motion makes

@@ -6,8 +6,8 @@ it never creates a GitHub release.
 ## Gates (0.1.0 status)
 | # | Gate | Status |
 |---|---|---|
-| 1 | Full test suite passes on Linux | ✅ 466 passed, 2 skipped (this environment) |
-| 2 | Full test suite passes on Windows | ✅ `tests-windows` job (see the run linked in NEXT_SESSION) |
+| 1 | Full test suite passes on Linux | ✅ 467 passed, 2 skipped (this environment) |
+| 2 | Full test suite passes on Windows | ✅ `tests-windows` job (run 4) |
 | 3 | PyInstaller build; no personal state or keys in the bundle | ✅ CI check |
 | 4 | Packaged app self-test (all pages, gated tools, a real calculation) | ✅ CI + local Linux frozen build |
 | 5 | Packaged child-Python mode (run_code / Forge tests) | ✅ CI + local |
@@ -25,10 +25,10 @@ it never creates a GitHub release.
 |---|---|
 | Version | 0.1.0 |
 | Installer | `Prometheus-Setup-0.1.0-x64-unsigned.exe` |
-| Size | INSTALLER_SIZE |
-| SHA-256 | INSTALLER_SHA |
-| Installed folder | INSTALLED_SIZE |
-| Built by | workflow run CI_RUN |
+| Size | 49.4 MB |
+| SHA-256 | `c168c1e2ff5526e26127e61f9fc21abc93ec0e56eff5b3744a8971c2f5d019a7` |
+| Installed folder | 164.8 MB |
+| Built by | [prometheus-desktop run 4](https://github.com/Nacrozma/Prometheus/actions/runs/43269570303) (artifact `prometheus-desktop-windows-x64-unsigned`, kept 14 days) |
 
 ## To publish (after gates 11–13)
 1. Bump `app/__init__.py:__version__` and `APP_VERSION` in the workflow; push; wait for green.

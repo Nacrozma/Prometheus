@@ -5,7 +5,7 @@ Prometheus Desktop 0.1.0 · Windows 10/11 64-bit · about 10 minutes.
 
 ## 1. Get the installer
 The installer is built by the `prometheus-desktop` workflow on GitHub Actions and attached to the run
-as the artifact **prometheus-desktop-windows-x64-unsigned** (kept 14 days). It contains:
+as the artifact **prometheus-desktop-windows-x64-unsigned** (kept 14 days; current build: [run 4](https://github.com/Nacrozma/Prometheus/actions/runs/43269570303), 49.4 MB, SHA-256 `c168c1e2ff5526e26127e61f9fc21abc93ec0e56eff5b3744a8971c2f5d019a7`). It contains:
 `Prometheus-Setup-0.1.0-x64-unsigned.exe`, `SHA256SUMS.txt`, `build-report.txt` and the self-test
 reports. It has **not** been published as a release.
 
