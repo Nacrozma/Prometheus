@@ -65,6 +65,7 @@ export const api = {
   todoOverview: () => call("todo_overview", {}, S.TodoOverviewSchema),
   todoSnooze: (id: string, minutes: number) => call("todo_snooze", { id, minutes }, S.TodoSchema),
   scheduleJobs: (limit = 100) => call("schedule_jobs", { limit }, S.ScheduleSchema),
+  commandCenter: () => call("command_center", {}, S.CommandCenterSchema),
 
   desktopStatus: () => call("desktop_status", {}, S.DesktopStatusSchema),
   notifications: (limit = 50) => call("notifications_list", { limit }, S.NotificationListSchema),

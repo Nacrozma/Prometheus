@@ -101,6 +101,12 @@ export const SettingsSchema = z.object({
   schedule: z
     .object({ paused: z.boolean(), deadline_notices: z.boolean(), deadline_hour: z.number(), missed_grace_minutes: z.number() })
     .default({ paused: false, deadline_notices: true, deadline_hour: 9, missed_grace_minutes: 720 }),
+  briefing: z
+    .object({ enabled: z.boolean(), time: z.string(), include_overdue: z.boolean(), include_upcoming: z.boolean(), include_missions: z.boolean(), include_recent: z.boolean() })
+    .default({ enabled: false, time: "08:00", include_overdue: true, include_upcoming: true, include_missions: true, include_recent: true }),
+  home: z
+    .object({ show_briefing: z.boolean(), show_missions: z.boolean(), show_conversations: z.boolean(), show_accomplished: z.boolean(), show_status: z.boolean() })
+    .default({ show_briefing: true, show_missions: true, show_conversations: true, show_accomplished: true, show_status: true }),
   default_project_id: z.string().nullable(),
   forge: z.object({ command_timeout_secs: z.number(), max_output_kb: z.number() }),
   first_launch: z.object({ completed_at: z.string().nullable() }),
@@ -839,3 +845,26 @@ export const ScheduleSchema = z.object({
   jobs: z.array(JobSchema),
 });
 export type Schedule = z.infer<typeof ScheduleSchema>;
+
+// ---------- Command Center ----------
+export const CommandCenterSchema = z.object({
+  briefing_text: z.string(),
+  briefing: z.object({
+    date: z.string(),
+    weekday: z.string(),
+    overdue: z.array(TodoSchema),
+    today: z.array(TodoSchema),
+    upcoming: z.array(TodoSchema),
+    reminders_today: z.array(z.tuple([z.string(), z.string()])),
+    missions: z.array(z.object({ id: z.string(), title: z.string(), state: z.string() })),
+    approvals_pending: z.number(),
+    recent_conversations: z.array(z.object({ id: z.string(), title: z.string(), updated_at: z.string() })),
+    accomplished: z.array(TodoSchema),
+    counts: z.object({ open: z.number(), overdue: z.number(), today: z.number(), week: z.number(), done_today: z.number(), done_week: z.number() }),
+    notes: z.array(z.string()),
+  }),
+  schedule: z.object({ pending: z.number(), done: z.number(), missed: z.number(), failed: z.number(), next_run_at: z.string().nullable() }),
+  paused: z.boolean(),
+  unread_notifications: z.number(),
+});
+export type CommandCenter = z.infer<typeof CommandCenterSchema>;
