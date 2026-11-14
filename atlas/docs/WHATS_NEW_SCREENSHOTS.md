@@ -100,11 +100,17 @@ coming up, recently finished work and system status, all from Atlas's own data:
 |---|---|
 | ![Start focus](screenshots/21-focus-start.png) | ![Focus running](screenshots/21b-focus-running.png) |
 
-When it ends, one summary says how long you focused and what waited (held notifications are in the
-bell; approvals and failures were never held):
+When it ends, one summary says how long you focused and what waited, naming the task a reminder was
+for (held notifications are in the bell; approvals and failures were never held):
 
 ![Focus summary](screenshots/21c-focus-summary.png)
 
-After time away, Home shows what Atlas recorded while it was closed. Nothing resumes by itself:
+After time away, Home shows what Atlas recorded while it was closed. This screenshot was taken after
+a real restart of the app: a file write was waiting for approval when Atlas closed, so it is listed
+as interrupted with **Open**. It was not resumed and the file was not written:
 
 ![While you were away](screenshots/22-recap.png)
+
+All four were captured by the end-to-end suite from the real app (automated-test build, scripted
+model). The only stand-in is the two hours away, which the test build simulates by moving Atlas's
+recorded "last active" time back before start-up.

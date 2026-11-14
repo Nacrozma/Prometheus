@@ -67,7 +67,7 @@ impl ChatProvider for Scripted {
                 _ => (String::new(), true),
             };
             let t = if result.1 { format!("The action did not complete: {}", result.0) } else { format!("Done. Tool result: {}", result.0) };
-            return Ok(stream(reply(t), sink, &cancel).await?);
+            return stream(reply(t), sink, &cancel).await;
         }
         if let Some(expr) = lower.split("calculate").nth(1) {
             return Ok(call("calc_evaluate", json!({"expression": expr.trim()})));
@@ -138,11 +138,11 @@ pub fn seed(atlas: &Atlas) {
             let _ = atlas.forge_add_project("e2e-sample", &root, Some("git --version"), None);
         }
     }
-    if atlas.providers().map(|p| p.is_empty()).unwrap_or(false) {
-        if let Ok(p) = atlas.add_provider(ProviderKind::Mock, "E2E scripted provider", "http://127.0.0.1:1", Some("scripted")) {
-            // Run the real connection test against the scripted provider so it reports "connected".
-            let _ = tauri::async_runtime::block_on(atlas.test_provider(&p.id));
-        }
+    if atlas.providers().map(|p| p.is_empty()).unwrap_or(false)
+        && let Ok(p) = atlas.add_provider(ProviderKind::Mock, "E2E scripted provider", "http://127.0.0.1:1", Some("scripted"))
+    {
+        // Run the real connection test against the scripted provider so it reports "connected".
+        let _ = tauri::async_runtime::block_on(atlas.test_provider(&p.id));
     }
 }
 

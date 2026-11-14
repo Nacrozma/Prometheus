@@ -55,7 +55,10 @@ location for the manifest.
 
 ## Release checklist
 
-1. `pnpm check` (typecheck, lint, unit tests, Rust tests) and `tests/e2e/run.sh` pass.
+1. `pnpm check` (typecheck, lint, unit tests, Rust tests) and `tests/e2e/run.sh` pass (both phases:
+   the main suite and the restart phase).
+1a. `tests/release/no-test-hooks.sh <production binary>` passes: no test-only commands in the build
+   (CI and the release workflow run it after each production build).
 2. Bump versions, update CHANGELOG.
 3. Build on each target OS; install and smoke-test (first-run, a conversation with a real provider, one approval).
 4. Sign/notarize where credentials exist; otherwise label builds unsigned.

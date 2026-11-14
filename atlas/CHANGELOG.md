@@ -55,8 +55,15 @@
 - The recap: a second time away before reading the first recap extends it instead of replacing it; an
   unreadable stored time means no recap (never "everything"); a clock set back no longer stops the
   "last active" mark from moving.
-- The test-only "time away" stand-in is compiled only into the automated-test build, and a unit test
-  fails if any test command loses that gate.
+- The test-only "time away" stand-in is compiled only into the automated-test build. A unit test
+  fails if any test command loses that gate, and CI checks each compiled production binary for the
+  test-only commands.
+- The Focus bar countdown showed too much time left for its first second (it kept the clock from when
+  the bar was first mounted). It now starts at the session's real length.
+- The Focus bar could squeeze the task title to nothing (it was laid out in half the window) and sat
+  over the page header. It is now a strip at the top of the page column that never covers content.
+- The Focus summary and the recap said "Reminder" without naming the task; they now say
+  "Reminder: <task>".
 - Database schema 5 (tasks, scheduled jobs; notifications accept new kinds). The database is copied to
   `atlas.pre-v5.bak` before upgrading. All existing data is kept (tested).
 - Toast descriptions use a higher-contrast colour (accessibility audit).
