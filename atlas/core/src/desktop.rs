@@ -338,8 +338,9 @@ impl NotificationCenter {
             held: false,
         };
         // Focus Mode holds what can wait; approvals and failures always come through.
-        if !crate::focus::passes_through(n.category) && crate::focus::is_active(&self.db)? {
-            out.held = true;
+        // (Checked on this connection: the database lock is already held here.)
+        if !crate::focus::passes_through(n.category) {
+            out.held = conn.query_row("SELECT EXISTS (SELECT 1 FROM focus_sessions WHERE ended_at IS NULL)", [], |r| r.get(0))?;
         }
         // Permission is decided here, in the core, from the stored settings.
         let allowed = s.system && s.category_on(n.category);
@@ -351,6 +352,8 @@ impl NotificationCenter {
         {
             out.shown_by_system = nf.show(&Self::system_notice(&out, s));
         }
+        // The connection (and so the database) stays locked from the Focus check to this write, so a
+        // session cannot end in between and leave this notice held after its release.
         conn.execute(
             "INSERT INTO notifications (id, category, title, detail, target, dedupe_key, created_at, shown_by_system, held) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![out.id, out.category.as_str(), out.title, out.detail, out.target, n.dedupe_key, out.created_at, out.shown_by_system, out.held],
@@ -414,14 +417,17 @@ impl NotificationCenter {
 
     /// End of a Focus session: what it held is no longer held. Returns the titles, newest first.
     pub fn release_held(&self) -> Result<Vec<String>> {
-        let conn = self.db.conn()?;
+        let mut conn = self.db.conn()?;
+        // One transaction: every notice counted in the summary is the one released, none twice.
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let titles: Vec<String> = {
-            let mut st = conn.prepare("SELECT title FROM notifications WHERE held = 1 ORDER BY created_at DESC, rowid DESC")?;
+            let mut st = tx.prepare("SELECT title FROM notifications WHERE held = 1 ORDER BY created_at DESC, rowid DESC")?;
             let rows = st.query_map([], |r| r.get(0))?;
             rows.collect::<std::result::Result<_, _>>()?
         };
+        tx.execute("UPDATE notifications SET held = 0 WHERE held = 1", [])?;
+        tx.commit()?;
         if !titles.is_empty() {
-            conn.execute("UPDATE notifications SET held = 0 WHERE held = 1", [])?;
             notify(&self.bus, Topic::Notifications, None);
         }
         Ok(titles)
@@ -452,5 +458,32 @@ mod tests {
         assert!(DesktopSettings::default().validate().is_ok());
         let d = DesktopSettings::default();
         assert!(d.tray && !d.close_to_tray && !d.shortcut_enabled && !d.notifications.system, "nothing intrusive is on by default");
+    }
+
+    /// Regression: `raise` used to take the database lock again (through `focus::is_active`) while
+    /// already holding it, which hung the first notice raised during a Focus session. Run on a
+    /// thread with a deadline so a regression fails instead of hanging the suite.
+    #[test]
+    fn raising_during_focus_does_not_deadlock_and_holds_and_releases_once() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let db = Arc::new(Db::open_in_memory().unwrap());
+            let center = NotificationCenter::new(db.clone(), Arc::new(crate::events::NullBus));
+            let s = NotificationSettings::default();
+            crate::focus::start(&db, 25, None, "", chrono::Utc::now()).unwrap();
+            let n = |c, t| NewNotification { category: c, title: t, detail: "", target: "", dedupe_key: "", only_if_away: false };
+            let held = center.raise(&s, n(Category::Reminder, "Stretch")).unwrap().unwrap().held;
+            let approval = center.raise(&s, n(Category::Approval, "Approve a command")).unwrap().unwrap().held;
+            crate::focus::end(&db, "stopped", chrono::Utc::now()).unwrap();
+            let first = center.release_held().unwrap();
+            let second = center.release_held().unwrap();
+            let after = center.raise(&s, n(Category::Reminder, "After")).unwrap().unwrap().held;
+            tx.send((held, approval, first, second, after)).unwrap();
+        });
+        let (held, approval, first, second, after) = rx.recv_timeout(std::time::Duration::from_secs(20)).expect("raise must not deadlock during Focus");
+        assert!(held && !approval, "reminder held, approval through");
+        assert_eq!(first, vec!["Stretch".to_string()]);
+        assert!(second.is_empty(), "released once, not twice");
+        assert!(!after, "nothing is held once the session has ended");
     }
 }

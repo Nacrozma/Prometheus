@@ -94,10 +94,19 @@ pub fn end(db: &Db, outcome: &str, now_utc: DateTime<Utc>) -> Result<Option<Focu
 }
 
 /// Ends the running session when its time is up. Returns the session that just completed.
+/// A session that ran out while Atlas was closed (or asleep) ends at its planned end, so the time
+/// reported is the time it was set for, not the time until Atlas next looked.
 pub fn tick(db: &Db, now_utc: DateTime<Utc>) -> Result<Option<FocusSession>> {
-    match active(db)? {
-        Some(s) if DateTime::parse_from_rfc3339(&s.planned_end).map(|e| e.with_timezone(&Utc) <= now_utc).unwrap_or(true) => end(db, "completed", now_utc),
-        _ => Ok(None),
+    let Some(s) = active(db)? else { return Ok(None) };
+    match DateTime::parse_from_rfc3339(&s.planned_end).map(|e| e.with_timezone(&Utc)) {
+        Ok(planned) if planned <= now_utc => {
+            // Never before it started (a clock set back while it ran).
+            let started = DateTime::parse_from_rfc3339(&s.started_at).map(|t| t.with_timezone(&Utc)).unwrap_or(planned);
+            end(db, "completed", planned.max(started))
+        }
+        Ok(_) => Ok(None),
+        // An unreadable end time cannot be waited for: end it now.
+        Err(_) => end(db, "completed", now_utc),
     }
 }
 
@@ -173,6 +182,18 @@ mod tests {
         let s = tick(&db, t0 + Duration::minutes(5)).unwrap().unwrap();
         assert_eq!(s.outcome, "completed");
         assert!(tick(&db, t0 + Duration::minutes(6)).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_session_that_ran_out_while_closed_ends_at_its_planned_end() {
+        let db = db();
+        let t0 = Utc::now() - Duration::hours(6);
+        start(&db, 25, None, "", t0).unwrap();
+        // Atlas was closed; the next upkeep tick is hours later.
+        let s = tick(&db, t0 + Duration::hours(6)).unwrap().unwrap();
+        assert_eq!(s.outcome, "completed");
+        assert_eq!(minutes_spent(&s), 25, "the time set, not the time until Atlas looked again");
+        assert_eq!(s.ended_at.as_deref(), Some(s.planned_end.as_str()));
     }
 
     #[test]

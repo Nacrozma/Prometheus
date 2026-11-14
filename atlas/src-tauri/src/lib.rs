@@ -73,6 +73,8 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
 
             #[cfg(feature = "e2e")]
+            e2e::before_start(&dir);
+            #[cfg(feature = "e2e")]
             let (secrets, factory) = e2e::services();
             #[cfg(not(feature = "e2e"))]
             let (secrets, factory): (atlas_core::credentials::SharedSecrets, Option<Arc<dyn atlas_core::providers::ProviderFactory>>) =

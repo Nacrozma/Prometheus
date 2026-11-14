@@ -41,8 +41,22 @@
   resumed by itself. Dismiss hides it until the next time away.
 
 ### Changed
-- Database schema 6 (Focus sessions; notifications can be held). Upgrades from schema 5 keep every
-  notification (tested).
+- Database schema 6 (Focus sessions; notifications can be held). Upgrades from every earlier schema
+  keep settings and notifications; an interrupted upgrade rolls back to schema 5 and is retried on the
+  next start (tested).
+
+### Fixed (found while verifying Focus Mode, before release)
+- A notification raised during a Focus session could freeze Atlas: the notification centre asked for
+  the database lock it was already holding. The check now runs on the same connection, under the same
+  lock as the write, so a session cannot end between the check and the write either.
+- A Focus session that ran out while Atlas was closed reported the whole time Atlas was closed as
+  focus time. It now ends at its planned end.
+- Releasing held notifications is one transaction, so the summary counts exactly what was released.
+- The recap: a second time away before reading the first recap extends it instead of replacing it; an
+  unreadable stored time means no recap (never "everything"); a clock set back no longer stops the
+  "last active" mark from moving.
+- The test-only "time away" stand-in is compiled only into the automated-test build, and a unit test
+  fails if any test command loses that gate.
 - Database schema 5 (tasks, scheduled jobs; notifications accept new kinds). The database is copied to
   `atlas.pre-v5.bak` before upgrading. All existing data is kept (tested).
 - Toast descriptions use a higher-contrast colour (accessibility audit).

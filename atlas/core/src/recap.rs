@@ -51,23 +51,56 @@ pub fn on_start(db: &Db, now_utc: DateTime<Utc>) -> Result<()> {
         && let Ok(t) = DateTime::parse_from_rfc3339(&last)
         && now_utc - t.with_timezone(&Utc) >= Duration::minutes(AWAY_MINUTES)
     {
-        set_meta(db, "recap_since", &last)?;
-        set_meta(db, "recap_dismissed", "")?;
+        // A recap not yet dismissed keeps its earlier start: the new time away is added to it, so
+        // nothing from the first absence drops out and the owner sees one recap, not a second one.
+        let pending = current_since(db)?.is_some();
+        if !pending {
+            set_meta(db, "recap_since", &ts(t.with_timezone(&Utc)))?;
+            set_meta(db, "recap_dismissed", "")?;
+        }
     }
     set_meta(db, "last_active_at", &ts(now_utc))
 }
 
 /// While running: keep the "last active" mark fresh (at most one write a minute).
 pub fn mark_active(db: &Db, now_utc: DateTime<Utc>) -> Result<()> {
+    // Refresh when the mark is a minute old, or when it is ahead of now (the clock was set back).
     let stale = ts(now_utc - Duration::seconds(MARK_EVERY_SECS));
-    db.conn()?.execute("UPDATE atlas_meta SET value = ?1 WHERE key = 'last_active_at' AND value < ?2", [ts(now_utc), stale])?;
+    let now_s = ts(now_utc);
+    db.conn()?.execute("UPDATE atlas_meta SET value = ?1 WHERE key = 'last_active_at' AND (value < ?2 OR value > ?1)", [now_s, stale])?;
     Ok(())
 }
 
-/// Start a recap from `since` (used by the automated-test build to stand in for real time away).
+/// Start a recap from `since`. Automated tests only (it stands in for real time away), so it is
+/// not compiled into the desktop app.
+#[cfg(any(test, feature = "test-support"))]
 pub fn begin_at(db: &Db, since: DateTime<Utc>) -> Result<()> {
     set_meta(db, "recap_since", &ts(since))?;
     set_meta(db, "recap_dismissed", "")
+}
+
+/// Automated tests only: make it as if Atlas had been closed `minutes` longer than it really was.
+/// The "last active" mark and any running Focus session move back by that much. The e2e build
+/// calls this before start-up, so the real restart path (task recovery, the recap, a Focus session
+/// that ran out while closed) is what gets tested. Not compiled into the desktop app.
+#[cfg(any(test, feature = "test-support"))]
+pub fn shift_back_for_test(db: &Db, minutes: i64) -> Result<()> {
+    let back = |v: &str| DateTime::parse_from_rfc3339(v).map(|t| ts(t.with_timezone(&Utc) - Duration::minutes(minutes))).ok();
+    if let Some(last) = meta(db, "last_active_at")?.as_deref().and_then(back) {
+        set_meta(db, "last_active_at", &last)?;
+    }
+    let conn = db.conn()?;
+    let open: Vec<(String, String, String)> = {
+        let mut st = conn.prepare("SELECT id, started_at, planned_end FROM focus_sessions WHERE ended_at IS NULL")?;
+        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.collect::<std::result::Result<_, _>>()?
+    };
+    for (id, a, b) in open {
+        if let (Some(a), Some(b)) = (back(&a), back(&b)) {
+            conn.execute("UPDATE focus_sessions SET started_at = ?1, planned_end = ?2 WHERE id = ?3", [a, b, id])?;
+        }
+    }
+    Ok(())
 }
 
 pub fn dismiss(db: &Db) -> Result<()> {
@@ -76,11 +109,20 @@ pub fn dismiss(db: &Db) -> Result<()> {
 
 /// The recap to show, or `None` when there is none (never away long enough, or dismissed).
 pub fn current(db: &Db) -> Result<Option<Recap>> {
+    match current_since(db)? {
+        Some(since) => build(db, &since).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// The start of the recap to show, normalised; `None` when there is none, it was dismissed, or the
+/// stored start cannot be read (a damaged value is treated as no recap, never as "everything").
+fn current_since(db: &Db) -> Result<Option<String>> {
     let Some(since) = meta(db, "recap_since")? else { return Ok(None) };
     if meta(db, "recap_dismissed")?.is_some_and(|d| !d.is_empty()) {
         return Ok(None);
     }
-    build(db, &since).map(Some)
+    Ok(DateTime::parse_from_rfc3339(&since).ok().map(|t| ts(t.with_timezone(&Utc))))
 }
 
 pub fn build(db: &Db, since: &str) -> Result<Recap> {
@@ -134,5 +176,60 @@ mod tests {
         assert!(r.empty);
         dismiss(&db).unwrap();
         assert!(current(&db).unwrap().is_none(), "dismissed");
+    }
+
+    #[test]
+    fn a_second_absence_extends_the_recap_instead_of_replacing_it() {
+        let db = Db::open_in_memory().unwrap();
+        let t0 = Utc::now() - Duration::hours(10);
+        on_start(&db, t0).unwrap();
+        on_start(&db, t0 + Duration::hours(2)).unwrap();
+        assert_eq!(current(&db).unwrap().unwrap().since, ts(t0));
+        // Closed again without reading it, back three hours later: still one recap, from t0.
+        on_start(&db, t0 + Duration::hours(5)).unwrap();
+        assert_eq!(current(&db).unwrap().unwrap().since, ts(t0));
+        // Once dismissed, the next absence starts a fresh one.
+        dismiss(&db).unwrap();
+        on_start(&db, t0 + Duration::hours(9)).unwrap();
+        assert_eq!(current(&db).unwrap().unwrap().since, ts(t0 + Duration::hours(5)));
+    }
+
+    #[test]
+    fn the_test_stand_in_moves_the_mark_and_a_running_focus_session_back() {
+        let db = Db::open_in_memory().unwrap();
+        let t0 = Utc::now();
+        on_start(&db, t0).unwrap();
+        crate::focus::start(&db, 15, None, "", t0).unwrap();
+        shift_back_for_test(&db, 120).unwrap();
+        assert_eq!(meta(&db, "last_active_at").unwrap().unwrap(), ts(t0 - Duration::minutes(120)));
+        let f = crate::focus::active(&db).unwrap().unwrap();
+        assert_eq!(f.started_at, ts(t0 - Duration::minutes(120)));
+        assert_eq!(f.planned_end, ts(t0 - Duration::minutes(105)));
+        on_start(&db, t0).unwrap();
+        assert_eq!(current(&db).unwrap().unwrap().since, ts(t0 - Duration::minutes(120)));
+    }
+
+    #[test]
+    fn damaged_records_and_clock_changes_are_safe() {
+        let db = Db::open_in_memory().unwrap();
+        let now_utc = Utc::now();
+        // An unreadable "last active" mark: no recap, and the mark is repaired.
+        set_meta(&db, "last_active_at", "not a time").unwrap();
+        on_start(&db, now_utc).unwrap();
+        assert!(current(&db).unwrap().is_none());
+        assert_eq!(meta(&db, "last_active_at").unwrap().unwrap(), ts(now_utc));
+        // An unreadable recap start is no recap (never "everything since the beginning").
+        set_meta(&db, "recap_since", "garbage").unwrap();
+        set_meta(&db, "recap_dismissed", "").unwrap();
+        assert!(current(&db).unwrap().is_none());
+        // The clock was set back: a mark in the future is not "away", and running pulls it back.
+        set_meta(&db, "recap_since", "").unwrap();
+        set_meta(&db, "recap_dismissed", "x").unwrap();
+        set_meta(&db, "last_active_at", &ts(now_utc + Duration::days(2))).unwrap();
+        on_start(&db, now_utc).unwrap();
+        assert!(current(&db).unwrap().is_none());
+        set_meta(&db, "last_active_at", &ts(now_utc + Duration::days(2))).unwrap();
+        mark_active(&db, now_utc).unwrap();
+        assert_eq!(meta(&db, "last_active_at").unwrap().unwrap(), ts(now_utc));
     }
 }

@@ -178,3 +178,16 @@ pub fn webview2_automation<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
     let _ = std::fs::write(std::env::temp_dir().join("atlas-e2e-startup.txt"), report);
     builder
 }
+
+/// Stand-in for time away across a real restart: when the previous run left `e2e-away-minutes` in
+/// the data folder, Atlas starts as if it had been closed that many minutes longer (see
+/// `recap::shift_back_for_test`). The file is removed once read, so it applies to one start only.
+pub fn before_start(dir: &std::path::Path) {
+    let marker = dir.join("e2e-away-minutes");
+    let Ok(text) = std::fs::read_to_string(&marker) else { return };
+    let _ = std::fs::remove_file(&marker);
+    let (Ok(minutes), Ok(db)) = (text.trim().parse::<i64>(), atlas_core::storage::Db::open(&dir.join("atlas.db"))) else { return };
+    if let Err(e) = atlas_core::recap::shift_back_for_test(&db, minutes) {
+        eprintln!("[atlas e2e] could not stand in for time away: {e}");
+    }
+}

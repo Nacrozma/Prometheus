@@ -313,7 +313,9 @@ impl Atlas {
         crate::recap::current(&self.db)
     }
 
-    /// Automated tests only: behave as if Atlas had been away since `minutes` ago.
+    /// Automated tests only: behave as if Atlas had been away since `minutes` ago. Not compiled
+    /// into the desktop app (only with `test-support`, which the e2e build turns on).
+    #[cfg(any(test, feature = "test-support"))]
     pub fn recap_begin_minutes_ago(&self, minutes: i64) -> Result<()> {
         crate::recap::begin_at(&self.db, chrono::Utc::now() - chrono::Duration::minutes(minutes))?;
         notify(&self.bus, Topic::Notifications, None);

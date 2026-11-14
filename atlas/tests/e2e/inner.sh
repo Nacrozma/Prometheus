@@ -18,3 +18,5 @@ DRIVER=$!
 trap 'kill $DRIVER $HTTP 2>/dev/null || true; echo "--- tauri-driver log (tail) ---"; tail -40 "$WORK/driver.log" || true' EXIT
 sleep 3
 node --test --test-concurrency=1 tests/e2e/app.e2e.mjs
+# Restart phase: the same app relaunched on the same data folder (see restart.e2e.mjs).
+node --test --test-concurrency=1 tests/e2e/restart.e2e.mjs

@@ -79,7 +79,8 @@ async function waitForMore(text, before, ms = 20000) {
 /** Atlas ignores Enter while it is responding (the composer shows Stop), so wait until it is idle. */
 async function waitIdle(ms = 20000) {
   await driver.wait(
-    () => driver.executeScript(`return ![...document.querySelectorAll("button")].some((b) => b.textContent.replace(/\\s+/g, " ").includes("Stop"))`),
+    // The Focus bar's own Stop (and Home's "Stop focus") are not a reply in progress.
+    () => driver.executeScript(`return ![...document.querySelectorAll("button")].some((b) => !b.closest("[data-focus-bar]") && !b.textContent.includes("Stop focus") && b.textContent.replace(/\\s+/g, " ").includes("Stop"))`),
     ms,
     "Atlas idle",
   );
@@ -785,6 +786,24 @@ test("Focus Mode holds what can wait and lets approvals through, ends with a sum
   const toastOf = (title) => By.xpath(`//li[@data-sonner-toast][.//*[contains(normalize-space(.), ${JSON.stringify(title)})]]`);
   await invoke("notifications_clear");
 
+  // Start from Tasks: a task's Focus button opens the dialog with that task chosen.
+  const essay = await invoke("todo_create", { task: { title: "Outline the essay" } });
+  await (await find(By.css('nav[aria-label="Main"] button[aria-label="Tasks"]'))).click();
+  await (await find(By.css('button[aria-label="Focus on Outline the essay"]'))).click();
+  await find(By.css("[data-focus-dialog]"));
+  await driver.wait(async () => (await (await find(By.css('select[aria-label="Task to focus on"]'))).getAttribute("value")) === essay.id, 5000, "the task is preselected");
+  for (const preset of ["15 min", "25 min", "50 min", "90 min"]) await find(exactButton(preset));
+  await (await find(By.css('input[aria-label="Other length in minutes"]'))).sendKeys("40");
+  await click("Start focusing");
+  await find(By.css("[data-focus-bar]"));
+  const onTask = (await invoke("focus_status")).active;
+  assert.equal(onTask.todo_title, "Outline the essay");
+  assert.equal(Math.round((Date.parse(onTask.planned_end) - Date.parse(onTask.started_at)) / 60000), 40, "custom length");
+  assert.match(await (await find(By.css("[data-focus-bar]"))).getText(), /Outline the essay/);
+  await invoke("focus_stop");
+  await driver.wait(() => gone("[data-focus-bar]"), 5000);
+  await invoke("notifications_clear");
+
   // Start from Home: 15 minutes, with a label.
   await go("1");
   await click("Focus");
@@ -815,18 +834,34 @@ test("Focus Mode holds what can wait and lets approvals through, ends with a sum
   assert.equal(held.shown_by_system, false);
   await driver.sleep(1500);
   assert.equal((await driver.findElements(toastOf("Stretch break"))).length, 0, "no toast while focusing");
+  // An approval during the session still comes through: listed unheld (and shown, when allowed).
+  await go("2");
+  await send("create a note during focus");
+  await waitText("Approval needed", 20000);
+  await driver.wait(async () => (await invoke("notifications_list", { limit: 20 })).items.some((n) => n.category === "approval"), 10000, "approval raised");
+  const appr = (await invoke("notifications_list", { limit: 20 })).items.find((n) => n.category === "approval");
+  assert.equal(appr.held, false, "approvals are never held");
+  await click("Decline");
+  await waitText("The action did not complete", 20000);
   await go("1");
   await waitText("Stop focus");
+  // The countdown is coherent with the session the core reports.
+  const left = await (await find(By.css("[data-focus-left]"))).getText();
+  const [mm, ss] = left.split(":").map(Number);
+  const coreLeft = (Date.parse((await invoke("focus_status")).active.planned_end) - Date.now()) / 1000;
+  assert.ok(Math.abs(mm * 60 + ss - coreLeft) < 5, `countdown ${left} vs ${Math.round(coreLeft)}s left`);
   await shot("21b-focus-running");
 
-  // Stopping releases what waited and says so.
+  // Stopping releases what waited and says so: exactly what was held, nothing else.
+  const heldBefore = (await invoke("notifications_list", { limit: 50 })).items.filter((n) => n.held);
+  assert.ok(heldBefore.some((n) => n.title.includes("Stretch break")) && heldBefore.every((n) => n.category !== "approval"), JSON.stringify(heldBefore));
   await (await bar.findElement(By.xpath(".//button[normalize-space()='Stop']"))).click();
   await driver.wait(() => gone("[data-focus-bar]"), 5000);
   await driver.wait(async () => (await invoke("notifications_list", { limit: 20 })).items.some((n) => n.category === "focus"), 5000);
   const items = (await invoke("notifications_list", { limit: 20 })).items;
   const summary = items.find((n) => n.category === "focus");
   assert.match(summary.title, /^Focus session stopped: Draft the essay$/);
-  assert.match(summary.detail, /1 notification waited: Stretch break/);
+  assert.match(summary.detail, heldBefore.length === 1 ? /1 notification waited: .*Stretch break/ : new RegExp(`${heldBefore.length} notifications waited, latest: `), "the approval came through, so it did not wait");
   assert.ok(items.every((n) => !n.held), "nothing is held after the session");
   await find(toastOf("Focus session stopped"));
   await shot("21c-focus-summary");
@@ -840,12 +875,12 @@ test("Focus Mode holds what can wait and lets approvals through, ends with a sum
   const card = await find(By.css("[data-recap]"));
   assert.match(await card.getText(), /While you were away/);
   assert.match(await card.getText(), /Stretch break/);
-  await shot("22-recap");
   await (await find(By.css('button[aria-label="Dismiss the recap"]'))).click();
   await driver.wait(() => gone("[data-recap]"), 5000);
   assert.equal(await invoke("recap_get"), null);
 
   await invoke("todo_delete", { id: t.id });
+  await invoke("todo_delete", { id: essay.id });
   await invoke("notifications_clear");
   await driver.wait(() => gone("[data-sonner-toast]"), 40000).catch(() => {});
 });
@@ -1017,4 +1052,27 @@ test("accessibility audit (axe-core) finds no serious or critical issues", async
   await invoke("settings_update", { settings: { ...(await invoke("settings_get")), desktop: before.desktop } });
   await invoke("notifications_clear");
   assert.deepEqual(failures, {});
+});
+
+// Must stay the last test: it leaves Atlas mid-work for the restart phase (tests/e2e/restart.e2e.mjs),
+// which relaunches the same app on the same data folder.
+test("before closing: a reply in progress and a Focus session on a task (checked after the restart)", async () => {
+  const dir = process.env.ATLAS_DATA_DIR;
+  assert.ok(dir, "run.sh sets the data folder");
+  const todo = await invoke("todo_create", { task: { title: "Prepare the slides" } });
+  await invoke("notifications_clear");
+  await invoke("notification_test").catch(() => {});
+  await go("2");
+  await driver.actions().keyDown(Key.CONTROL).sendKeys("n").keyUp(Key.CONTROL).perform();
+  await driver.sleep(300);
+  await send("wait for me across the restart");
+  await find(xpText("button", "Stop"));
+  const running = (await invoke("tasks_list", { limit: 5 })).find((t) => t.request.includes("across the restart"));
+  assert.ok(running && !["completed", "failed", "cancelled", "interrupted"].includes(running.status), JSON.stringify(running));
+  const f = await invoke("focus_start", { minutes: 15, todoId: todo.id, label: "" });
+  assert.ok(!f.__error, JSON.stringify(f));
+  const kept = (await invoke("notifications_list", { limit: 50 })).items.map((n) => n.id);
+  fs.writeFileSync(path.join(dir, "..", "e2e-handoff.json"), JSON.stringify({ todo: todo.id, task: running.id, conversation: running.conversation_id, focus: f.id, kept }));
+  // Atlas is closed right after this test; on the next start it behaves as if two hours passed.
+  fs.writeFileSync(path.join(dir, "e2e-away-minutes"), "120");
 });
