@@ -787,9 +787,12 @@ test("Focus Mode holds what can wait and lets approvals through, ends with a sum
   await invoke("notifications_clear");
 
   // Start from Tasks: a task's Focus button opens the dialog with that task chosen.
-  const essay = await invoke("todo_create", { task: { title: "Outline the essay" } });
+  const d0 = new Date();
+  const today = `${d0.getFullYear()}-${String(d0.getMonth() + 1).padStart(2, "0")}-${String(d0.getDate()).padStart(2, "0")}`;
+  const essay = await invoke("todo_create", { task: { title: "Outline the essay", due_date: today } });
   await (await find(By.css('nav[aria-label="Main"] button[aria-label="Tasks"]'))).click();
-  await (await find(By.css('button[aria-label="Focus on Outline the essay"]'))).click();
+  // The row's buttons appear on hover or keyboard focus; click it directly.
+  await driver.executeScript("arguments[0].click()", await find(By.css('button[aria-label="Focus on Outline the essay"]')));
   await find(By.css("[data-focus-dialog]"));
   await driver.wait(async () => (await (await find(By.css('select[aria-label="Task to focus on"]'))).getAttribute("value")) === essay.id, 5000, "the task is preselected");
   for (const preset of ["15 min", "25 min", "50 min", "90 min"]) await find(exactButton(preset));
@@ -1065,14 +1068,17 @@ test("before closing: a reply in progress and a Focus session on a task (checked
   await go("2");
   await driver.actions().keyDown(Key.CONTROL).sendKeys("n").keyUp(Key.CONTROL).perform();
   await driver.sleep(300);
-  await send("wait for me across the restart");
-  await find(xpText("button", "Stop"));
-  const running = (await invoke("tasks_list", { limit: 5 })).find((t) => t.request.includes("across the restart"));
+  // A run waiting for approval to write a file: real tool-using work in progress when Atlas closes.
+  const note = path.join(workspaceDir(), "e2e", "hello.md");
+  const noteBefore = fs.statSync(note).mtimeMs;
+  await send("create a note before closing");
+  await waitText("Approval needed", 20000);
+  const running = (await invoke("tasks_list", { limit: 10 })).find((t) => t.request.includes("before closing"));
   assert.ok(running && !["completed", "failed", "cancelled", "interrupted"].includes(running.status), JSON.stringify(running));
   const f = await invoke("focus_start", { minutes: 15, todoId: todo.id, label: "" });
   assert.ok(!f.__error, JSON.stringify(f));
   const kept = (await invoke("notifications_list", { limit: 50 })).items.map((n) => n.id);
-  fs.writeFileSync(path.join(dir, "..", "e2e-handoff.json"), JSON.stringify({ todo: todo.id, task: running.id, conversation: running.conversation_id, focus: f.id, kept }));
+  fs.writeFileSync(path.join(dir, "..", "e2e-handoff.json"), JSON.stringify({ todo: todo.id, task: running.id, conversation: running.conversation_id, focus: f.id, kept, note, noteBefore }));
   // Atlas is closed right after this test; on the next start it behaves as if two hours passed.
   fs.writeFileSync(path.join(dir, "e2e-away-minutes"), "120");
 });

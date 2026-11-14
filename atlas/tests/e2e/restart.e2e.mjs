@@ -54,7 +54,7 @@ after(async () => {
   await driver?.quit();
 });
 
-test("after two hours closed: the interrupted reply is listed, not resumed; the Focus session finished on time; the recap opens what was interrupted; data survived", async () => {
+test("after two hours closed: the interrupted run is listed, not resumed; the Focus session finished on time; the recap opens what was interrupted; data survived", async () => {
   const handoff = JSON.parse(fs.readFileSync(path.join(DIR, "..", "e2e-handoff.json"), "utf8"));
 
   // Atlas opens to its main view: the introduction played once, on the first launch.
@@ -62,9 +62,11 @@ test("after two hours closed: the interrupted reply is listed, not resumed; the 
   assert.equal(await gone("[data-first-launch='first']"), true, "no first-launch introduction on a restart");
   assert.equal(fs.existsSync(path.join(DIR, "e2e-away-minutes")), false, "the stand-in is used once");
 
-  // The reply that was running when Atlas closed is marked interrupted. Nothing restarted it.
+  // The run that was waiting for approval when Atlas closed is marked interrupted; its approval
+  // lapsed and the file was never written.
   const task = (await invoke("tasks_list", { limit: 50 })).find((t) => t.id === handoff.task);
   assert.equal(task?.status, "interrupted", JSON.stringify(task));
+  assert.equal(fs.statSync(handoff.note).mtimeMs, handoff.noteBefore, "the approved-only write never happened");
 
   // The Focus session ran out while Atlas was closed: it completes at its planned end, with a summary.
   await driver.wait(async () => (await invoke("focus_status")).active === null, 15000, "the session completed");
@@ -96,18 +98,20 @@ test("after two hours closed: the interrupted reply is listed, not resumed; the 
   const card = await find(By.css("[data-recap]"));
   assert.match(await card.getText(), /While you were away/);
   const interrupted = await find(By.css("[data-recap-interrupted]"));
-  assert.match(await interrupted.getText(), /wait for me across the restart/);
+  assert.match(await interrupted.getText(), /create a note before closing/);
   assert.match(await interrupted.getText(), /Nothing was resumed/);
   await shot("22-recap");
 
   // Open takes the owner to the conversation. It does not run anything.
   await (await interrupted.findElement(By.xpath(".//button[normalize-space()='Open']"))).click();
   await find(By.id("composer"));
-  await driver.wait(async () => (await pageText()).includes("wait for me across the restart"), 10000, "the interrupted conversation is open");
+  await driver.wait(async () => (await pageText()).includes("create a note before closing"), 10000, "the interrupted conversation is open");
   await driver.sleep(3000);
   assert.equal(await replyRunning(), false, "opening it did not resume the reply");
   const after = (await invoke("tasks_list", { limit: 50 })).find((t) => t.id === handoff.task);
   assert.equal(after.status, "interrupted", "still interrupted: only the owner can start it again");
+  assert.equal(fs.statSync(handoff.note).mtimeMs, handoff.noteBefore, "opening it wrote nothing");
+  assert.deepEqual(await invoke("approvals_pending"), [], "the lapsed approval did not come back");
 
   // Dismissed, the recap is gone, and it stays gone.
   await go("1");
