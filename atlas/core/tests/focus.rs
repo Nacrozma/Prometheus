@@ -69,6 +69,20 @@ fn focus_holds_what_can_wait_and_lets_approvals_and_failures_through() {
 }
 
 #[test]
+fn the_summary_and_recap_say_which_task_a_reminder_was_for() {
+    let (db, center, _) = setup();
+    let s = NotificationSettings::default();
+    recap::on_start(&db, Utc::now() - Duration::hours(2)).unwrap();
+    focus::start(&db, 25, None, "", Utc::now()).unwrap();
+    center.raise(&s, NewNotification { category: Category::Reminder, title: "Reminder", detail: "Stretch break", target: "", dedupe_key: "", only_if_away: false }).unwrap();
+    focus::end(&db, "stopped", Utc::now()).unwrap();
+    assert_eq!(center.release_held().unwrap(), ["Reminder: Stretch break"]);
+    recap::on_start(&db, Utc::now()).unwrap();
+    let r = recap::current(&db).unwrap().unwrap();
+    assert_eq!(r.notices, [("reminder".to_string(), "Reminder: Stretch break".to_string())]);
+}
+
+#[test]
 fn a_session_on_a_task_needs_an_open_task() {
     let (db, _, _) = setup();
     let now = chrono::Local::now().naive_local();

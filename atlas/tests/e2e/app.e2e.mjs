@@ -834,8 +834,8 @@ test("Focus Mode holds what can wait and lets approvals through, ends with a sum
 
   // A reminder falls due during the session: listed (held), but no toast.
   const t = await invoke("todo_create", { task: { title: "Stretch break", remind_at: soon(3) } });
-  await driver.wait(async () => (await invoke("notifications_list", { limit: 20 })).items.some((n) => n.title.includes("Stretch break")), 30000, "the reminder was raised");
-  const held = (await invoke("notifications_list", { limit: 20 })).items.find((n) => n.title.includes("Stretch break"));
+  await driver.wait(async () => (await invoke("notifications_list", { limit: 20 })).items.some((n) => n.detail.includes("Stretch break")), 30000, "the reminder was raised");
+  const held = (await invoke("notifications_list", { limit: 20 })).items.find((n) => n.detail.includes("Stretch break"));
   assert.equal(held.held, true, "held while focusing");
   assert.equal(held.shown_by_system, false);
   await driver.sleep(1500);
@@ -860,14 +860,14 @@ test("Focus Mode holds what can wait and lets approvals through, ends with a sum
 
   // Stopping releases what waited and says so: exactly what was held, nothing else.
   const heldBefore = (await invoke("notifications_list", { limit: 50 })).items.filter((n) => n.held);
-  assert.ok(heldBefore.some((n) => n.title.includes("Stretch break")) && heldBefore.every((n) => n.category !== "approval"), JSON.stringify(heldBefore));
+  assert.ok(heldBefore.some((n) => n.detail.includes("Stretch break")) && heldBefore.every((n) => n.category !== "approval"), JSON.stringify(heldBefore));
   await (await bar.findElement(By.xpath(".//button[normalize-space()='Stop']"))).click();
   await driver.wait(() => gone("[data-focus-bar]"), 5000);
   await driver.wait(async () => (await invoke("notifications_list", { limit: 20 })).items.some((n) => n.category === "focus"), 5000);
   const items = (await invoke("notifications_list", { limit: 20 })).items;
   const summary = items.find((n) => n.category === "focus");
   assert.match(summary.title, /^Focus session stopped: Draft the essay$/);
-  assert.match(summary.detail, heldBefore.length === 1 ? /1 notification waited: .*Stretch break/ : new RegExp(`${heldBefore.length} notifications waited, latest: `), "the approval came through, so it did not wait");
+  assert.match(summary.detail, heldBefore.length === 1 ? /1 notification waited: Reminder: Stretch break\./ : new RegExp(`${heldBefore.length} notifications waited, latest: `), "the approval came through, so it did not wait");
   assert.ok(items.every((n) => !n.held), "nothing is held after the session");
   await find(toastOf("Focus session stopped"));
   await shot("21c-focus-summary");

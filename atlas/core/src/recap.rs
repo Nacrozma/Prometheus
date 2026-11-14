@@ -137,7 +137,7 @@ pub fn build(db: &Db, since: &str) -> Result<Recap> {
         rows.collect::<std::result::Result<_, _>>()?
     };
     let notices: Vec<(String, String)> = {
-        let mut st = conn.prepare("SELECT category, title FROM notifications WHERE created_at >= ?1 AND category NOT IN ('test','focus') ORDER BY created_at DESC, rowid DESC LIMIT 8")?;
+        let mut st = conn.prepare(&format!("SELECT category, {} FROM notifications WHERE created_at >= ?1 AND category NOT IN ('test','focus') ORDER BY created_at DESC, rowid DESC LIMIT 8", crate::desktop::NAMED_TITLE))?;
         let rows = st.query_map([since], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.collect::<std::result::Result<_, _>>()?
     };

@@ -274,6 +274,10 @@ pub trait Notifier: Send + Sync {
     fn show(&self, notice: &SystemNotice) -> bool;
 }
 
+/// SQL for a notification's title that says what it is about: reminders and deadlines are titled
+/// generically ("Reminder", "Due today") with the task in the detail, so the detail is added.
+pub const NAMED_TITLE: &str = "CASE WHEN category IN ('reminder','deadline') AND detail <> '' THEN title || ': ' || detail ELSE title END";
+
 pub struct NewNotification<'a> {
     pub category: Category,
     pub title: &'a str,
@@ -415,13 +419,14 @@ impl NotificationCenter {
         }
     }
 
-    /// End of a Focus session: what it held is no longer held. Returns the titles, newest first.
+    /// End of a Focus session: what it held is no longer held. Returns what each was about, newest
+    /// first (a reminder says which task, not just "Reminder").
     pub fn release_held(&self) -> Result<Vec<String>> {
         let mut conn = self.db.conn()?;
         // One transaction: every notice counted in the summary is the one released, none twice.
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let titles: Vec<String> = {
-            let mut st = tx.prepare("SELECT title FROM notifications WHERE held = 1 ORDER BY created_at DESC, rowid DESC")?;
+            let mut st = tx.prepare(&format!("SELECT {} FROM notifications WHERE held = 1 ORDER BY created_at DESC, rowid DESC", NAMED_TITLE))?;
             let rows = st.query_map([], |r| r.get(0))?;
             rows.collect::<std::result::Result<_, _>>()?
         };
