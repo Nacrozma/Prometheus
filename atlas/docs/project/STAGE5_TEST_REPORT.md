@@ -8,7 +8,7 @@ Design and behaviour: `docs/KNOWLEDGE_VAULT.md`.
 
 | Suite | Command | Result |
 |---|---|---|
-| Rust core, unit | `cargo test -p atlas-core` (lib) | 122 passed, 1 ignored (OS keyring; Windows CI). Vault: 15 (extraction 5, chunking 3, search/citations/local-only/neutralizing 4, plus 3 shared) |
+| Rust core, unit | `cargo test -p atlas-core` (lib) | 122 passed, 1 ignored (OS keyring; Windows CI). Vault: 12 (extraction 5, chunking 3, query quoting, delimiter neutralizing, citation checks and local-only 4) |
 | Rust core, integration | (same, `tests/*.rs`) | 85 passed, **vault 13**, briefing 3, engine 31, focus 8, scheduler 8, sibling bridge 6, todos 7, voice 9 |
 | Rust core, ignored by design | (same) | 5: live providers 2, real Prometheus runtime 1, real voice engines 1, opt-in fixture check 1 (`ATLAS_VAULT_FIXTURES`, run by hand: all e2e fixtures read as expected) |
 | Rust desktop shell | `cargo test -p atlas-desktop` | 2 passed |
