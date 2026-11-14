@@ -802,7 +802,10 @@ test("Focus Mode holds what can wait and lets approvals through, ends with a sum
   const onTask = (await invoke("focus_status")).active;
   assert.equal(onTask.todo_title, "Outline the essay");
   assert.equal(Math.round((Date.parse(onTask.planned_end) - Date.parse(onTask.started_at)) / 60000), 40, "custom length");
-  assert.match(await (await find(By.css("[data-focus-bar]"))).getText(), /Outline the essay/);
+  // What the bar shows, and that it is really laid out (not squeezed to nothing).
+  const what = await driver.executeScript(`const e = document.querySelector("[data-focus-what]"); const r = e?.getBoundingClientRect(); const b = document.querySelector("[data-focus-bar]").getBoundingClientRect(); return { text: e?.textContent, width: r?.width ?? 0, bar: b.width, win: window.innerWidth, html: document.querySelector("[data-focus-bar]").outerHTML.slice(0, 600) }`);
+  assert.equal(what.text, "Outline the essay", JSON.stringify(what));
+  assert.ok(what.width > 40, `title laid out: ${JSON.stringify(what)}`);
   await invoke("focus_stop");
   await driver.wait(() => gone("[data-focus-bar]"), 5000);
   await invoke("notifications_clear");
@@ -816,7 +819,7 @@ test("Focus Mode holds what can wait and lets approvals through, ends with a sum
   await shot("21-focus-start");
   await click("Start focusing");
   const bar = await find(By.css("[data-focus-bar]"));
-  assert.match(await bar.getText(), /Draft the essay/);
+  await driver.wait(async () => (await driver.executeScript(`return document.querySelector("[data-focus-what]")?.textContent`)) === "Draft the essay", 5000, "the label is shown");
   const st = await invoke("focus_status");
   assert.equal(st.active.label, "Draft the essay");
   assert.equal(Math.round((Date.parse(st.active.planned_end) - Date.parse(st.active.started_at)) / 60000), 15);
@@ -1062,6 +1065,7 @@ test("accessibility audit (axe-core) finds no serious or critical issues", async
 test("before closing: a reply in progress and a Focus session on a task (checked after the restart)", async () => {
   const dir = process.env.ATLAS_DATA_DIR;
   assert.ok(dir, "run.sh sets the data folder");
+  await invoke("focus_stop"); // independent of earlier tests
   const todo = await invoke("todo_create", { task: { title: "Prepare the slides" } });
   await invoke("notifications_clear");
   await invoke("notification_test").catch(() => {});
