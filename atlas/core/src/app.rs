@@ -97,6 +97,8 @@ impl Atlas {
         if runs > 0 {
             audit::record(&db, "forge.runs_interrupted", "warn", None, None, json!({"interrupted": runs}));
         }
+        // Session recap: note how long Atlas was away (before anything else marks it active).
+        crate::recap::on_start(&db, chrono::Utc::now())?;
         let settings = Settings::load(&db)?;
         if let Some(days) = settings.retention.conversation_days {
             let _ = conversations::apply_retention(&db, days);
@@ -244,6 +246,11 @@ impl Atlas {
             }
             let _ = crate::scheduler::prune(&self.db, chrono::Utc::now(), 30);
         }
+        // Focus Mode: end a session whose time is up (releasing what it held).
+        if let Some(done) = crate::focus::tick(&self.db, chrono::Utc::now())? {
+            self.focus_finished(&done, &s.desktop.notifications)?;
+        }
+        let _ = crate::recap::mark_active(&self.db, chrono::Utc::now());
         let r = crate::scheduler::tick(&self.db, &self.notifications, &s.schedule, &s.briefing, &s.desktop.notifications, chrono::Utc::now(), Self::local_now())?;
         if r.delivered + r.missed + r.failed > 0 {
             audit::record(&self.db, "scheduler.ran", if r.failed > 0 { "warn" } else { "info" }, None, None, json!(r));
@@ -263,6 +270,60 @@ impl Atlas {
             "paused": s.schedule.paused,
             "unread_notifications": self.notifications.unread()?,
         }))
+    }
+
+    // ----- Focus Mode -----
+
+    pub fn focus_status(&self) -> Result<serde_json::Value> {
+        Ok(json!({
+            "active": crate::focus::active(&self.db)?,
+            "history": crate::focus::history(&self.db, 10)?,
+            "min_minutes": crate::focus::MIN_MINUTES,
+            "max_minutes": crate::focus::MAX_MINUTES,
+        }))
+    }
+
+    pub fn focus_start(&self, minutes: u32, todo_id: Option<&str>, label: &str) -> Result<crate::focus::FocusSession> {
+        let s = crate::focus::start(&self.db, minutes, todo_id, label, chrono::Utc::now())?;
+        audit::record(&self.db, "focus.start", "info", None, None, json!({ "minutes": minutes, "on_task": todo_id.is_some() }));
+        notify(&self.bus, Topic::Focus, Some(&s.id));
+        Ok(s)
+    }
+
+    /// The owner stops the session early. Returns it, or `None` if none was running.
+    pub fn focus_stop(&self) -> Result<Option<crate::focus::FocusSession>> {
+        let Some(done) = crate::focus::end(&self.db, "stopped", chrono::Utc::now())? else { return Ok(None) };
+        let n = self.settings()?.desktop.notifications;
+        self.focus_finished(&done, &n)?;
+        Ok(Some(done))
+    }
+
+    fn focus_finished(&self, done: &crate::focus::FocusSession, n: &crate::desktop::NotificationSettings) -> Result<()> {
+        let held = self.notifications.release_held()?;
+        let (title, detail) = crate::focus::summary(done, &held);
+        self.notifications.raise(n, crate::desktop::NewNotification { category: crate::desktop::Category::Focus, title: &title, detail: &detail, target: "home", dedupe_key: &format!("focus:{}", done.id), only_if_away: false })?;
+        audit::record(&self.db, "focus.end", "info", None, None, json!({ "outcome": done.outcome, "minutes": crate::focus::minutes_spent(done), "held": held.len() }));
+        notify(&self.bus, Topic::Focus, Some(&done.id));
+        Ok(())
+    }
+
+    // ----- session recap -----
+
+    pub fn recap(&self) -> Result<Option<crate::recap::Recap>> {
+        crate::recap::current(&self.db)
+    }
+
+    /// Automated tests only: behave as if Atlas had been away since `minutes` ago.
+    pub fn recap_begin_minutes_ago(&self, minutes: i64) -> Result<()> {
+        crate::recap::begin_at(&self.db, chrono::Utc::now() - chrono::Duration::minutes(minutes))?;
+        notify(&self.bus, Topic::Notifications, None);
+        Ok(())
+    }
+
+    pub fn recap_dismiss(&self) -> Result<()> {
+        crate::recap::dismiss(&self.db)?;
+        notify(&self.bus, Topic::Notifications, None);
+        Ok(())
     }
 
     pub fn scheduler_jobs(&self, limit: u32) -> Result<serde_json::Value> {

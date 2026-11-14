@@ -1,9 +1,10 @@
 import { PrometheusAvatar } from "@/features/siblings/avatar/PrometheusAvatar";
-import { Activity, ArrowRight, Bell, Brain, CalendarClock, Check, ListTodo, MessageSquarePlus, PauseCircle, Plug, ShieldAlert, SlidersHorizontal, Sparkles, Volume2, Wrench } from "lucide-react";
+import { Activity, ArrowRight, Bell, Brain, CalendarClock, Check, History, ListTodo, MessageSquarePlus, PauseCircle, Plug, ShieldAlert, SlidersHorizontal, Sparkles, Target, Volume2, Wrench, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { newConversation } from "@/app/CommandPalette";
 import { Emblem } from "@/components/Emblem";
+import { focusWhat, stopFocus, useFocus, useFocusUi } from "@/features/focus/Focus";
 import { Dialog } from "@/components/ui/dialog";
 import { Badge, Button, ErrorNote, Panel, Skeleton, StatusPill, Switch } from "@/components/ui/primitives";
 import { STATE_LABEL } from "@/features/siblings/Siblings";
@@ -12,7 +13,7 @@ import { dueLabel } from "@/features/tasks/dates";
 import { api, AtlasError } from "@/lib/bridge";
 import { cn, relativeTime } from "@/lib/format";
 import { useAtlasQuery } from "@/lib/query";
-import type { MissionState, Settings, Todo } from "@/lib/schemas";
+import type { MissionState, Recap, Settings, Todo } from "@/lib/schemas";
 import { useUi } from "@/state/ui";
 import { useVoice } from "@/state/voice";
 
@@ -69,6 +70,67 @@ function TodoLine({ t, today }: { t: Todo; today: string }) {
   );
 }
 
+const NOTICE_KIND: Record<string, string> = { approval: "Approval", reply: "Reply", mission: "Mission", error: "Problem", reminder: "Reminder", deadline: "Due today", briefing: "Briefing" };
+
+/** "While you were away": what Atlas recorded since it was last open. Nothing here resumes by itself. */
+function RecapCard({ r }: { r: Recap }) {
+  const ui = useUi();
+  const away = new Date(r.since);
+  const facts = [
+    r.reminders_delivered ? `${r.reminders_delivered} reminder${r.reminders_delivered === 1 ? "" : "s"} delivered` : "",
+    r.reminders_missed ? `${r.reminders_missed} missed` : "",
+    r.missions_updated ? `${r.missions_updated} mission${r.missions_updated === 1 ? "" : "s"} updated by Prometheus` : "",
+    r.approvals_pending ? `${r.approvals_pending} waiting for your approval` : "",
+  ].filter(Boolean);
+  return (
+    <Panel className="mt-6 p-5" data-recap>
+      <div className="flex items-start gap-3">
+        <History className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <h2 className="font-display text-md font-semibold">While you were away</h2>
+          <p className="text-xs text-text-3">Since {away.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })} ({relativeTime(r.since)})</p>
+          {r.empty ? (
+            <p className="mt-2 text-sm text-text-2">All quiet: nothing happened while Atlas was closed.</p>
+          ) : (
+            <>
+              {facts.length > 0 && <p className="mt-2 text-sm text-text-2">{facts.join(" · ")}.</p>}
+              {r.notices.length > 0 && (
+                <ul className="mt-2 flex flex-col gap-1 text-sm">
+                  {r.notices.map(([k, t], i) => (
+                    <li key={i} className="flex items-center gap-2">
+                      <span className="w-20 shrink-0 text-xs text-text-3">{NOTICE_KIND[k] ?? k}</span>
+                      <span className="truncate">{t}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {r.tasks_done.length > 0 && <p className="mt-2 text-sm text-text-2">Finished: {r.tasks_done.join("; ")}.</p>}
+              {r.interrupted.length > 0 && (
+                <div className="mt-3 rounded-md border border-line-2 bg-bg-3/60 p-3" data-recap-interrupted>
+                  <p className="text-xs text-text-2">Interrupted when Atlas closed. Nothing was resumed; open one to pick it up yourself.</p>
+                  <ul className="mt-1 flex flex-col gap-1 text-sm">
+                    {r.interrupted.map(([id, req, conv]) => (
+                      <li key={id} className="flex items-center gap-2">
+                        <span className="min-w-0 flex-1 truncate">{req}</span>
+                        <Button size="sm" variant="ghost" onClick={() => (conv ? ui.openConversation(conv) : ui.openTask(id))}>
+                          Open
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        <Button size="sm" variant="ghost" icon={<X className="size-3.5" aria-hidden />} aria-label="Dismiss the recap" onClick={() => void api.recapDismiss().catch(() => toast.error("Could not dismiss"))}>
+          Dismiss
+        </Button>
+      </div>
+    </Panel>
+  );
+}
+
 const HOME_PARTS: [keyof Settings["home"], string][] = [
   ["show_briefing", "Today's briefing"],
   ["show_missions", "Active missions"],
@@ -89,6 +151,10 @@ export function HomePage() {
   const runs = useAtlasQuery("recent-tasks", () => api.tasks(null, 6), ["tasks"]);
   const siblings = useAtlasQuery("siblings", api.siblings, ["siblings"]);
   const voice = useVoice();
+  const recap = useAtlasQuery("recap", api.recap, ["notifications", "todos", "approvals"]);
+  const focus = useFocus();
+  const startFocus = useFocusUi((f) => f.start);
+  const active = focus.data?.active ?? null;
   const sibling = siblings.data?.find((s) => s.status === "paired");
   const s = settings.data;
   const home = s?.home;
@@ -125,6 +191,15 @@ export function HomePage() {
             <Button size="lg" icon={<ListTodo className="size-4" aria-hidden />} onClick={() => ui.navigate("tasks")}>
               Tasks
             </Button>
+            {active ? (
+              <Button size="lg" icon={<Target className="size-4" aria-hidden />} onClick={stopFocus} aria-label={`Stop focus session: ${focusWhat(active)}`}>
+                Stop focus
+              </Button>
+            ) : (
+              <Button size="lg" icon={<Target className="size-4" aria-hidden />} onClick={() => startFocus()}>
+                Focus
+              </Button>
+            )}
             <Button size="lg" variant="ghost" icon={<SlidersHorizontal className="size-4" aria-hidden />} onClick={() => setCustomize(true)} aria-label="Customize Home">
               Customize
             </Button>
@@ -152,6 +227,8 @@ export function HomePage() {
             <span className={sibling.connected ? "text-ok" : "text-text-3"}>· {sibling.connected ? "connected" : "not connected"}</span>
           </button>
         )}
+
+        {recap.data && <RecapCard r={recap.data} />}
 
         {cc.error && <div className="mt-6"><ErrorNote message={cc.error.message} onRetry={cc.reload} /></div>}
 

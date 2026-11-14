@@ -66,6 +66,11 @@ export const api = {
   todoSnooze: (id: string, minutes: number) => call("todo_snooze", { id, minutes }, S.TodoSchema),
   scheduleJobs: (limit = 100) => call("schedule_jobs", { limit }, S.ScheduleSchema),
   commandCenter: () => call("command_center", {}, S.CommandCenterSchema),
+  focusStatus: () => call("focus_status", {}, S.FocusStatusSchema),
+  focusStart: (minutes: number, todoId: string | null, label: string) => call("focus_start", { minutes, todoId, label }, S.FocusSessionSchema),
+  focusStop: () => call("focus_stop", {}, S.FocusSessionSchema.nullable()),
+  recap: () => call("recap_get", {}, S.RecapSchema.nullable()),
+  recapDismiss: () => call("recap_dismiss", {}, z.null()),
 
   desktopStatus: () => call("desktop_status", {}, S.DesktopStatusSchema),
   notifications: (limit = 50) => call("notifications_list", { limit }, S.NotificationListSchema),

@@ -28,6 +28,8 @@ pub mod tools;
 pub mod usage;
 pub mod desktop;
 pub mod briefing;
+pub mod focus;
+pub mod recap;
 pub mod scheduler;
 pub mod todos;
 pub mod voice;

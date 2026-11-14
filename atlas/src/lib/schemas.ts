@@ -514,6 +514,7 @@ export const TOPICS = [
   "missions",
   "notifications",
   "todos",
+  "focus",
 ] as const;
 export type Topic = (typeof TOPICS)[number];
 export const ChangeEventSchema = z.object({ topic: z.enum(TOPICS), id: z.string().nullable() });
@@ -731,13 +732,15 @@ export type Benchmark = z.infer<typeof BenchmarkSchema>;
 // ---------- desktop presence ----------
 export const NotificationSchema = z.object({
   id: z.string(),
-  category: z.enum(["approval", "reply", "mission", "error", "reminder", "deadline", "briefing", "test"]),
+  category: z.enum(["approval", "reply", "mission", "error", "reminder", "deadline", "briefing", "focus", "test"]),
   title: z.string(),
   detail: z.string(),
   target: z.string(),
   created_at: z.string(),
   read_at: z.string().nullable(),
   shown_by_system: z.boolean(),
+  /** Held by a Focus session: listed, shown when the session ends. */
+  held: z.boolean().default(false),
 });
 export type AtlasNotification = z.infer<typeof NotificationSchema>;
 export const NotificationListSchema = z.object({ items: z.array(NotificationSchema), unread: z.number() });
@@ -868,3 +871,35 @@ export const CommandCenterSchema = z.object({
   unread_notifications: z.number(),
 });
 export type CommandCenter = z.infer<typeof CommandCenterSchema>;
+
+// ---------- Focus Mode and the session recap ----------
+export const FocusSessionSchema = z.object({
+  id: z.string(),
+  started_at: z.string(),
+  planned_end: z.string(),
+  ended_at: z.string().nullable(),
+  todo_id: z.string().nullable(),
+  todo_title: z.string().nullable(),
+  label: z.string(),
+  outcome: z.string(),
+});
+export type FocusSession = z.infer<typeof FocusSessionSchema>;
+export const FocusStatusSchema = z.object({
+  active: FocusSessionSchema.nullable(),
+  history: z.array(FocusSessionSchema),
+  min_minutes: z.number(),
+  max_minutes: z.number(),
+});
+export type FocusStatus = z.infer<typeof FocusStatusSchema>;
+export const RecapSchema = z.object({
+  since: z.string(),
+  reminders_delivered: z.number(),
+  reminders_missed: z.number(),
+  tasks_done: z.array(z.string()),
+  notices: z.array(z.tuple([z.string(), z.string()])),
+  missions_updated: z.number(),
+  interrupted: z.array(z.tuple([z.string(), z.string(), z.string().nullable()])),
+  approvals_pending: z.number(),
+  empty: z.boolean(),
+});
+export type Recap = z.infer<typeof RecapSchema>;

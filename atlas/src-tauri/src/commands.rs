@@ -23,7 +23,8 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
     tauri::generate_handler![
         app_info, diagnostics, recent_errors, open_external, save_text_via_dialog,
         settings_get, settings_update, first_launch_complete,
-        todos_list, todo_detail, todo_create, todo_quick_add, todo_quick_preview, todo_update, todo_set_status, todo_postpone, todo_delete, todo_overview, todo_snooze, schedule_jobs, command_center,
+        todos_list, todo_detail, todo_create, todo_quick_add, todo_quick_preview, todo_update, todo_set_status, todo_postpone, todo_delete, todo_overview, todo_snooze, schedule_jobs, command_center, focus_status, focus_start, focus_stop, recap_get, recap_dismiss,
+        #[cfg(feature = "e2e")] e2e_recap_since,
         desktop_status, notifications_list, notifications_mark_read, notifications_clear, notification_test, window_hide, workspace_pick, workspace_use_default, workspace_add_sample, workspace_browse, workspace_preview, workspace_reveal,
         provider_templates, providers_list, provider_add, provider_update, provider_delete, provider_set_key, provider_clear_key, provider_test,
         integrations_list, integration_set_key, integration_clear_key, integration_set_enabled, integration_test,
@@ -255,6 +256,40 @@ fn schedule_jobs(state: State<'_, AppState>, limit: Option<u32>) -> R<Value> {
 #[tauri::command]
 fn command_center(state: State<'_, AppState>) -> R<Value> {
     state.atlas.command_center()
+}
+
+/// Focus Mode: the running session (if any) and recent ones.
+#[tauri::command]
+fn focus_status(state: State<'_, AppState>) -> R<Value> {
+    state.atlas.focus_status()
+}
+
+#[tauri::command]
+fn focus_start(state: State<'_, AppState>, minutes: u32, todo_id: Option<String>, label: Option<String>) -> R<atlas_core::focus::FocusSession> {
+    state.atlas.focus_start(minutes, todo_id.as_deref(), label.as_deref().unwrap_or(""))
+}
+
+#[tauri::command]
+fn focus_stop(state: State<'_, AppState>) -> R<Option<atlas_core::focus::FocusSession>> {
+    state.atlas.focus_stop()
+}
+
+/// "While you were away", built from what Atlas recorded; `null` when there is nothing to offer.
+#[tauri::command]
+fn recap_get(state: State<'_, AppState>) -> R<Option<atlas_core::recap::Recap>> {
+    state.atlas.recap()
+}
+
+/// Automated-test build only: stand in for time away so the recap can be checked in one session.
+#[cfg(feature = "e2e")]
+#[tauri::command]
+fn e2e_recap_since(state: State<'_, AppState>, minutes: i64) -> R<()> {
+    state.atlas.recap_begin_minutes_ago(minutes)
+}
+
+#[tauri::command]
+fn recap_dismiss(state: State<'_, AppState>) -> R<()> {
+    state.atlas.recap_dismiss()
 }
 
 /// What the desktop presence is actually doing right now (tray shown, shortcut registered or why not).

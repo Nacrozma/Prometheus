@@ -29,8 +29,20 @@
   as a notification at the time you choose, with switches for overdue tasks, this week's deadlines,
   missions and recent progress. Respects the global pause; a briefing more than two hours late is
   skipped. "Read aloud" on Home when voice is set up.
+- **Focus Mode:** start a session from Home or from a task (15, 25, 50, 90 minutes or your own length,
+  5–240), optionally on one task or with a label. While it runs a slim bar shows what you are on and
+  the time left. Reminders, replies, mission updates and the briefing wait (listed in the bell, marked
+  "waiting for Focus to end", with no toast or system notification); **approvals and failures always
+  come through**. When the session ends, on time or stopped, one summary says how long you focused and
+  what waited. One session at a time.
+- **While you were away:** after 30 minutes or more with Atlas closed, Home shows a recap built from
+  what Atlas recorded (reminders delivered or missed, notices, tasks finished, mission updates,
+  approvals waiting). Runs that were interrupted when Atlas closed are listed with **Open**; nothing is
+  resumed by itself. Dismiss hides it until the next time away.
 
 ### Changed
+- Database schema 6 (Focus sessions; notifications can be held). Upgrades from schema 5 keep every
+  notification (tested).
 - Database schema 5 (tasks, scheduled jobs; notifications accept new kinds). The database is copied to
   `atlas.pre-v5.bak` before upgrading. All existing data is kept (tested).
 - Toast descriptions use a higher-contrast colour (accessibility audit).

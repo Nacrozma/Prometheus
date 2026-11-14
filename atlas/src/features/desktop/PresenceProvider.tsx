@@ -55,7 +55,20 @@ export function PresenceProvider() {
         .notifications(10)
         .then(({ items }) => {
           for (const n of items) {
-            if (n.read_at || n.created_at < since || shown.has(n.id) || (n.category !== "reminder" && n.category !== "deadline")) continue;
+            if (n.read_at || n.created_at < since || shown.has(n.id)) continue;
+            // Held by Focus Mode: no toast now, and none in a burst when the session ends (its
+            // summary says what waited; the bell lists them).
+            if (n.held) {
+              shown.add(n.id);
+              continue;
+            }
+            if (n.category === "focus") {
+              // The end of a focus session: what happened, and where the held notifications are.
+              shown.add(n.id);
+              toast(n.title, { id: `focus-${n.id}`, description: n.detail, duration: 15_000 });
+              continue;
+            }
+            if (n.category !== "reminder" && n.category !== "deadline") continue;
             shown.add(n.id);
             const id = n.target.startsWith("todo:") ? n.target.slice(5) : null;
             const read = () => void api.notificationsMarkRead({ id: n.id }).catch(() => {});

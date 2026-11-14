@@ -780,6 +780,76 @@ test("Command Center: today's briefing and priorities come from real tasks, tick
   await driver.wait(() => gone("[data-sonner-toast]"), 40000).catch(() => {});
 });
 
+test("Focus Mode holds what can wait and lets approvals through, ends with a summary, and the recap shows what happened while away", async () => {
+  const soon = (sec) => new Date(Date.now() + sec * 1000).toISOString();
+  const toastOf = (title) => By.xpath(`//li[@data-sonner-toast][.//*[contains(normalize-space(.), ${JSON.stringify(title)})]]`);
+  await invoke("notifications_clear");
+
+  // Start from Home: 15 minutes, with a label.
+  await go("1");
+  await click("Focus");
+  await find(By.css("[data-focus-dialog]"));
+  await (await find(exactButton("15 min"))).click();
+  await (await find(By.css('input[aria-label="Focus label"]'))).sendKeys("Draft the essay");
+  await shot("21-focus-start");
+  await click("Start focusing");
+  const bar = await find(By.css("[data-focus-bar]"));
+  assert.match(await bar.getText(), /Draft the essay/);
+  const st = await invoke("focus_status");
+  assert.equal(st.active.label, "Draft the essay");
+  assert.equal(Math.round((Date.parse(st.active.planned_end) - Date.parse(st.active.started_at)) / 60000), 15);
+
+  // A second session and impossible lengths are refused by the core.
+  assert.ok((await invoke("focus_start", { minutes: 25 })).__error, "only one session at a time");
+  await invoke("focus_stop");
+  assert.ok((await invoke("focus_start", { minutes: 2 })).__error);
+  assert.ok((await invoke("focus_start", { minutes: 600 })).__error);
+  await invoke("focus_start", { minutes: 15, label: "Draft the essay" });
+  await find(By.css("[data-focus-bar]"));
+
+  // A reminder falls due during the session: listed (held), but no toast.
+  const t = await invoke("todo_create", { task: { title: "Stretch break", remind_at: soon(3) } });
+  await driver.wait(async () => (await invoke("notifications_list", { limit: 20 })).items.some((n) => n.title.includes("Stretch break")), 30000, "the reminder was raised");
+  const held = (await invoke("notifications_list", { limit: 20 })).items.find((n) => n.title.includes("Stretch break"));
+  assert.equal(held.held, true, "held while focusing");
+  assert.equal(held.shown_by_system, false);
+  await driver.sleep(1500);
+  assert.equal((await driver.findElements(toastOf("Stretch break"))).length, 0, "no toast while focusing");
+  await go("1");
+  await waitText("Stop focus");
+  await shot("21b-focus-running");
+
+  // Stopping releases what waited and says so.
+  await (await bar.findElement(By.xpath(".//button[normalize-space()='Stop']"))).click();
+  await driver.wait(() => gone("[data-focus-bar]"), 5000);
+  await driver.wait(async () => (await invoke("notifications_list", { limit: 20 })).items.some((n) => n.category === "focus"), 5000);
+  const items = (await invoke("notifications_list", { limit: 20 })).items;
+  const summary = items.find((n) => n.category === "focus");
+  assert.match(summary.title, /^Focus session stopped: Draft the essay$/);
+  assert.match(summary.detail, /1 notification waited: Stretch break/);
+  assert.ok(items.every((n) => !n.held), "nothing is held after the session");
+  await find(toastOf("Focus session stopped"));
+  await shot("21c-focus-summary");
+  const hist = (await invoke("focus_status")).history;
+  assert.equal(hist[0].outcome, "stopped");
+
+  // The recap: as if Atlas had been away for two hours (test-build stand-in for a real absence).
+  await invoke("e2e_recap_since", { minutes: 120 });
+  await go("2");
+  await go("1");
+  const card = await find(By.css("[data-recap]"));
+  assert.match(await card.getText(), /While you were away/);
+  assert.match(await card.getText(), /Stretch break/);
+  await shot("22-recap");
+  await (await find(By.css('button[aria-label="Dismiss the recap"]'))).click();
+  await driver.wait(() => gone("[data-recap]"), 5000);
+  assert.equal(await invoke("recap_get"), null);
+
+  await invoke("todo_delete", { id: t.id });
+  await invoke("notifications_clear");
+  await driver.wait(() => gone("[data-sonner-toast]"), 40000).catch(() => {});
+});
+
 test("desktop presence: nothing is on by default, the shortcut is validated and never duplicated, notifications need permission, and the bell lists them", async () => {
   const s0 = await invoke("settings_get");
   assert.equal(s0.desktop.shortcut_enabled, false);

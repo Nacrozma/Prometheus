@@ -93,3 +93,18 @@ coming up, recently finished work and system status, all from Atlas's own data:
 | Customize what Home shows | Daily briefing settings (off until turned on) |
 |---|---|
 | ![Customize Home](screenshots/20b-customize-home.png) | ![Briefing settings](screenshots/20c-briefing-settings.png) |
+
+## 0.5.0 (in progress, not released): Focus Mode and "While you were away"
+
+| Starting a focus session | While it runs: a slim bar with what you are on and the time left |
+|---|---|
+| ![Start focus](screenshots/21-focus-start.png) | ![Focus running](screenshots/21b-focus-running.png) |
+
+When it ends, one summary says how long you focused and what waited (held notifications are in the
+bell; approvals and failures were never held):
+
+![Focus summary](screenshots/21c-focus-summary.png)
+
+After time away, Home shows what Atlas recorded while it was closed. Nothing resumes by itself:
+
+![While you were away](screenshots/22-recap.png)

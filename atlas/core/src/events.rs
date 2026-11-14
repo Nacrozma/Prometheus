@@ -21,6 +21,7 @@ pub enum Topic {
     Missions,
     Notifications,
     Todos,
+    Focus,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -396,6 +396,21 @@ pub const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_notifications_unread ON notifications(read_at, created_at);
     CREATE INDEX idx_notifications_dedupe ON notifications(dedupe_key, read_at);
     "#,
+    // v6 (0.5.0 stage 4): Focus Mode sessions; notifications held during one are flagged.
+    // The session recap keeps its marker in atlas_meta (no table needed).
+    r#"
+    CREATE TABLE focus_sessions (
+        id TEXT PRIMARY KEY,
+        started_at TEXT NOT NULL,
+        planned_end TEXT NOT NULL,
+        ended_at TEXT,
+        todo_id TEXT REFERENCES todos(id) ON DELETE SET NULL,
+        label TEXT NOT NULL DEFAULT '',
+        outcome TEXT NOT NULL DEFAULT '' CHECK (outcome IN ('','completed','stopped'))
+    );
+    CREATE INDEX idx_focus_active ON focus_sessions(ended_at);
+    ALTER TABLE notifications ADD COLUMN held INTEGER NOT NULL DEFAULT 0;
+    "#,
 ];
 
 pub const CURRENT_SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

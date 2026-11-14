@@ -2,7 +2,7 @@
 
 **Updated:** 2026-11-12 · **Branch:** `claude/prometheus-ai-evaluation-pxqzfr` · **Released:** 0.4.2
 
-**Working on:** 0.5.0, Stage 3 (Command Center, daily briefing). Plan: `PLAN_0.5-0.7.md`.
+**Working on:** 0.5.0, Stage 4 (Focus Mode, session recap). Plan: `PLAN_0.5-0.7.md`.
 
 ## Standing rules from the owner
 * Every new feature gets a screenshot in `docs/screenshots/` and `docs/WHATS_NEW_SCREENSHOTS.md`.
@@ -16,13 +16,15 @@
 |---|---|
 | 1 Tasks | Done (tests + e2e + screenshots) |
 | 2 Scheduler, reminders | Done (tests + e2e + screenshots) |
-| 3 Command Center, briefing | Not started |
-| 4 Focus Mode, recap | Not started |
+| 3 Command Center, briefing | Done (tests + e2e + screenshots) |
+| 4 Focus Mode, recap | In progress |
 | 5 Knowledge Vault | Not started |
 | 6 Memory quality, Trust Center | Not started |
 | 7 Specialists, personality | Not started |
 
 ## Next
-Stage 3: turn Home into the Command Center (today's priorities, deadlines, overdue, reminders, missions,
-approvals, recent conversations, accomplishments) from real data, and add the daily briefing as a
-scheduler job (kind "briefing", repeats daily) with settings and a manual "Brief me now".
+Stage 4: Focus Mode (a timed session, optionally on one task; holds non-urgent notifications and shows
+them when it ends; approvals, failures and safety notices always pass through; respects the global
+pause) and the session recap ("while you were away": reminders delivered or missed, replies and
+missions that finished, tasks completed, approvals waiting, built from recorded events since the last
+session; nothing resumes without the owner's approval). Migration v6 = focus sessions + recap marker.

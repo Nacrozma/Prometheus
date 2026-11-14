@@ -7,7 +7,7 @@ import { useAtlasQuery } from "@/lib/query";
 import type { AtlasNotification } from "@/lib/schemas";
 import { useUi } from "@/state/ui";
 
-const CATEGORY: Record<AtlasNotification["category"], string> = { approval: "Approval", reply: "Reply", mission: "Mission", error: "Problem", reminder: "Reminder", deadline: "Due today", briefing: "Briefing", test: "Test" };
+const CATEGORY: Record<AtlasNotification["category"], string> = { approval: "Approval", reply: "Reply", mission: "Mission", error: "Problem", reminder: "Reminder", deadline: "Due today", briefing: "Briefing", focus: "Focus", test: "Test" };
 
 function when(iso: string): string {
   const t = new Date(iso);
@@ -120,6 +120,7 @@ export function NotificationBell() {
                     </span>
                     <span className="truncate text-[0.6875rem] text-text-3">
                       {CATEGORY[n.category]}
+                      {n.held ? " · waiting for Focus to end" : ""}
                       {n.detail ? ` · ${n.detail}` : ""}
                       {n.read_at ? "" : " · unread"}
                     </span>

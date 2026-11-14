@@ -1,0 +1,109 @@
+//! Focus Mode (what is held, what always comes through, the end summary) and the session recap
+//! (built from recorded events after time away), plus the v6 database upgrade.
+
+use atlas_core::desktop::{Category, NewNotification, NotificationCenter, NotificationSettings, Notifier, SystemNotice};
+use atlas_core::events::RecordingBus;
+use atlas_core::storage::{migrations, Db};
+use atlas_core::{focus, recap};
+use chrono::{Duration, Utc};
+use std::sync::{Arc, Mutex};
+
+#[derive(Default)]
+struct Shell {
+    shown: Mutex<Vec<String>>,
+}
+impl Notifier for Shell {
+    fn in_front(&self) -> bool {
+        false
+    }
+    fn show(&self, n: &SystemNotice) -> bool {
+        self.shown.lock().unwrap().push(n.title.clone());
+        true
+    }
+}
+
+fn setup() -> (Arc<Db>, Arc<NotificationCenter>, Arc<Shell>) {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    let center = Arc::new(NotificationCenter::new(db.clone(), Arc::new(RecordingBus::default())));
+    let shell = Arc::new(Shell::default());
+    center.set_notifier(shell.clone());
+    (db, center, shell)
+}
+fn raise(center: &NotificationCenter, s: &NotificationSettings, c: Category, title: &str) {
+    center.raise(s, NewNotification { category: c, title, detail: "", target: "", dedupe_key: "", only_if_away: false }).unwrap();
+}
+
+#[test]
+fn focus_holds_what_can_wait_and_lets_approvals_and_failures_through() {
+    let (db, center, shell) = setup();
+    let s = NotificationSettings { system: true, show_details: true, ..Default::default() };
+    let t0 = Utc::now();
+    focus::start(&db, 25, None, "Write the report", t0).unwrap();
+    raise(&center, &s, Category::Reminder, "Stretch");
+    raise(&center, &s, Category::Reply, "Atlas has replied");
+    raise(&center, &s, Category::Approval, "Approval needed");
+    raise(&center, &s, Category::Error, "Something failed");
+    let shown = shell.shown.lock().unwrap().clone();
+    assert!(shown.iter().any(|t| t.contains("Approval")) && shown.iter().any(|t| t.contains("failed")), "{shown:?}");
+    assert!(!shown.iter().any(|t| t.contains("Stretch") || t.contains("replied")), "held ones are not shown by the system: {shown:?}");
+    let list = center.list(20).unwrap();
+    let held: Vec<_> = list.iter().filter(|n| n.held).map(|n| n.title.as_str()).collect();
+    assert_eq!(held, ["Atlas has replied", "Stretch"], "held ones are still listed in Atlas");
+
+    // Ending releases them and says what waited.
+    let done = focus::end(&db, "stopped", t0 + Duration::minutes(12)).unwrap().unwrap();
+    let released = center.release_held().unwrap();
+    assert_eq!(released, ["Atlas has replied", "Stretch"]);
+    assert!(center.list(20).unwrap().iter().all(|n| !n.held));
+    let (title, detail) = focus::summary(&done, &released);
+    assert_eq!(title, "Focus session stopped: Write the report");
+    assert_eq!(detail, "12 minutes of focus. 2 notifications waited, latest: Atlas has replied.");
+    // After the session, nothing is held.
+    raise(&center, &s, Category::Reminder, "After");
+    assert!(shell.shown.lock().unwrap().iter().any(|t| t.contains("After")));
+}
+
+#[test]
+fn a_session_on_a_task_needs_an_open_task() {
+    let (db, _, _) = setup();
+    let now = chrono::Local::now().naive_local();
+    let t = atlas_core::todos::create(&db, atlas_core::todos::NewTodo { title: "Draft the plan".into(), ..Default::default() }, now).unwrap();
+    assert_eq!(focus::start(&db, 25, Some("nope"), "", Utc::now()).unwrap_err().code(), "not_found");
+    let s = focus::start(&db, 25, Some(&t.id), "", Utc::now()).unwrap();
+    assert_eq!(s.todo_title.as_deref(), Some("Draft the plan"));
+    focus::end(&db, "completed", Utc::now()).unwrap();
+    atlas_core::todos::set_status(&db, &t.id, "done", now).unwrap();
+    assert_eq!(focus::start(&db, 25, Some(&t.id), "", Utc::now()).unwrap_err().code(), "validation");
+}
+
+#[test]
+fn the_recap_reports_what_was_recorded_while_away() {
+    let (db, center, _) = setup();
+    let s = NotificationSettings::default();
+    let away = Utc::now() - Duration::hours(3);
+    recap::on_start(&db, away).unwrap();
+    // While away (between the last activity and now): a reminder and a reply were raised.
+    raise(&center, &s, Category::Reminder, "Water the plants");
+    raise(&center, &s, Category::Reply, "Atlas has replied: trip plan");
+    raise(&center, &s, Category::Test, "Ignored test notice");
+    recap::on_start(&db, Utc::now()).unwrap();
+    let r = recap::current(&db).unwrap().expect("a recap after three hours away");
+    assert!(!r.empty);
+    let titles: Vec<_> = r.notices.iter().map(|(_, t)| t.as_str()).collect();
+    assert_eq!(titles, ["Atlas has replied: trip plan", "Water the plants"]);
+    recap::dismiss(&db).unwrap();
+    assert!(recap::current(&db).unwrap().is_none());
+}
+
+#[test]
+fn upgrading_a_v5_database_adds_focus_and_keeps_notifications() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+    migrations::apply_list(&conn, &migrations::MIGRATIONS[..5]).unwrap();
+    conn.execute_batch("INSERT INTO notifications(id,category,title,created_at,shown_by_system) VALUES('n1','reminder','Kept notice','2026-11-12T00:00:00Z',1);").unwrap();
+    migrations::apply(&conn).unwrap();
+    let count = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
+    assert_eq!(count("SELECT COUNT(*) FROM notifications WHERE id='n1' AND held=0 AND shown_by_system=1"), 1);
+    conn.execute("INSERT INTO focus_sessions(id,started_at,planned_end) VALUES('f1','a','b')", []).unwrap();
+    assert!(conn.execute("INSERT INTO focus_sessions(id,started_at,planned_end,outcome) VALUES('f2','a','b','sideways')", []).is_err());
+}

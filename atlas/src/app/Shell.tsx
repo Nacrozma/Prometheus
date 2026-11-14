@@ -1,4 +1,5 @@
 import { SiblingsPage } from "@/features/siblings/Siblings";
+import { FocusBar, FocusDialog } from "@/features/focus/Focus";
 import { ForgePage } from "@/features/forge/Forge";
 import { lazy, Suspense, useEffect } from "react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -86,6 +87,8 @@ export function Shell() {
       <CommandPalette />
       <VoiceProvider />
       <PresenceProvider />
+      <FocusBar />
+      <FocusDialog />
     </div>
   );
 }

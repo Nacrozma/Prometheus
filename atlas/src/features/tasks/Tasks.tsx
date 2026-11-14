@@ -1,4 +1,4 @@
-import { Bell, CalendarClock, Check, ListTodo, Pencil, Plus, Repeat, Search, Trash2 } from "lucide-react";
+import { Bell, CalendarClock, Check, ListTodo, Pencil, Plus, Repeat, Search, Target, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog, Dialog } from "@/components/ui/dialog";
@@ -8,6 +8,7 @@ import { cn } from "@/lib/format";
 import { useAtlasQuery } from "@/lib/query";
 import type { QuickPreview, Todo, TodoDetail, TodoPatch, TodoView } from "@/lib/schemas";
 import { useUi } from "@/state/ui";
+import { useFocusUi } from "@/features/focus/Focus";
 import { dueLabel, groupByDay, REPEAT_LABEL } from "./dates";
 
 const VIEWS: { value: TodoView; label: string }[] = [
@@ -74,6 +75,9 @@ function TaskRow({ t, today, onOpen, onDelete }: { t: Todo; today: string; onOpe
           <Button size="sm" variant="ghost" onClick={() => void api.todoPostpone(t.id, 1).catch((e) => fail(e, "The task could not be moved"))} aria-label={`+1 day: ${t.title}`}>
             +1 day
           </Button>
+        )}
+        {!done && (
+          <Button size="sm" variant="ghost" icon={<Target className="size-3.5" aria-hidden />} onClick={() => useFocusUi.getState().start(t.id)} aria-label={`Focus on ${t.title}`} />
         )}
         <Button size="sm" variant="ghost" icon={<Pencil className="size-3.5" aria-hidden />} onClick={onOpen} aria-label={`Edit ${t.title}`} />
         <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" aria-hidden />} onClick={onDelete} aria-label={`Delete ${t.title}`} />

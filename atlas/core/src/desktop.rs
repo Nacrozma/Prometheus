@@ -80,6 +80,7 @@ impl NotificationSettings {
             Category::Reminder => self.reminders,
             Category::Deadline => self.deadlines,
             Category::Briefing => self.briefings,
+            Category::Focus => true,
             Category::Test => true,
         }
     }
@@ -205,6 +206,8 @@ pub enum Category {
     Reminder,
     Deadline,
     Briefing,
+    /// A Focus session ended (with what was held).
+    Focus,
     Test,
 }
 
@@ -218,6 +221,7 @@ impl Category {
             Category::Reminder => "reminder",
             Category::Deadline => "deadline",
             Category::Briefing => "briefing",
+            Category::Focus => "focus",
             Category::Test => "test",
         }
     }
@@ -230,6 +234,7 @@ impl Category {
             "reminder" => Category::Reminder,
             "deadline" => Category::Deadline,
             "briefing" => Category::Briefing,
+            "focus" => Category::Focus,
             _ => Category::Test,
         }
     }
@@ -249,6 +254,8 @@ pub struct Notification {
     pub read_at: Option<String>,
     /// Whether the system notification was shown (false: not allowed, or Atlas was in front).
     pub shown_by_system: bool,
+    /// Held by a Focus session: listed, but not shown until the session ends.
+    pub held: bool,
 }
 
 /// What the system may show for a notification.
@@ -328,10 +335,16 @@ impl NotificationCenter {
             created_at: now(),
             read_at: None,
             shown_by_system: false,
+            held: false,
         };
+        // Focus Mode holds what can wait; approvals and failures always come through.
+        if !crate::focus::passes_through(n.category) && crate::focus::is_active(&self.db)? {
+            out.held = true;
+        }
         // Permission is decided here, in the core, from the stored settings.
         let allowed = s.system && s.category_on(n.category);
         if allowed
+            && !out.held
             && let Some(nf) = notifier
             // A reminder is shown even while Atlas is in front: the owner asked for that moment.
             && !(s.only_when_away && n.category != Category::Reminder && nf.in_front())
@@ -339,8 +352,8 @@ impl NotificationCenter {
             out.shown_by_system = nf.show(&Self::system_notice(&out, s));
         }
         conn.execute(
-            "INSERT INTO notifications (id, category, title, detail, target, dedupe_key, created_at, shown_by_system) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![out.id, out.category.as_str(), out.title, out.detail, out.target, n.dedupe_key, out.created_at, out.shown_by_system],
+            "INSERT INTO notifications (id, category, title, detail, target, dedupe_key, created_at, shown_by_system, held) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![out.id, out.category.as_str(), out.title, out.detail, out.target, n.dedupe_key, out.created_at, out.shown_by_system, out.held],
         )?;
         conn.execute("DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY created_at DESC, rowid DESC LIMIT ?1)", [KEEP as i64])?;
         notify(&self.bus, Topic::Notifications, Some(&out.id));
@@ -349,7 +362,7 @@ impl NotificationCenter {
 
     pub fn list(&self, limit: u32) -> Result<Vec<Notification>> {
         let conn = self.db.conn()?;
-        let mut st = conn.prepare("SELECT id, category, title, detail, target, created_at, read_at, shown_by_system FROM notifications ORDER BY created_at DESC, rowid DESC LIMIT ?1")?;
+        let mut st = conn.prepare("SELECT id, category, title, detail, target, created_at, read_at, shown_by_system, held FROM notifications ORDER BY created_at DESC, rowid DESC LIMIT ?1")?;
         let rows = st.query_map([limit.clamp(1, KEEP as u32)], |r| {
             Ok(Notification {
                 id: r.get(0)?,
@@ -360,6 +373,7 @@ impl NotificationCenter {
                 created_at: r.get(5)?,
                 read_at: r.get(6)?,
                 shown_by_system: r.get(7)?,
+                held: r.get(8)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -396,6 +410,21 @@ impl NotificationCenter {
         {
             notify(&self.bus, Topic::Notifications, None);
         }
+    }
+
+    /// End of a Focus session: what it held is no longer held. Returns the titles, newest first.
+    pub fn release_held(&self) -> Result<Vec<String>> {
+        let conn = self.db.conn()?;
+        let titles: Vec<String> = {
+            let mut st = conn.prepare("SELECT title FROM notifications WHERE held = 1 ORDER BY created_at DESC, rowid DESC")?;
+            let rows = st.query_map([], |r| r.get(0))?;
+            rows.collect::<std::result::Result<_, _>>()?
+        };
+        if !titles.is_empty() {
+            conn.execute("UPDATE notifications SET held = 0 WHERE held = 1", [])?;
+            notify(&self.bus, Topic::Notifications, None);
+        }
+        Ok(titles)
     }
 
     pub fn clear(&self) -> Result<()> {
