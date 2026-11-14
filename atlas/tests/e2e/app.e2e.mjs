@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
 import { Builder, By, Key, until } from "selenium-webdriver";
 
 const AXE = fs.readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
@@ -1067,6 +1068,108 @@ test("accessibility audit (axe-core) finds no serious or critical issues", async
   await invoke("settings_update", { settings: { ...(await invoke("settings_get")), desktop: before.desktop } });
   await invoke("notifications_clear");
   assert.deepEqual(failures, {});
+});
+
+test("Knowledge Vault: four formats imported and indexed, scanned PDFs refused honestly, search with page citations, answers cite real passages, scope, injected text stays evidence, re-index and removal", async () => {
+  const dir = path.join(process.env.WORK ?? fs.mkdtempSync("/tmp/atlas-vault-"), "vault-fixtures");
+  execFileSync(process.platform === "win32" ? "python" : "python3", [path.resolve("tests/e2e/make_vault_fixtures.py"), dir]);
+  const f = (n) => path.join(dir, n);
+  const docsNow = async () => (await invoke("vault_list", { filter: { library: { kind: "all" } } })).documents;
+  const settle = () => driver.wait(async () => (await docsNow()).every((d) => d.status !== "processing"), 30000, "processing finished");
+
+  // Only files chosen in the native picker can be imported (the test build stands in for the picker).
+  const refused = await invoke("vault_import", { paths: [f("field-notes.txt")], projectId: null });
+  assert.match(String(refused.__error?.message ?? ""), /chosen in the import dialog/);
+  const all = ["field-notes.txt", "trip-plan.md", "glacier-report.pdf", "project-brief.docx", "scan.pdf", "suspicious-memo.md", "changing-notes.md"].map(f);
+  await invoke("e2e_vault_allow", { paths: all });
+  const project = await invoke("project_create", { name: "Glacier fieldwork", description: "", instructions: "" });
+  const personal = all.filter((p) => !p.endsWith(".docx"));
+  const r1 = await invoke("vault_import", { paths: personal, projectId: null });
+  const r2 = await invoke("vault_import", { paths: [f("project-brief.docx")], projectId: project.id });
+  assert.ok([...r1, ...r2].every((r) => r.document && !r.error), JSON.stringify([...r1, ...r2]));
+  assert.ok((await invoke("vault_import", { paths: [f("trip-plan.md")], projectId: null }))[0].error.includes("already in that library"), "duplicates are refused");
+  await settle();
+  const docs = await docsNow();
+  const by = (t) => docs.find((d) => d.title === t);
+  for (const t of ["field-notes", "trip-plan", "glacier-report", "project-brief", "suspicious-memo", "changing-notes"]) assert.equal(by(t).status, "indexed", `${t}: ${by(t).error}`);
+  assert.equal(by("glacier-report").pages, 2);
+  assert.equal(by("scan").status, "failed");
+  assert.match(by("scan").error, /no text layer.*OCR/);
+
+  // The Vault page: documents, statuses, the failed one apart.
+  await (await find(By.css('nav[aria-label="Main"] button[aria-label="Knowledge Vault"]'))).click();
+  await find(By.css('[data-vault-doc="glacier-report"][data-status="indexed"]'));
+  await find(By.css('[data-vault-doc="scan"][data-status="failed"]'));
+  await shot("23-vault-library");
+
+  // Search: the passage on page 2 of the PDF, highlighted, opening the reader at that passage.
+  await (await find(By.css('input[aria-label="Search the Knowledge Vault"]'))).sendKeys("glacier survey costs");
+  const hit = await find(By.css('[data-vault-hit="glacier-report"]'));
+  assert.match(await hit.getText(), /page 2/);
+  await shot("23b-vault-search");
+  await hit.click();
+  await driver.wait(async () => /40000 euros/.test((await driver.executeScript(`return document.querySelector('[data-vault-reader] [data-cited="true"]')?.textContent ?? ""`)) ?? ""), 10000, "the reader opens at the passage");
+  await driver.actions().sendKeys(Key.ESCAPE).perform();
+  await driver.wait(() => gone("[data-vault-reader]"), 5000);
+
+  // Ask Atlas: the answer comes from the passage and cites it; the citation opens the source.
+  await go("2");
+  await driver.actions().keyDown(Key.CONTROL).sendKeys("n").keyUp(Key.CONTROL).perform();
+  await driver.sleep(300);
+  await send("What is the total cost of the glacier survey in euros?");
+  await waitText("40000 euros", 20000);
+  await waitIdle();
+  const src1 = await find(By.css('[data-sources] [data-source="S1"]'));
+  assert.equal(await src1.getAttribute("data-cited"), "true");
+  const srcText = await driver.executeScript(`return document.querySelector('[data-sources] [data-source="S1"]').textContent`);
+  assert.match(srcText, /glacier-report/);
+  assert.match(srcText, /page 2/);
+  assert.equal(await gone("[data-unknown-citations]"), true, "every citation matches a passage it was given");
+  await shot("23c-vault-answer-citations");
+  await (await src1.findElement(By.css("button"))).click();
+  await driver.wait(async () => /40000 euros/.test((await driver.executeScript(`return document.querySelector('[data-vault-reader] [data-cited="true"]')?.textContent ?? ""`)) ?? ""), 10000, "the citation opens the cited passage");
+  await shot("23d-vault-cited-passage");
+  await driver.actions().sendKeys(Key.ESCAPE).perform();
+  await driver.wait(() => gone("[data-vault-reader]"), 5000);
+
+  // Scope: a project's document is not used outside the project, until it is moved.
+  await go("2");
+  await send("Who owns the permits in the project brief?");
+  await waitIdle();
+  const convId = (await invoke("conversations_list", { projectId: null, archived: false, limit: 5, offset: 0 }))?.[0]?.id;
+  const sourcesFor = async () => Object.values(await invoke("vault_conversation_sources", { conversationId: convId })).flat();
+  assert.ok(convId, "the conversation exists");
+  assert.ok(!(await sourcesFor()).some((s) => s.title === "project-brief"), "another library's document was not searched");
+  await invoke("vault_move", { id: by("project-brief").id, projectId: null });
+  await send("Who owns the permits in the project brief?");
+  await waitText("Dana Whitfield", 20000);
+  await waitIdle();
+
+  // Injected instructions inside a document stay quoted evidence: nothing is created or requested.
+  await send("What happened to the quarterly figures?");
+  await waitText("twelve percent", 20000);
+  await waitIdle();
+  assert.deepEqual(await invoke("approvals_pending"), [], "no action was requested because of the document");
+  assert.equal(fs.existsSync(path.join(workspaceDir(), "evil.md")), false);
+
+  // A changed original is noticed and re-indexed from the page; no duplicate passages.
+  fs.writeFileSync(f("changing-notes.md"), "# Changing notes\nThe first version mentions the kestrel.\n\n## Update\nThe second version adds the osprey.\n");
+  assert.equal(await invoke("vault_check_changes"), 1);
+  await (await find(By.css('nav[aria-label="Main"] button[aria-label="Knowledge Vault"]'))).click();
+  const reindexBtn = await find(By.css('button[aria-label="Re-index changing-notes"]'));
+  await find(By.css('[data-vault-doc="changing-notes"][data-status="needs_reindex"]'));
+  await driver.executeScript("arguments[0].click()", reindexBtn);
+  await find(By.css('[data-vault-doc="changing-notes"][data-status="indexed"]'), 20000);
+  const os = await invoke("vault_search", { query: "osprey", library: { kind: "all" } });
+  assert.equal(os.length, 1);
+  assert.equal(os[0].heading, "Changing notes › Update");
+
+  // Removal: confirmed, passages gone from search, the original file kept.
+  await driver.executeScript("arguments[0].click()", await find(By.css('button[aria-label="Remove field-notes"]')));
+  await click("Remove");
+  await driver.wait(() => gone('[data-vault-doc="field-notes"]'), 5000);
+  assert.equal((await invoke("vault_search", { query: "heron reservoir", library: { kind: "all" } })).length, 0);
+  assert.ok(fs.existsSync(f("field-notes.txt")), "the owner's original is untouched");
 });
 
 // Must stay the last test: it leaves Atlas mid-work for the restart phase (tests/e2e/restart.e2e.mjs),

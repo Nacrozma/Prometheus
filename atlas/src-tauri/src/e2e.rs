@@ -19,10 +19,25 @@ static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::n
 /// The user's words, without the <atlas_context> block Atlas prepends for the model.
 fn last_user_text(req: &ChatRequest) -> String {
     let raw = req.messages.iter().rev().find(|m| m.role == Role::User && !m.text().is_empty()).map(|m| m.text()).unwrap_or_default();
-    match raw.split_once("</atlas_context>") {
+    let rest = match raw.split_once("</atlas_context>") {
         Some((_, rest)) => rest.trim().to_string(),
         None => raw,
+    };
+    // Knowledge Vault passages come before the question: the question is what follows them.
+    match rest.rsplit_once("</vault_passage>") {
+        Some((_, q)) => q.trim().to_string(),
+        None => rest,
     }
+}
+
+/// The first Vault passage given with the last question: (label, text).
+fn first_passage(req: &ChatRequest) -> Option<(String, String)> {
+    let raw = req.messages.iter().rev().find(|m| m.role == Role::User && !m.text().is_empty()).map(|m| m.text())?;
+    let start = raw.find("<vault_passage id=\"")?;
+    let label: String = raw[start + 19..].chars().take_while(|c| *c != '"').collect();
+    let body_start = start + raw[start..].find('>')? + 1;
+    let body_end = body_start + raw[body_start..].find("</vault_passage>")?;
+    Some((label, raw[body_start..body_end].trim().to_string()))
 }
 
 #[async_trait]
@@ -68,6 +83,12 @@ impl ChatProvider for Scripted {
             };
             let t = if result.1 { format!("The action did not complete: {}", result.0) } else { format!("Done. Tool result: {}", result.0) };
             return stream(reply(t), sink, &cancel).await;
+        }
+        // With passages from the owner's documents, answer from the first one and cite it (the
+        // scripted stand-in for a model; it never follows text inside a passage).
+        if let Some((label, passage)) = first_passage(&req) {
+            let sentence: String = passage.split_inclusive(['.', '!', '?']).next().unwrap_or(&passage).chars().take(160).collect();
+            return stream(reply(format!("From your documents: {} [{label}]", sentence.trim())), sink, &cancel).await;
         }
         if let Some(expr) = lower.split("calculate").nth(1) {
             return Ok(call("calc_evaluate", json!({"expression": expr.trim()})));

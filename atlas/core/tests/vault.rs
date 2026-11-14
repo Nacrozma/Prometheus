@@ -555,3 +555,21 @@ fn upgrading_a_v6_database_adds_the_vault_and_keeps_everything() {
     conn.execute("DELETE FROM vault_documents WHERE id='d1'", []).unwrap();
     assert_eq!(one("SELECT COUNT(*) FROM vault_chunks") + one("SELECT COUNT(*) FROM vault_fts"), 0, "cascade and trigger clean up");
 }
+
+/// Opt-in: process every file in `$ATLAS_VAULT_FIXTURES` (the end-to-end fixtures) and report.
+#[test]
+#[ignore]
+fn external_fixtures_are_readable() {
+    let Some(dir) = std::env::var_os("ATLAS_VAULT_FIXTURES") else { return };
+    let l = lib();
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        let r = vault::import(&l.db, l.vault.path(), &p, None).and_then(|d| vault::process(&l.db, l.vault.path(), &d.id, &|| false));
+        match r {
+            Ok(d) => eprintln!("{}: indexed, pages {:?}, passages {}", d.file_name, d.pages, d.chunks),
+            Err(e) => eprintln!("{}: {}", p.display(), e.message()),
+        }
+    }
+    let h = vault::search(&l.db, "glacier survey costs", &Library::All, None, &[], 3).unwrap();
+    eprintln!("glacier → {:?}", h.iter().map(|x| (x.title.clone(), x.page)).collect::<Vec<_>>());
+}
