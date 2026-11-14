@@ -279,6 +279,7 @@ export function CompanionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voiceDraft]);
 
+  const vaultSources = useAtlasQuery(`vault-sources:${activeId}:${turn?.revision ?? 0}`, () => (activeId ? api.vaultConversationSources(activeId) : Promise.resolve({})), ["vault"]);
   const msgs = messages.data ?? [];
   const regenerateOk = Boolean(activeId) && !running && canRegenerate(msgs);
   const regenerate = () => {
@@ -341,7 +342,7 @@ export function CompanionPage() {
             </div>
           ) : (
             <>
-              <Thread messages={msgs} canAskAgain={!running} running={running} onAskAgain={(t) => onSend(t)} onRegenerate={regenerate} onSpeak={(t) => useVoice.getState().speakText(t)} />
+              <Thread messages={msgs} sources={vaultSources.data ?? {}} canAskAgain={!running} running={running} onAskAgain={(t) => onSend(t)} onRegenerate={regenerate} onSpeak={(t) => useVoice.getState().speakText(t)} />
               {transient.map((n, i) => (
                 <p key={i} className="mx-auto mb-2 max-w-3xl px-6 text-xs text-warn">{n.text}</p>
               ))}

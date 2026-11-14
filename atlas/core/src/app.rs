@@ -63,6 +63,12 @@ pub struct Atlas {
     pub notifications: Arc<crate::desktop::NotificationCenter>,
     pub(crate) schedule_dirty: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) schedule_synced_at: Mutex<Option<std::time::Instant>>,
+    /// Where Atlas keeps its own copies of Knowledge Vault documents.
+    pub vault_dir: PathBuf,
+    /// The Knowledge Vault worker: documents waiting to be processed, one at a time, off the
+    /// caller's thread. Created on first use.
+    pub(crate) vault_queue: Mutex<Option<std::sync::mpsc::Sender<String>>>,
+    pub(crate) vault_cancels: Arc<Mutex<HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,7 +118,11 @@ impl Atlas {
         audit::record(&db, "app.start", "info", None, None, json!({"version": cfg.version}));
         let voice = crate::voice::VoiceService::new(cfg.data_dir.as_deref());
         let notifications = Arc::new(crate::desktop::NotificationCenter::new(db.clone(), cfg.bus.clone()));
-        Ok(Arc::new_cyclic(|me| Atlas {
+        let vault_dir = match &cfg.data_dir {
+            Some(d) => d.join("vault"),
+            None => std::env::temp_dir().join(format!("atlas-vault-{}-{}", std::process::id(), crate::storage::new_id())),
+        };
+        let atlas = Arc::new_cyclic(|me| Atlas {
             db,
             secrets: cfg.secrets,
             bus: cfg.bus,
@@ -137,7 +147,16 @@ impl Atlas {
             schedule_synced_at: Mutex::new(None),
             me: me.clone(),
             recovered_tasks: recovered,
-        }))
+            vault_dir,
+            vault_queue: Mutex::new(None),
+            vault_cancels: Arc::new(Mutex::new(HashMap::new())),
+        });
+        // Knowledge Vault documents left half-processed when Atlas closed are processed again from
+        // Atlas's own copy (idempotent: their passages are replaced in one transaction).
+        for id in crate::vault::interrupted(&atlas.db).unwrap_or_default() {
+            atlas.vault_enqueue(&id);
+        }
+        Ok(atlas)
     }
 
     pub(crate) fn arc(&self) -> Arc<Atlas> {
@@ -160,6 +179,7 @@ impl Atlas {
             cancel,
             services: self.arc(),
             forge: None,
+            model_local: false,
         }
     }
 
@@ -305,6 +325,134 @@ impl Atlas {
         audit::record(&self.db, "focus.end", "info", None, None, json!({ "outcome": done.outcome, "minutes": crate::focus::minutes_spent(done), "held": held.len() }));
         notify(&self.bus, Topic::Focus, Some(&done.id));
         Ok(())
+    }
+
+    // ----- Knowledge Vault -----
+
+    /// Queue a document for processing on the Vault worker (started on first use).
+    pub(crate) fn vault_enqueue(&self, id: &str) {
+        let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        if let Ok(mut m) = self.vault_cancels.lock() {
+            m.insert(id.to_string(), flag);
+        }
+        let Ok(mut q) = self.vault_queue.lock() else { return };
+        if q.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel::<String>();
+            let (db, bus, dir, cancels) = (self.db.clone(), self.bus.clone(), self.vault_dir.clone(), self.vault_cancels.clone());
+            std::thread::Builder::new()
+                .name("atlas-vault".into())
+                .spawn(move || {
+                    for id in rx {
+                        let flag = cancels.lock().ok().and_then(|m| m.get(&id).cloned()).unwrap_or_default();
+                        let started = std::time::Instant::now();
+                        let r = crate::vault::process(&db, &dir, &id, &|| flag.load(std::sync::atomic::Ordering::SeqCst));
+                        if let Ok(mut m) = cancels.lock() {
+                            m.remove(&id);
+                        }
+                        let ms = started.elapsed().as_millis() as u64;
+                        match &r {
+                            Ok(d) => audit::record(&db, "vault.indexed", "info", None, None, json!({ "document": id, "kind": d.kind, "pages": d.pages, "passages": d.chunks, "chars": d.chars, "ms": ms })),
+                            Err(e) => audit::record(&db, "vault.failed", "warn", None, None, json!({ "document": id, "error": e.code(), "ms": ms })),
+                        }
+                        notify(&bus, Topic::Vault, Some(&id));
+                    }
+                })
+                .ok();
+            *q = Some(tx);
+        }
+        if let Some(tx) = q.as_ref() {
+            let _ = tx.send(id.to_string());
+        }
+    }
+
+    /// Check files before importing (the import dialog shows the result).
+    pub fn vault_check(&self, paths: &[String]) -> Vec<crate::vault::Candidate> {
+        paths.iter().take(200).map(|p| crate::vault::check_file(std::path::Path::new(p))).collect()
+    }
+
+    /// Import files the owner chose. Each is checked and copied now, then processed in the
+    /// background. Returns one result per path: the document, or why it was not imported.
+    pub fn vault_import(&self, paths: &[String], project_id: Option<&str>) -> Vec<std::result::Result<crate::vault::Document, String>> {
+        let mut out = Vec::new();
+        for p in paths.iter().take(200) {
+            match crate::vault::import(&self.db, &self.vault_dir, std::path::Path::new(p), project_id) {
+                Ok(d) => {
+                    audit::record(&self.db, "vault.import", "info", None, None, json!({ "document": d.id, "kind": d.kind, "bytes": d.size_bytes, "project": d.project_id.is_some() }));
+                    self.vault_enqueue(&d.id);
+                    out.push(Ok(d));
+                }
+                Err(e) => out.push(Err(e.message())),
+            }
+        }
+        notify(&self.bus, Topic::Vault, None);
+        out
+    }
+
+    pub fn vault_list(&self, filter: &crate::vault::ListFilter) -> Result<serde_json::Value> {
+        Ok(json!({ "documents": crate::vault::list(&self.db, filter)?, "stats": crate::vault::stats(&self.db)? }))
+    }
+
+    pub fn vault_search(&self, query: &str, library: &crate::vault::Library, document_id: Option<&str>, kinds: &[String], limit: u32) -> Result<Vec<crate::vault::Hit>> {
+        let started = std::time::Instant::now();
+        let hits = crate::vault::search(&self.db, query, library, document_id, kinds, limit)?;
+        tracing_ms("vault.search", started);
+        Ok(hits)
+    }
+
+    pub fn vault_reader(&self, id: &str) -> Result<serde_json::Value> {
+        let (doc, parts) = crate::vault::reader(&self.db, id)?;
+        Ok(json!({ "document": doc, "parts": parts }))
+    }
+
+    /// Retry a failed document or re-index a changed one (refreshing Atlas's copy from the original
+    /// when that has changed).
+    pub fn vault_reindex(&self, id: &str) -> Result<crate::vault::Document> {
+        let d = crate::vault::prepare_reindex(&self.db, &self.vault_dir, id)?;
+        audit::record(&self.db, "vault.reindex", "info", None, None, json!({ "document": id }));
+        self.vault_enqueue(id);
+        notify(&self.bus, Topic::Vault, Some(id));
+        Ok(d)
+    }
+
+    /// Stop processing a document. It is marked failed (with "Cancelled") and can be retried.
+    pub fn vault_cancel(&self, id: &str) -> Result<bool> {
+        let flag = self.vault_cancels.lock().ok().and_then(|m| m.get(id).cloned());
+        match flag {
+            Some(f) => {
+                f.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    pub fn vault_move(&self, id: &str, project_id: Option<&str>) -> Result<crate::vault::Document> {
+        let d = crate::vault::move_to(&self.db, id, project_id)?;
+        audit::record(&self.db, "vault.move", "info", None, None, json!({ "document": id, "project": project_id.is_some() }));
+        notify(&self.bus, Topic::Vault, Some(id));
+        Ok(d)
+    }
+
+    /// Remove a document from the Vault (its passages and Atlas's copy). The original file is kept.
+    pub fn vault_remove(&self, id: &str) -> Result<crate::vault::Document> {
+        let _ = self.vault_cancel(id);
+        let d = crate::vault::remove(&self.db, &self.vault_dir, id)?;
+        audit::record(&self.db, "vault.remove", "info", None, None, json!({ "document": id, "kind": d.kind, "passages": d.chunks }));
+        notify(&self.bus, Topic::Vault, Some(id));
+        Ok(d)
+    }
+
+    /// Compare documents with their original files; changed ones are marked "needs re-indexing".
+    pub fn vault_check_changes(&self) -> Result<u32> {
+        let n = crate::vault::check_changes(&self.db)?;
+        if n > 0 {
+            notify(&self.bus, Topic::Vault, None);
+        }
+        Ok(n)
+    }
+
+    pub fn vault_conversation_sources(&self, conversation_id: &str) -> Result<std::collections::BTreeMap<String, Vec<crate::vault::SourceRef>>> {
+        crate::vault::conversation_sources(&self.db, conversation_id)
     }
 
     // ----- session recap -----
@@ -1425,5 +1573,12 @@ impl ToolServices for Atlas {
     }
     async fn sibling_consult(&self, question: &str, context: &str) -> std::result::Result<Value, String> {
         self.consult(question, context).await.map_err(|e| e.to_string())
+    }
+}
+
+/// Debug timing for local measurements (stderr in debug builds only).
+fn tracing_ms(what: &str, started: std::time::Instant) {
+    if cfg!(debug_assertions) && std::env::var_os("ATLAS_TIMINGS").is_some() {
+        eprintln!("[atlas timing] {what}: {} ms", started.elapsed().as_millis());
     }
 }

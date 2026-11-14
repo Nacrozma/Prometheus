@@ -3,9 +3,10 @@ import { AlertTriangle, Brain, ChevronRight, CircleCheck, CircleSlash, Info, Ref
 import { useVoice } from "@/state/voice";
 import { useState } from "react";
 import { CopyButton, Markdown } from "@/components/Markdown";
+import { SourceList } from "@/features/vault/Citations";
 import { Badge } from "@/components/ui/primitives";
 import { cn, relativeTime } from "@/lib/format";
-import type { Message, Part } from "@/lib/schemas";
+import type { Message, Part, VaultSource } from "@/lib/schemas";
 import { canRegenerate, lastQuestionUnanswered, modKey } from "./conversation";
 
 type ToolCall = Extract<Part, { type: "tool_call" }>;
@@ -105,7 +106,9 @@ export function Thread({
   onSpeak,
   canAskAgain,
   running = false,
+  sources = {},
 }: {
+  sources?: Record<string, VaultSource[]>;
   messages: Message[];
   onAskAgain: (text: string) => void;
   onRegenerate?: () => void;
@@ -123,6 +126,22 @@ export function Thread({
     if (next?.role === "tool") for (const p of next.parts ?? []) if (p.type === "tool_result") map.set(p.call_id, p);
     resultsFor.set(m.id, map);
   });
+  // Each turn's Knowledge Vault sources belong to its last assistant reply with text.
+  const sourcesFor = new Map<string, VaultSource[]>();
+  let turnUser: string | null = null;
+  let lastText: string | null = null;
+  const flush = () => {
+    const list = turnUser ? sources[turnUser] : undefined;
+    if (lastText && list?.length) sourcesFor.set(lastText, list);
+  };
+  for (const m of messages) {
+    if (m.role === "user") {
+      flush();
+      turnUser = m.id;
+      lastText = null;
+    } else if (m.role === "assistant" && m.content.trim()) lastText = m.id;
+  }
+  flush();
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
   const regen = canAskAgain && onRegenerate && canRegenerate(messages);
   const canSpeak = useVoice((s) => Boolean(s.settings?.enabled && s.status?.tts_ready)) && Boolean(onSpeak);
@@ -155,6 +174,7 @@ export function Thread({
                 <Markdown text={m.content} />
               </div>
             )}
+            {sourcesFor.has(m.id) && <SourceList sources={sourcesFor.get(m.id)!} reply={m.content} />}
             {calls.length > 0 && (
               <div className="flex flex-col gap-1.5" aria-label="Tool activity">
                 {calls.map((c) => (

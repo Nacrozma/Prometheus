@@ -41,6 +41,7 @@ export const SettingsSchema = z.object({
   }),
   permissions: z.object({ local_write: gate, network_tools: gate, planner: gate.default("allow") }),
   memory: z.object({ enabled: z.boolean(), max_retrieved: z.number() }),
+  vault: z.object({ use_in_chat: z.boolean(), local_only: z.boolean(), max_passages: z.number() }).default({ use_in_chat: true, local_only: false, max_passages: 4 }),
   workspace_dir: z.string().nullable(),
   appearance: z.object({
     theme: z.enum(["dark", "light", "system"]),
@@ -351,6 +352,7 @@ export const TurnEventSchema = z.discriminatedUnion("type", [
     fell_back: z.boolean(),
     tier: TierSchema.nullable().optional(),
     memories: z.array(z.object({ id: z.string(), content: z.string(), reason: z.string() })),
+    sources: z.lazy(() => z.array(VaultSourceSchema)).default([]),
     tools_offered: z.number(),
   }),
   z.object({ type: z.literal("text_delta"), text: z.string() }),
@@ -515,6 +517,7 @@ export const TOPICS = [
   "notifications",
   "todos",
   "focus",
+  "vault",
 ] as const;
 export type Topic = (typeof TOPICS)[number];
 export const ChangeEventSchema = z.object({ topic: z.enum(TOPICS), id: z.string().nullable() });
@@ -903,3 +906,89 @@ export const RecapSchema = z.object({
   empty: z.boolean(),
 });
 export type Recap = z.infer<typeof RecapSchema>;
+
+// ---------------- Knowledge Vault ----------------
+
+export const VaultSourceSchema = z.object({
+  label: z.string(),
+  chunk_id: z.string().nullable(),
+  document_id: z.string().nullable(),
+  title: z.string(),
+  kind: z.string(),
+  page: z.number().nullable(),
+  heading: z.string(),
+  excerpt: z.string(),
+  sent: z.boolean(),
+});
+export type VaultSource = z.infer<typeof VaultSourceSchema>;
+
+export const VAULT_STATUSES = ["imported", "processing", "indexed", "needs_reindex", "failed"] as const;
+export const VaultDocumentSchema = z.object({
+  id: z.string(),
+  project_id: z.string().nullable(),
+  project_name: z.string().nullable(),
+  title: z.string(),
+  file_name: z.string(),
+  source_path: z.string(),
+  kind: z.enum(["txt", "md", "pdf", "docx"]),
+  size_bytes: z.number(),
+  content_hash: z.string(),
+  status: z.enum(VAULT_STATUSES),
+  error: z.string().nullable(),
+  pages: z.number().nullable(),
+  sections: z.number(),
+  chunks: z.number(),
+  chars: z.number(),
+  extractor_version: z.number(),
+  index_version: z.number(),
+  imported_at: z.string(),
+  updated_at: z.string(),
+  indexed_at: z.string().nullable(),
+  opened_at: z.string().nullable(),
+});
+export type VaultDocument = z.infer<typeof VaultDocumentSchema>;
+
+export const VaultStatsSchema = z.object({
+  documents: z.number(),
+  indexed: z.number(),
+  processing: z.number(),
+  failed: z.number(),
+  needs_reindex: z.number(),
+  passages: z.number(),
+  storage_bytes: z.number(),
+});
+export const VaultListSchema = z.object({ documents: z.array(VaultDocumentSchema), stats: VaultStatsSchema });
+
+export const VaultCandidateSchema = z.object({
+  path: z.string(),
+  file_name: z.string(),
+  kind: z.string().nullable(),
+  size_bytes: z.number(),
+  problem: z.string().nullable(),
+});
+export type VaultCandidate = z.infer<typeof VaultCandidateSchema>;
+
+export const VaultImportResultSchema = z.object({ path: z.string(), document: VaultDocumentSchema.nullable(), error: z.string().nullable() });
+
+export const VaultHitSchema = z.object({
+  chunk_id: z.string(),
+  document_id: z.string(),
+  title: z.string(),
+  kind: z.string(),
+  project_id: z.string().nullable(),
+  page: z.number().nullable(),
+  heading: z.string(),
+  snippet: z.string(),
+  content: z.string(),
+  score: z.number(),
+  matched_terms: z.number(),
+});
+export type VaultHit = z.infer<typeof VaultHitSchema>;
+
+export const VaultReaderSchema = z.object({
+  document: VaultDocumentSchema,
+  parts: z.array(z.object({ chunk_id: z.string(), seq: z.number(), page: z.number().nullable(), heading: z.string(), text: z.string() })),
+});
+export type VaultReader = z.infer<typeof VaultReaderSchema>;
+
+export type VaultLibrary = { kind: "all" } | { kind: "personal" } | { kind: "project"; project_id: string };

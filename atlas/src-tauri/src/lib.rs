@@ -16,6 +16,9 @@ pub struct AppState {
     pub atlas: Arc<Atlas>,
     /// Backup file the user picked and Atlas validated, awaiting explicit confirmation.
     pub pending_restore: Mutex<Option<PathBuf>>,
+    /// Files the owner chose in the native "Import documents" dialog this session. Only these can
+    /// be imported into the Knowledge Vault (the window cannot name arbitrary paths).
+    pub vault_picked: Mutex<std::collections::HashSet<PathBuf>>,
 }
 
 struct TauriBus(tauri::AppHandle);
@@ -106,7 +109,7 @@ pub fn run() {
             });
             atlas.notifications.set_notifier(Arc::new(presence::ShellNotifier(handle.clone())));
             let desktop = atlas.settings().map(|s| s.desktop).unwrap_or_default();
-            app.manage(AppState { atlas, pending_restore: Mutex::new(None) });
+            app.manage(AppState { atlas, pending_restore: Mutex::new(None), vault_picked: Mutex::new(Default::default()) });
             let presence = presence::Presence::default();
             presence.build_tray(&handle);
             app.manage(presence);

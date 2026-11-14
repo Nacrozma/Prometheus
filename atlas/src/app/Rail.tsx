@@ -1,4 +1,4 @@
-import { Activity, Brain, ListTodo, Cable, Hammer, FolderKanban, FolderOpen, Home, MessageSquareText, Mic, Octagon, Orbit, Plug, Settings2 } from "lucide-react";
+import { Activity, Brain, ListTodo, Cable, Hammer, FolderKanban, FolderOpen, Home, Library, MessageSquareText, Mic, Octagon, Orbit, Plug, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { Emblem } from "@/components/Emblem";
 import { NotificationBell } from "@/features/desktop/NotificationBell";
@@ -20,6 +20,7 @@ export const NAV: { route: Route; label: string; icon: typeof Home; shortcut: st
   { route: "projects", label: "Projects", icon: FolderKanban, shortcut: "6" },
   { route: "memory", label: "Memory", icon: Brain, shortcut: "7" },
   { route: "files", label: "Files", icon: FolderOpen, shortcut: "8" },
+  { route: "vault", label: "Knowledge Vault", icon: Library, shortcut: "" },
   { route: "integrations", label: "Integrations", icon: Plug, shortcut: "9" },
   { route: "voice", label: "Voice", icon: Mic, shortcut: "" },
 ];

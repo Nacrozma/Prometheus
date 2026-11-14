@@ -12,6 +12,7 @@ pub mod system;
 pub mod test_tools;
 pub mod text;
 pub mod time;
+pub mod vault_tools;
 pub mod web;
 
 use super::{PermissionClass, Tool, ToolDescriptor};
@@ -64,6 +65,7 @@ pub fn register_all(reg: &ToolRegistry) -> crate::error::Result<()> {
         Arc::new(system::TaskStatus::new()),
         Arc::new(memory_tools::SearchMemory::new()),
         Arc::new(memory_tools::SaveMemory::new()),
+        Arc::new(vault_tools::SearchVault::new()),
         Arc::new(web::WebSearch::new()),
         Arc::new(data::ImportPreview::new()),
         Arc::new(data::Export::new()),

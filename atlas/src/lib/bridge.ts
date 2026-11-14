@@ -71,6 +71,18 @@ export const api = {
   focusStop: () => call("focus_stop", {}, S.FocusSessionSchema.nullable()),
   recap: () => call("recap_get", {}, S.RecapSchema.nullable()),
   recapDismiss: () => call("recap_dismiss", {}, z.null()),
+  vaultPickFiles: () => call("vault_pick_files", {}, z.array(S.VaultCandidateSchema)),
+  vaultImport: (paths: string[], projectId: string | null) => call("vault_import", { paths, projectId }, z.array(S.VaultImportResultSchema)),
+  vaultList: (library: S.VaultLibrary = { kind: "all" }) => call("vault_list", { filter: { library } }, S.VaultListSchema),
+  vaultSearch: (query: string, library: S.VaultLibrary, kinds: string[] = [], documentId: string | null = null) =>
+    call("vault_search", { query, library, kinds, documentId, limit: 40 }, z.array(S.VaultHitSchema)),
+  vaultReader: (id: string) => call("vault_reader", { id }, S.VaultReaderSchema),
+  vaultReindex: (id: string) => call("vault_reindex", { id }, S.VaultDocumentSchema),
+  vaultCancel: (id: string) => call("vault_cancel", { id }, z.boolean()),
+  vaultMove: (id: string, projectId: string | null) => call("vault_move", { id, projectId }, S.VaultDocumentSchema),
+  vaultRemove: (id: string) => call("vault_remove", { id }, S.VaultDocumentSchema),
+  vaultCheckChanges: () => call("vault_check_changes", {}, z.number()),
+  vaultConversationSources: (conversationId: string) => call("vault_conversation_sources", { conversationId }, z.record(z.string(), z.array(S.VaultSourceSchema))),
 
   desktopStatus: () => call("desktop_status", {}, S.DesktopStatusSchema),
   notifications: (limit = 50) => call("notifications_list", { limit }, S.NotificationListSchema),

@@ -66,6 +66,9 @@ pub enum TurnEvent {
         tier: Option<crate::settings::Tier>,
         memories: Vec<MemoryRef>,
         tools_offered: usize,
+        /// Knowledge Vault passages found for this turn, labelled S1, S2… (`sent` false when
+        /// local-only withheld them).
+        sources: Vec<crate::vault::SourceRef>,
     },
     TextDelta { text: String },
     ReasoningDelta { text: String },
@@ -242,6 +245,7 @@ impl Atlas {
         // Tools offered: enabled, available, not denied by policy, and only if the model can use them.
         let mut probe_ctx = self.tool_context(settings.clone(), None, conv.project_id.clone(), cancel.clone());
         probe_ctx.forge = forge_scope.clone();
+        probe_ctx.model_local = route.provider.local;
         let tool_states = crate::tools::registry::stats(&self.db)?;
         let model_tools_ok = route.model_info.as_ref().and_then(|m| m.supports_tools) != Some(false);
         let mut specs: Vec<ToolSpec> = if model_tools_ok && settings.limits.max_tool_calls > 0 {
@@ -313,9 +317,34 @@ impl Atlas {
         }
         memory::mark_used(&self.db, &mem_refs.iter().map(|m| m.id.clone()).collect::<Vec<_>>());
 
+        // Knowledge Vault: relevant passages from the personal library and this conversation's
+        // project only. With local-only on, they are never sent to a model outside this computer.
+        let mut vault_notice: Option<String> = None;
+        let (vault_hits, vault_sent) = if settings.vault.use_in_chat && settings.vault.max_passages > 0 {
+            let hits = crate::vault::retrieve_for_chat(&self.db, text, conv.project_id.as_deref(), settings.vault.max_passages).unwrap_or_default();
+            let allowed = !settings.vault.local_only || route.provider.local;
+            if !hits.is_empty() && !allowed {
+                vault_notice = Some(format!(
+                    "{} relevant {} from your Knowledge Vault {} not sent: local-only is on and {} does not run on this computer.",
+                    hits.len(),
+                    if hits.len() == 1 { "passage" } else { "passages" },
+                    if hits.len() == 1 { "was" } else { "were" },
+                    route.provider.label
+                ));
+            }
+            (hits, allowed)
+        } else {
+            (vec![], false)
+        };
+        let vault_sources = crate::vault::source_refs(&vault_hits, vault_sent);
+        let vault_block = if vault_sent { crate::vault::passage_block(&vault_hits) } else { String::new() };
+
         let local_time = chrono::Local::now().format("%A %Y-%m-%d %H:%M (UTC%:z)").to_string();
         let block = context::context_block(&local_time, &retrieved, &pinned);
-        let sent_text = format!("{block}{text}");
+        // The passages go after <atlas_context> (which carries application-supplied context), so
+        // document text never inherits that standing.
+        let sent_text = if vault_block.is_empty() { format!("{block}{text}") } else { format!("{block}{vault_block}\n{text}") };
+        let regenerating = reuse_user_message.is_some();
         let user_message_id = match reuse_user_message {
             // Regenerate: the stored message (with the context it was first sent with) is answered again.
             Some(id) => id,
@@ -333,6 +362,19 @@ impl Atlas {
                 None,
             )?,
         };
+        if !vault_sources.is_empty() || regenerating {
+            let _ = crate::vault::save_turn_sources(&self.db, &user_message_id, &vault_sources);
+        }
+        if !vault_sources.is_empty() {
+            crate::audit::record(
+                &self.db,
+                "vault.passages",
+                "info",
+                None,
+                None,
+                serde_json::json!({ "conversation": conv.id, "passages": vault_sources.len(), "sent": vault_sent, "provider_local": route.provider.local }),
+            );
+        }
         if conv.message_count == 0 && conv.title == "New conversation" {
             let title: String = text.lines().next().unwrap_or(text).chars().take(60).collect();
             let _ = conversations::rename(&self.db, &conv.id, &title);
@@ -352,7 +394,12 @@ impl Atlas {
             tier: route.tier,
             memories: mem_refs,
             tools_offered: specs.len(),
+            sources: vault_sources.clone(),
         });
+        if let Some(n) = vault_notice {
+            let _ = conversations::append(&self.db, &conv.id, "notice", &n, None, None, None, None, "info", None, None);
+            sink(TurnEvent::Notice { level: "info".into(), text: n });
+        }
         if route.fell_back {
             let _ = conversations::append(&self.db, &conv.id, "notice", &route.reason, None, None, None, None, "warning", None, None);
             sink(TurnEvent::Notice { level: "warn".into(), text: route.reason.clone() });
@@ -615,6 +662,7 @@ impl Atlas {
                 }
                 tool_calls_used += 1;
                 let mut ctx = self.tool_context(settings.clone(), Some(tid.clone()), conv.project_id.clone(), cancel.clone());
+                ctx.model_local = route.provider.local;
                 ctx.forge = forge_scope.clone();
                 let r = {
                     let mut on_ev = |e: DispatchEvent| sink(TurnEvent::Tool { event: e });

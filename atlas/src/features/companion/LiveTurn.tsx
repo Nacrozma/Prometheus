@@ -2,6 +2,7 @@ import { ChevronRight, CircleCheck, CircleSlash, Cloud, Cpu, Loader2, ShieldAler
 import { useState } from "react";
 import { ApprovalCard } from "@/components/ApprovalCard";
 import { Markdown } from "@/components/Markdown";
+import { SourceList } from "@/features/vault/Citations";
 import { cn } from "@/lib/format";
 import type { ToolActivity, TurnState } from "@/state/turns";
 import { MemoryChips } from "./Thread";
@@ -67,6 +68,7 @@ export function LiveTurn({ turn }: { turn: TurnState }) {
           <span aria-hidden className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 bg-accent" style={{ animation: "caret 1s steps(1) infinite" }} />
         </div>
       )}
+      {s && s.sources.length > 0 && <SourceList sources={s.sources} reply={turn.text} />}
       {turn.tools.length > 0 && (
         <ul className="flex flex-col gap-1.5 rounded-md border border-line-1 bg-bg-2/60 px-3 py-2" aria-label="Tool activity">
           {turn.tools.map((a) => (

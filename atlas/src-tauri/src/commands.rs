@@ -25,6 +25,8 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         settings_get, settings_update, first_launch_complete,
         todos_list, todo_detail, todo_create, todo_quick_add, todo_quick_preview, todo_update, todo_set_status, todo_postpone, todo_delete, todo_overview, todo_snooze, schedule_jobs, command_center, focus_status, focus_start, focus_stop, recap_get, recap_dismiss,
         #[cfg(feature = "e2e")] e2e_recap_since,
+        vault_pick_files, vault_check, vault_import, vault_list, vault_search, vault_reader, vault_reindex, vault_cancel, vault_move, vault_remove, vault_check_changes, vault_conversation_sources,
+        #[cfg(feature = "e2e")] e2e_vault_allow,
         desktop_status, notifications_list, notifications_mark_read, notifications_clear, notification_test, window_hide, workspace_pick, workspace_use_default, workspace_add_sample, workspace_browse, workspace_preview, workspace_reveal,
         provider_templates, providers_list, provider_add, provider_update, provider_delete, provider_set_key, provider_clear_key, provider_test,
         integrations_list, integration_set_key, integration_clear_key, integration_set_enabled, integration_test,
@@ -285,6 +287,117 @@ fn recap_get(state: State<'_, AppState>) -> R<Option<atlas_core::recap::Recap>> 
 #[tauri::command]
 fn e2e_recap_since(state: State<'_, AppState>, minutes: i64) -> R<()> {
     state.atlas.recap_begin_minutes_ago(minutes)
+}
+
+// ---------------- Knowledge Vault ----------------
+
+/// The native file picker for importing documents. The chosen paths are remembered for this
+/// session; `vault_import` accepts only those.
+#[tauri::command]
+async fn vault_pick_files(app: AppHandle, state: State<'_, AppState>) -> R<Vec<atlas_core::vault::Candidate>> {
+    let a = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        a.dialog().file().set_title("Import documents into the Knowledge Vault").add_filter("Documents", &["txt", "md", "markdown", "pdf", "docx"]).blocking_pick_files()
+    })
+    .await
+    .map_err(io)?
+    .unwrap_or_default();
+    let paths: Vec<PathBuf> = picked.into_iter().filter_map(|p| p.into_path().ok()).collect();
+    if let Ok(mut set) = state.vault_picked.lock() {
+        set.extend(paths.iter().cloned());
+    }
+    Ok(state.atlas.vault_check(&paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>()))
+}
+
+fn picked_only(state: &State<'_, AppState>, paths: &[String]) -> R<()> {
+    let set = state.vault_picked.lock().map_err(|_| AtlasError::Internal("lock".into()))?;
+    if paths.iter().all(|p| set.contains(&PathBuf::from(p))) {
+        Ok(())
+    } else {
+        Err(AtlasError::PermissionDenied("documents can only be imported from files chosen in the import dialog".into()))
+    }
+}
+
+#[tauri::command]
+fn vault_check(state: State<'_, AppState>, paths: Vec<String>) -> R<Vec<atlas_core::vault::Candidate>> {
+    picked_only(&state, &paths)?;
+    Ok(state.atlas.vault_check(&paths))
+}
+
+#[derive(Serialize)]
+struct ImportResult {
+    path: String,
+    document: Option<atlas_core::vault::Document>,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn vault_import(state: State<'_, AppState>, paths: Vec<String>, project_id: Option<String>) -> R<Vec<ImportResult>> {
+    picked_only(&state, &paths)?;
+    let r = state.atlas.vault_import(&paths, project_id.as_deref());
+    Ok(paths
+        .into_iter()
+        .zip(r)
+        .map(|(path, x)| match x {
+            Ok(d) => ImportResult { path, document: Some(d), error: None },
+            Err(e) => ImportResult { path, document: None, error: Some(e) },
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn vault_list(state: State<'_, AppState>, filter: Option<atlas_core::vault::ListFilter>) -> R<Value> {
+    state.atlas.vault_list(&filter.unwrap_or_default())
+}
+
+#[tauri::command]
+fn vault_search(state: State<'_, AppState>, query: String, library: Option<atlas_core::vault::Library>, document_id: Option<String>, kinds: Option<Vec<String>>, limit: Option<u32>) -> R<Vec<atlas_core::vault::Hit>> {
+    state.atlas.vault_search(&query, &library.unwrap_or(atlas_core::vault::Library::All), document_id.as_deref(), &kinds.unwrap_or_default(), limit.unwrap_or(30))
+}
+
+#[tauri::command]
+fn vault_reader(state: State<'_, AppState>, id: String) -> R<Value> {
+    state.atlas.vault_reader(&id)
+}
+
+#[tauri::command]
+fn vault_reindex(state: State<'_, AppState>, id: String) -> R<atlas_core::vault::Document> {
+    state.atlas.vault_reindex(&id)
+}
+
+#[tauri::command]
+fn vault_cancel(state: State<'_, AppState>, id: String) -> R<bool> {
+    state.atlas.vault_cancel(&id)
+}
+
+#[tauri::command]
+fn vault_move(state: State<'_, AppState>, id: String, project_id: Option<String>) -> R<atlas_core::vault::Document> {
+    state.atlas.vault_move(&id, project_id.as_deref())
+}
+
+#[tauri::command]
+fn vault_remove(state: State<'_, AppState>, id: String) -> R<atlas_core::vault::Document> {
+    state.atlas.vault_remove(&id)
+}
+
+#[tauri::command]
+fn vault_check_changes(state: State<'_, AppState>) -> R<u32> {
+    state.atlas.vault_check_changes()
+}
+
+#[tauri::command]
+fn vault_conversation_sources(state: State<'_, AppState>, conversation_id: String) -> R<Value> {
+    Ok(json!(state.atlas.vault_conversation_sources(&conversation_id)?))
+}
+
+/// Automated-test build only: stand in for the native file picker (WebDriver cannot operate it).
+#[cfg(feature = "e2e")]
+#[tauri::command]
+fn e2e_vault_allow(state: State<'_, AppState>, paths: Vec<String>) -> R<()> {
+    if let Ok(mut set) = state.vault_picked.lock() {
+        set.extend(paths.into_iter().map(PathBuf::from));
+    }
+    Ok(())
 }
 
 #[tauri::command]

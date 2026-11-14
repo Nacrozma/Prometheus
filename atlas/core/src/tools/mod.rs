@@ -119,6 +119,8 @@ pub struct ToolContext {
     pub services: Arc<dyn ToolServices>,
     /// The active Forge project, only inside a Forge session.
     pub forge: Option<crate::forge::ForgeScope>,
+    /// Whether the model reading tool results runs on this computer (local-only settings use it).
+    pub model_local: bool,
 }
 
 #[async_trait]
