@@ -91,6 +91,19 @@ test("after two hours closed: the interrupted run is listed, not resumed; the Fo
   assert.ok(!todos.__error, JSON.stringify(todos));
   assert.ok(todos.some((t) => t.id === handoff.todo), "the to-do survived the restart");
 
+  // The Knowledge Vault survived: documents still indexed, searchable with their page, and the
+  // citations stored with an earlier answer still point at the document.
+  const vdocs = (await invoke("vault_list", { filter: { library: { kind: "all" } } })).documents;
+  assert.equal(vdocs.find((d) => d.title === "glacier-report")?.status, "indexed", JSON.stringify(vdocs.map((d) => [d.title, d.status])));
+  const vhit = await invoke("vault_search", { query: "glacier survey costs", library: { kind: "all" } });
+  assert.equal(vhit[0]?.page, 2);
+  let cited = false;
+  for (const c of await invoke("conversations_list", { limit: 30 })) {
+    const srcs = Object.values(await invoke("vault_conversation_sources", { conversationId: c.id })).flat();
+    if (srcs.some((x) => x.title === "glacier-report" && x.page === 2 && x.document_id)) cited = true;
+  }
+  assert.ok(cited, "a stored citation still resolves to its document after the restart");
+
   // The recap: built from what was recorded. The interrupted reply is listed with Open.
   const r = await invoke("recap_get");
   assert.ok(r && !r.empty, JSON.stringify(r));

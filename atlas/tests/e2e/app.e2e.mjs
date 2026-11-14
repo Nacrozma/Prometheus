@@ -1052,8 +1052,9 @@ test("accessibility audit (axe-core) finds no serious or critical issues", async
   await invoke("notification_test");
   await driver.wait(async () => Number(await (await find(By.css("[data-bell]"))).getAttribute("data-unread")) >= 1, 5000);
   const failures = {};
-  for (const [key, page] of [["1", "home"], ["2", "companion"], ["tasks", "tasks"], ["4", "forge"], ["siblings", "siblings"], ["5", "mission-control"], ["7", "memory"], ["9", "integrations"], [",", "settings"]]) {
-    if (key === "siblings" || key === "tasks") await (await find(By.css(`nav[aria-label="Main"] button[aria-label="${key === "tasks" ? "Tasks" : "Siblings"}"]`))).click();
+  for (const [key, page] of [["1", "home"], ["2", "companion"], ["tasks", "tasks"], ["4", "forge"], ["siblings", "siblings"], ["5", "mission-control"], ["7", "memory"], ["vault", "knowledge-vault"], ["9", "integrations"], [",", "settings"]]) {
+    const railLabel = { tasks: "Tasks", siblings: "Siblings", vault: "Knowledge Vault" }[key];
+    if (railLabel) await (await find(By.css(`nav[aria-label="Main"] button[aria-label="${railLabel}"]`))).click();
     else await go(key);
     await driver.sleep(500);
     const blocking = await audit(page);
@@ -1109,7 +1110,8 @@ test("Knowledge Vault: four formats imported and indexed, scanned PDFs refused h
   await shot("23b-vault-search");
   await hit.click();
   await driver.wait(async () => /40000 euros/.test((await driver.executeScript(`return document.querySelector('[data-vault-reader] [data-cited="true"]')?.textContent ?? ""`)) ?? ""), 10000, "the reader opens at the passage");
-  await driver.actions().sendKeys(Key.ESCAPE).perform();
+  // Closed with its button: Esc first stops Atlas reading a reply aloud.
+  await driver.executeScript("arguments[0].click()", await find(By.css('[role="dialog"] button[aria-label="Close"]')));
   await driver.wait(() => gone("[data-vault-reader]"), 5000);
 
   // Ask Atlas: the answer comes from the passage and cites it; the citation opens the source.
@@ -1129,7 +1131,8 @@ test("Knowledge Vault: four formats imported and indexed, scanned PDFs refused h
   await (await src1.findElement(By.css("button"))).click();
   await driver.wait(async () => /40000 euros/.test((await driver.executeScript(`return document.querySelector('[data-vault-reader] [data-cited="true"]')?.textContent ?? ""`)) ?? ""), 10000, "the citation opens the cited passage");
   await shot("23d-vault-cited-passage");
-  await driver.actions().sendKeys(Key.ESCAPE).perform();
+  // Closed with its button: Esc first stops Atlas reading a reply aloud.
+  await driver.executeScript("arguments[0].click()", await find(By.css('[role="dialog"] button[aria-label="Close"]')));
   await driver.wait(() => gone("[data-vault-reader]"), 5000);
 
   // Scope: a project's document is not used outside the project, until it is moved.

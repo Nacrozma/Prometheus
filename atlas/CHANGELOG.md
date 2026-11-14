@@ -35,12 +35,31 @@
   "waiting for Focus to end", with no toast or system notification); **approvals and failures always
   come through**. When the session ends, on time or stopped, one summary says how long you focused and
   what waited. One session at a time.
+- **Knowledge Vault** (new page): import text, Markdown, PDF and Word documents into a personal library
+  or a project's library. Atlas keeps its own copy and reads it on this computer; originals are never
+  changed. Documents are checked by their content (not just the name), processed in the background with
+  progress, cancel and retry, and only shown as Indexed when extraction really succeeded. Scanned PDFs
+  without a text layer and password-protected PDFs are refused with that reason (no OCR yet).
+  - **Search** every word or an exact "phrase", by library and type; matches highlighted; each result
+    opens the document at that passage, with its PDF page or section heading.
+  - **Answers from your documents, with citations:** in a conversation Atlas looks up the few relevant
+    passages (personal library plus that conversation's project only), answers from them and cites them
+    as [S1], [S2]. Under the reply, each source opens the exact passage; a citation that matches no
+    passage Atlas was given is flagged as unsupported. Citations survive restarts.
+  - **Local-only:** optionally, passages are never sent to a model that does not run on this computer;
+    Atlas says when it held them back.
+  - Document text is treated as evidence, never as instructions; a document cannot grant permissions or
+    trigger actions. Re-index when the original changes (Atlas notices), move between libraries, remove
+    (original kept). A `vault.search` tool lets Atlas search when you ask it to find something.
 - **While you were away:** after 30 minutes or more with Atlas closed, Home shows a recap built from
   what Atlas recorded (reminders delivered or missed, notices, tasks finished, mission updates,
   approvals waiting). Runs that were interrupted when Atlas closed are listed with **Open**; nothing is
   resumed by itself. Dismiss hides it until the next time away.
 
 ### Changed
+- Database schema 7 (Knowledge Vault: documents, passages, full-text index, sources per answer). The
+  database is copied to `atlas.pre-v7.bak` before upgrading; every earlier schema upgrades with its data
+  kept (tested).
 - Database schema 6 (Focus sessions; notifications can be held). Upgrades from every earlier schema
   keep settings and notifications; an interrupted upgrade rolls back to schema 5 and is retried on the
   next start (tested).

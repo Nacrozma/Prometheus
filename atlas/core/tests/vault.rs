@@ -154,6 +154,10 @@ fn all_four_formats_are_extracted_with_the_locations_citations_need() {
     }
     assert_eq!(pdf.pages, Some(2));
 
+    // PDF lines positioned with Td stay separate words (they used to run together: "reportIntroduction").
+    let h = vault::search(&l.db, "report introduction", &Library::All, None, &["pdf".into()], 10).unwrap();
+    assert_eq!(h.len(), 1, "line ends are word breaks: {h:?}");
+    assert!(h[0].content.contains("Annual report Introduction"), "{}", h[0].content);
     // PDF: the page is the one the text is really on.
     let h = vault::search(&l.db, "glacier survey", &Library::All, None, &[], 10).unwrap();
     assert_eq!(h.len(), 1, "{h:?}");

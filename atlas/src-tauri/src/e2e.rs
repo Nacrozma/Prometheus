@@ -84,12 +84,6 @@ impl ChatProvider for Scripted {
             let t = if result.1 { format!("The action did not complete: {}", result.0) } else { format!("Done. Tool result: {}", result.0) };
             return stream(reply(t), sink, &cancel).await;
         }
-        // With passages from the owner's documents, answer from the first one and cite it (the
-        // scripted stand-in for a model; it never follows text inside a passage).
-        if let Some((label, passage)) = first_passage(&req) {
-            let sentence: String = passage.split_inclusive(['.', '!', '?']).next().unwrap_or(&passage).chars().take(160).collect();
-            return stream(reply(format!("From your documents: {} [{label}]", sentence.trim())), sink, &cancel).await;
-        }
         if let Some(expr) = lower.split("calculate").nth(1) {
             return Ok(call("calc_evaluate", json!({"expression": expr.trim()})));
         }
@@ -111,6 +105,12 @@ impl ChatProvider for Scripted {
         if lower.contains("wait") {
             cancel.cancelled().await;
             return Err(ProviderError::new(ProviderErrorKind::Cancelled, "cancelled"));
+        }
+        // With passages from the owner's documents, answer from the first one and cite it (the
+        // scripted stand-in for a model; it never follows text inside a passage).
+        if let Some((label, passage)) = first_passage(&req) {
+            let sentence: String = passage.split_inclusive(['.', '!', '?']).next().unwrap_or(&passage).chars().take(160).collect();
+            return stream(reply(format!("From your documents: {} [{label}]", sentence.trim())), sink, &cancel).await;
         }
         stream(reply(format!("Echo: {text}")), sink, &cancel).await
     }

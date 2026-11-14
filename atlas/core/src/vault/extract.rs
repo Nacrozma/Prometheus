@@ -226,7 +226,7 @@ fn markdown(text: &str) -> Extracted {
 
 fn pdf(bytes: &[u8], cancel: &dyn Fn() -> bool) -> Result<Extracted> {
     let has_encrypt = bytes.windows(8).any(|w| w == b"/Encrypt");
-    let doc = match lopdf::Document::load_mem(bytes) {
+    let mut doc = match lopdf::Document::load_mem(bytes) {
         Ok(d) => d,
         Err(_) if has_encrypt => return Err(AtlasError::Validation("this PDF is password-protected; Atlas cannot open protected PDFs yet".into())),
         Err(e) => return Err(AtlasError::Validation(format!("this PDF could not be read (damaged or unsupported): {}", short(&e.to_string())))),
@@ -244,6 +244,9 @@ fn pdf(bytes: &[u8], cancel: &dyn Fn() -> bool) -> Result<Extracted> {
     for &n in pages.keys().take(MAX_PDF_PAGES as usize) {
         if cancel() {
             return Err(AtlasError::Cancelled);
+        }
+        if let Some(&page_id) = pages.get(&n) {
+            mark_line_moves(&mut doc, page_id);
         }
         match doc.extract_text_with_limit(&[n], MAX_PDF_PAGE_BYTES) {
             Ok(t) => {
@@ -264,6 +267,38 @@ fn pdf(bytes: &[u8], cancel: &dyn Fn() -> bool) -> Result<Extracted> {
         return Err(AtlasError::Validation(why));
     }
     Ok(Extracted { sections, title: pdf_title(&doc), pages: Some(total), skipped_pages: skipped })
+}
+
+/// lopdf ends a line of text only at `T*` and `ET`, but many PDFs start each new line with a
+/// positioning operator (`Td`/`TD` with a vertical move, or `Tm`). Without a break there, the last word
+/// of one line and the first of the next run together ("staffingThe") and neither can be found. This
+/// adds a `T*` before every vertical move (extraction only; the stored document is not changed).
+fn mark_line_moves(doc: &mut lopdf::Document, page_id: lopdf::ObjectId) {
+    use lopdf::content::{Content, Operation};
+    let Ok(bytes) = doc.get_page_content_with_limit(page_id, MAX_PDF_PAGE_BYTES) else { return };
+    let Ok(content) = Content::decode(&bytes) else { return };
+    let num = |o: &lopdf::Object| match o {
+        lopdf::Object::Integer(i) => Some(*i as f64),
+        lopdf::Object::Real(r) => Some(*r as f64),
+        _ => None,
+    };
+    let mut ops = Vec::with_capacity(content.operations.len() + 16);
+    let mut changed = false;
+    for op in content.operations {
+        let vertical = match op.operator.as_str() {
+            "Td" | "TD" => op.operands.get(1).and_then(num).is_some_and(|y| y.abs() > 0.01),
+            "Tm" | "'" | "\"" => true,
+            _ => false,
+        };
+        if vertical {
+            ops.push(Operation::new("T*", vec![]));
+            changed = true;
+        }
+        ops.push(op);
+    }
+    if changed && let Ok(enc) = (Content { operations: ops }).encode() {
+        let _ = doc.change_page_content(page_id, enc);
+    }
 }
 
 /// lopdf puts each text run on its own line; join lines into paragraphs where the page has no
