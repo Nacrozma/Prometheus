@@ -57,6 +57,9 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo test -p atlas-core --lib os_keyring -- --ignored
       - run: pnpm tauri build
+      - name: No test-only hooks in the production binary
+        shell: bash
+        run: bash tests/release/no-test-hooks.sh "target/release/atlas-desktop$([[ "$RUNNER_OS" == Windows ]] && echo .exe)"
       - uses: actions/upload-artifact@v4
         with:
           name: atlas-${{ matrix.os }}
@@ -115,6 +118,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build the e2e desktop binary
         run: pnpm tauri build --debug --no-bundle --features e2e
+      - name: The test build does contain the test hooks (so the production check can see them)
+        shell: bash
+        run: bash tests/release/no-test-hooks.sh "target/debug/atlas-desktop$([[ "$RUNNER_OS" == Windows ]] && echo .exe)" --expect-test-build
       # Independent of WebDriver: launch the app, confirm it stays up, and capture the real Windows desktop.
       - name: Windows launch smoke test
         if: runner.os == 'Windows'

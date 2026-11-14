@@ -42,6 +42,9 @@ jobs:
           pnpm test
           cargo test --workspace
       - run: pnpm tauri build
+      - name: No test-only hooks in the production binary
+        shell: bash
+        run: bash tests/release/no-test-hooks.sh target/release/atlas-desktop.exe
       - name: Collect installers with stable names and checksums
         shell: pwsh
         run: |
