@@ -411,8 +411,7 @@ async fn turn(atlas: &Arc<Atlas>, conv: &str, text: &str) -> Vec<TurnEvent> {
         .send_message(TurnParams { conversation_id: conv.into(), text: text.into(), ..Default::default() }, Box::new(move |e| e2.lock().unwrap().push(e)))
         .await
         .unwrap();
-    let ev = events.lock().unwrap().clone();
-    ev
+    events.lock().unwrap().clone()
 }
 
 #[tokio::test]

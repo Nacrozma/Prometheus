@@ -183,7 +183,7 @@ mod tests {
     #[test]
     fn long_text_splits_at_paragraphs_with_overlap_and_respects_the_maximum() {
         let para = "This is a sentence about budgets and travel plans. ".repeat(12);
-        let text = vec![para.trim(); 6].join("\n\n");
+        let text = [para.trim(); 6].join("\n\n");
         let cfg = ChunkConfig { target: 700, max: 900, overlap: 100 };
         let c = chunk(&[sec(Some(3), "", &text)], cfg);
         assert!(c.len() >= 4, "{}", c.len());

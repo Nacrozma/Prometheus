@@ -167,7 +167,7 @@ fn an_interrupted_v6_upgrade_rolls_back_to_v5_and_can_be_retried() {
     assert_eq!(one("SELECT COUNT(*) FROM sqlite_master WHERE name='focus_sessions'"), 0, "no half-made table");
     assert_eq!(one("SELECT COUNT(*) FROM notifications WHERE id='n1'"), 1);
     migrations::apply(&conn).unwrap();
-    assert_eq!(one("PRAGMA user_version"), 6);
+    assert_eq!(one("PRAGMA user_version"), migrations::CURRENT_SCHEMA_VERSION);
     assert_eq!(one("SELECT COUNT(*) FROM notifications WHERE id='n1' AND held=0"), 1);
 }
 

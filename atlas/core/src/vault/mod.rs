@@ -551,7 +551,8 @@ pub fn search(db: &Db, query: &str, lib: &Library, document_id: Option<&str>, ki
     if !hits.is_empty() || terms.len() < 2 {
         return Ok(hits);
     }
-    let loose = format!("{}{}", phrase_q.iter().map(|p| format!("{p} AND ")).collect::<String>(), format!("({})", terms.iter().map(|t| quote(t)).collect::<Vec<_>>().join(" OR ")));
+    let any_term = terms.iter().map(|t| quote(t)).collect::<Vec<_>>().join(" OR ");
+    let loose = format!("{}({any_term})", phrase_q.iter().map(|p| format!("{p} AND ")).collect::<String>());
     run_search(db, &loose, lib, document_id, kinds, &all, limit)
 }
 
