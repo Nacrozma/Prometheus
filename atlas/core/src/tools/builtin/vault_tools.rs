@@ -45,7 +45,7 @@ impl Tool for SearchVault {
     fn availability(&self, ctx: &ToolContext) -> Availability {
         if !ctx.settings.vault.use_in_chat {
             Availability::Unavailable { reason: "the Knowledge Vault is turned off for conversations in Settings".into() }
-        } else if ctx.settings.vault.local_only && !ctx.model_local {
+        } else if !crate::vault::passages_allowed(ctx.settings.vault.local_only, ctx.model_local) {
             Availability::Unavailable { reason: "local-only is on and the selected model does not run on this computer".into() }
         } else {
             Availability::Available
@@ -53,7 +53,7 @@ impl Tool for SearchVault {
     }
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
         // Checked again here, not only when the tool is offered.
-        if ctx.settings.vault.local_only && !ctx.model_local {
+        if !crate::vault::passages_allowed(ctx.settings.vault.local_only, ctx.model_local) {
             return Err(ToolError::new("local_only", "local-only is on: document text is not sent to a model outside this computer"));
         }
         let limit = input["limit"].as_u64().unwrap_or(5).clamp(1, 10) as u32;

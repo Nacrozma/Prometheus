@@ -322,7 +322,7 @@ impl Atlas {
         let mut vault_notice: Option<String> = None;
         let (vault_hits, vault_sent) = if settings.vault.use_in_chat && settings.vault.max_passages > 0 {
             let hits = crate::vault::retrieve_for_chat(&self.db, text, conv.project_id.as_deref(), settings.vault.max_passages).unwrap_or_default();
-            let allowed = !settings.vault.local_only || route.provider.local;
+            let allowed = crate::vault::passages_allowed(settings.vault.local_only, route.provider.local);
             if !hits.is_empty() && !allowed {
                 vault_notice = Some(format!(
                     "{} relevant {} from your Knowledge Vault {} not sent: local-only is on and {} does not run on this computer.",

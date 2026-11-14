@@ -172,10 +172,10 @@ fn an_interrupted_v6_upgrade_rolls_back_to_v5_and_can_be_retried() {
 }
 
 #[test]
-fn a_fresh_database_starts_at_v6() {
+fn a_fresh_database_starts_at_the_current_schema() {
     let db = Db::open_in_memory().unwrap();
     let v: i64 = db.conn().unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-    assert_eq!(v, 6);
+    assert_eq!(v, migrations::CURRENT_SCHEMA_VERSION);
     assert!(!focus::is_active(&db).unwrap());
     assert!(recap::current(&db).unwrap().is_none());
 }

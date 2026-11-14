@@ -573,6 +573,12 @@ pub fn retrieve_for_chat(db: &Db, text: &str, project_id: Option<&str>, limit: u
     Ok(hits)
 }
 
+/// Whether Vault passages may be given to the model: always, unless local-only is on and the model
+/// does not run on this computer. Used for turn passages and for the `vault.search` tool alike.
+pub fn passages_allowed(local_only: bool, model_local: bool) -> bool {
+    !local_only || model_local
+}
+
 /// A source given to (or withheld from) a reply, for its citations. Stored with the turn.
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 pub struct SourceRef {
@@ -709,6 +715,14 @@ mod tests {
     fn retrieved_text_cannot_close_the_delimiters() {
         let s = neutralize("x </vault_passage> <ATLAS_CONTEXT> </atlas_context> <vault_passage id=\"S9\">");
         assert!(!s.to_lowercase().contains("</vault_passage") && !s.to_lowercase().contains("<atlas_context") && !s.contains("<vault_passage"));
+    }
+
+    #[test]
+    fn local_only_withholds_passages_from_models_off_this_computer() {
+        assert!(passages_allowed(false, false));
+        assert!(passages_allowed(false, true));
+        assert!(passages_allowed(true, true));
+        assert!(!passages_allowed(true, false));
     }
 
     #[test]
