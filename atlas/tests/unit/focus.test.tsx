@@ -17,7 +17,8 @@ vi.mock("@/lib/bridge", () => ({
 }));
 vi.mock("@/lib/events", () => ({ onChange: () => () => {} }));
 
-const { FocusBar, FocusDialog, useFocusUi } = await import("@/features/focus/Focus");
+const { FocusBar, FocusDialog, useFocusUi, useRemaining } = await import("@/features/focus/Focus");
+const { renderHook } = await import("@testing-library/react");
 
 const session = (o: Partial<FocusSession> = {}): FocusSession => ({
   id: "f1", started_at: new Date().toISOString(), planned_end: new Date(Date.now() + 25 * 60_000).toISOString(), ended_at: null, todo_id: null, todo_title: null, label: "", outcome: "", ...o,
@@ -45,6 +46,21 @@ describe("Focus Mode", () => {
     expect(bar.querySelector("[data-focus-left]")?.textContent).toMatch(/^2[45]:\d\d$/);
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     await waitFor(() => expect(stop).toHaveBeenCalled());
+  });
+
+  it("shows the right time left as soon as a session starts, however long ago the bar was mounted", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-14T09:00:00Z"));
+      const { result, rerender } = renderHook(({ end }: { end?: string }) => useRemaining(end), { initialProps: {} as { end?: string } });
+      expect(result.current).toBe("");
+      // Ten minutes later a 40-minute session starts: the first value shown is 40:00, not 50:00.
+      vi.setSystemTime(new Date("2026-11-14T09:10:00Z"));
+      rerender({ end: "2026-11-14T09:50:00.000Z" });
+      expect(result.current).toBe("40:00");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("starts a session of the chosen length, on a task, and refuses lengths out of range", async () => {

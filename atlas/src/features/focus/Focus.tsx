@@ -22,17 +22,28 @@ export function useFocus() {
   return useAtlasQuery("focus", api.focusStatus, ["focus", "todos"]);
 }
 
-/** mm:ss left until `end`, updated every second. */
-function useRemaining(end: string | undefined): string {
-  const [now, setNow] = useState(() => Date.now());
+/** mm:ss from `now` until `end`. */
+export function formatRemaining(end: string, now: number): string {
+  const left = Math.max(0, Math.round((Date.parse(end) - now) / 1000));
+  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+}
+
+/**
+ * mm:ss left until `end`, updated every second. The clock is read when the session changes, not
+ * kept from when the bar was first mounted (which showed too much time left for the first second).
+ */
+export function useRemaining(end: string | undefined): string {
+  const [clock, setClock] = useState<{ end: string | undefined; now: number }>(() => ({ end, now: Date.now() }));
   useEffect(() => {
     if (!end) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    setClock({ end, now: Date.now() });
+    const t = setInterval(() => setClock({ end, now: Date.now() }), 1000);
     return () => clearInterval(t);
   }, [end]);
   if (!end) return "";
-  const left = Math.max(0, Math.round((Date.parse(end) - now) / 1000));
-  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+  // Until the effect above has run for this session, read the clock now rather than show a stale value.
+  const now = clock.end === end ? clock.now : Date.now();
+  return formatRemaining(end, now);
 }
 
 export const focusWhat = (s: FocusSession) => s.todo_title || s.label || "Focus";
@@ -53,16 +64,22 @@ export function FocusBar() {
   const left = useRemaining(s?.planned_end);
   if (!s) return null;
   return (
-    <div role="status" aria-label={`Focus session: ${focusWhat(s)}, ${left} left`} data-focus-bar className="fixed left-1/2 top-3 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-accent/40 bg-bg-2/95 py-1.5 pl-4 pr-1.5 text-sm shadow-2 backdrop-blur">
-      <Target className="size-4 text-accent" aria-hidden />
-      <span className="max-w-64 truncate font-medium">{focusWhat(s)}</span>
-      <span className="font-mono tabular-nums text-text-2" data-focus-left>
-        {left}
-      </span>
-      <span className="hidden text-xs text-text-3 sm:inline">Notifications wait · approvals still come through</span>
-      <Button size="sm" variant="ghost" onClick={stopFocus}>
-        Stop
-      </Button>
+    // Centred in a full-width strip, so the bar can use the whole window width (positioned at
+    // left: 50% it had only half, and the task title was squeezed to nothing).
+    <div className="pointer-events-none fixed inset-x-0 top-3 z-40 flex justify-center px-4">
+      <div role="status" aria-label={`Focus session: ${focusWhat(s)}, ${left} left`} data-focus-bar className="pointer-events-auto flex max-w-full items-center gap-3 rounded-full border border-accent/40 bg-bg-2/95 py-1.5 pl-4 pr-1.5 text-sm shadow-2 backdrop-blur">
+        <Target className="size-4 shrink-0 text-accent" aria-hidden />
+        <span className="max-w-64 shrink-0 truncate font-medium" data-focus-what>
+          {focusWhat(s)}
+        </span>
+        <span className="shrink-0 font-mono tabular-nums text-text-2" data-focus-left>
+          {left}
+        </span>
+        <span className="hidden min-w-0 truncate text-xs text-text-3 md:inline">Notifications wait · approvals still come through</span>
+        <Button size="sm" variant="ghost" onClick={stopFocus}>
+          Stop
+        </Button>
+      </div>
     </div>
   );
 }
