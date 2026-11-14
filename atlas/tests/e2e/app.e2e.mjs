@@ -64,6 +64,13 @@ const pageText = () => driver.executeScript("return document.body.innerText");
  * are being removed at that moment can fail with a stale-element error (seen with the splash).
  */
 const gone = (selector) => driver.executeScript(`return document.querySelector(${JSON.stringify(selector)}) === null`);
+/**
+ * Text of truncating spans (overflow: hidden), checked by content and real layout. WebDriver's
+ * visible-text heuristic leaves such spans out even when they are drawn (seen with WebKitWebDriver),
+ * so tests check the text and that it has a rendered width instead.
+ */
+const laidOutText = (sel) =>
+  driver.executeScript(`return [...document.querySelectorAll(${JSON.stringify(sel)})].map((e) => ({ text: e.textContent.trim(), width: e.getBoundingClientRect().width }))`);
 /** Navigate with the app's own keyboard shortcuts (Ctrl+1…9, Ctrl+,). */
 async function go(key) {
   await driver.actions().keyDown(Key.CONTROL).sendKeys(key).keyUp(Key.CONTROL).perform();
@@ -881,7 +888,8 @@ test("Focus Mode holds what can wait and lets approvals through, ends with a sum
   await go("1");
   const card = await find(By.css("[data-recap]"));
   assert.match(await card.getText(), /While you were away/);
-  assert.match(await card.getText(), /Stretch break/);
+  const notices = await laidOutText("[data-recap] [data-recap-notice]");
+  assert.ok(notices.some((n) => n.text === "Reminder: Stretch break" && n.width > 40), JSON.stringify(notices));
   await (await find(By.css('button[aria-label="Dismiss the recap"]'))).click();
   await driver.wait(() => gone("[data-recap]"), 5000);
   assert.equal(await invoke("recap_get"), null);

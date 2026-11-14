@@ -99,7 +99,9 @@ function RecapCard({ r }: { r: Recap }) {
                   {r.notices.map(([k, t], i) => (
                     <li key={i} className="flex items-center gap-2">
                       <span className="w-20 shrink-0 text-xs text-text-3">{NOTICE_KIND[k] ?? k}</span>
-                      <span className="truncate">{t}</span>
+                      <span className="truncate" data-recap-notice>
+                        {t}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -111,7 +113,9 @@ function RecapCard({ r }: { r: Recap }) {
                   <ul className="mt-1 flex flex-col gap-1 text-sm">
                     {r.interrupted.map(([id, req, conv]) => (
                       <li key={id} className="flex items-center gap-2">
-                        <span className="min-w-0 flex-1 truncate">{req}</span>
+                        <span className="min-w-0 flex-1 truncate" data-recap-request>
+                          {req}
+                        </span>
                         <Button size="sm" variant="ghost" onClick={() => (conv ? ui.openConversation(conv) : ui.openTask(id))}>
                           Open
                         </Button>

@@ -98,7 +98,8 @@ test("after two hours closed: the interrupted run is listed, not resumed; the Fo
   const card = await find(By.css("[data-recap]"));
   assert.match(await card.getText(), /While you were away/);
   const interrupted = await find(By.css("[data-recap-interrupted]"));
-  assert.match(await interrupted.getText(), /create a note before closing/);
+  const reqs = await driver.executeScript(`return [...document.querySelectorAll("[data-recap-request]")].map((e) => ({ text: e.textContent.trim(), width: e.getBoundingClientRect().width }))`);
+  assert.ok(reqs.some((r) => r.text.includes("create a note before closing") && r.width > 40), JSON.stringify(reqs));
   assert.match(await interrupted.getText(), /Nothing was resumed/);
   await shot("22-recap");
 
