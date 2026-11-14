@@ -60,9 +60,11 @@ export function Shell() {
         Skip to content
       </a>
       <Rail />
-      <main id="main" className="atmosphere relative min-w-0 flex-1 overflow-hidden" tabIndex={-1}>
+      <main id="main" className="atmosphere relative flex min-w-0 flex-1 flex-col overflow-hidden" tabIndex={-1}>
+        {/* In the page flow, above the page: it takes its own space and never covers content. */}
+        <FocusBar />
         <ErrorBoundary key={route} label={NAV.find((n) => n.route === route)?.label ?? "Settings"}>
-        <div className="h-full anim-fade">
+        <div className="min-h-0 flex-1 anim-fade">
           {route === "home" && <HomePage />}
           {route === "companion" && <CompanionPage />}
           {route === "tasks" && <TasksPage />}
@@ -87,7 +89,6 @@ export function Shell() {
       <CommandPalette />
       <VoiceProvider />
       <PresenceProvider />
-      <FocusBar />
       <FocusDialog />
     </div>
   );

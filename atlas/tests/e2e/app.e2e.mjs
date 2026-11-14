@@ -818,7 +818,7 @@ test("Focus Mode holds what can wait and lets approvals through, ends with a sum
   await (await find(By.css('input[aria-label="Focus label"]'))).sendKeys("Draft the essay");
   await shot("21-focus-start");
   await click("Start focusing");
-  const bar = await find(By.css("[data-focus-bar]"));
+  await find(By.css("[data-focus-bar]"));
   await driver.wait(async () => (await driver.executeScript(`return document.querySelector("[data-focus-what]")?.textContent`)) === "Draft the essay", 5000, "the label is shown");
   const st = await invoke("focus_status");
   assert.equal(st.active.label, "Draft the essay");
@@ -861,7 +861,8 @@ test("Focus Mode holds what can wait and lets approvals through, ends with a sum
   // Stopping releases what waited and says so: exactly what was held, nothing else.
   const heldBefore = (await invoke("notifications_list", { limit: 50 })).items.filter((n) => n.held);
   assert.ok(heldBefore.some((n) => n.detail.includes("Stretch break")) && heldBefore.every((n) => n.category !== "approval"), JSON.stringify(heldBefore));
-  await (await bar.findElement(By.xpath(".//button[normalize-space()='Stop']"))).click();
+  // Found again: the bar re-renders as pages change, so an earlier reference can be stale.
+  await (await find(By.xpath("//*[@data-focus-bar]//button[normalize-space()='Stop']"))).click();
   await driver.wait(() => gone("[data-focus-bar]"), 5000);
   await driver.wait(async () => (await invoke("notifications_list", { limit: 20 })).items.some((n) => n.category === "focus"), 5000);
   const items = (await invoke("notifications_list", { limit: 20 })).items;

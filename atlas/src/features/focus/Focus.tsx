@@ -64,10 +64,10 @@ export function FocusBar() {
   const left = useRemaining(s?.planned_end);
   if (!s) return null;
   return (
-    // Centred in a full-width strip, so the bar can use the whole window width (positioned at
-    // left: 50% it had only half, and the task title was squeezed to nothing).
-    <div className="pointer-events-none fixed inset-x-0 top-3 z-40 flex justify-center px-4">
-      <div role="status" aria-label={`Focus session: ${focusWhat(s)}, ${left} left`} data-focus-bar className="pointer-events-auto flex max-w-full items-center gap-3 rounded-full border border-accent/40 bg-bg-2/95 py-1.5 pl-4 pr-1.5 text-sm shadow-2 backdrop-blur">
+    // A full-width strip at the top of the page column (in the flow, so it never covers the page).
+    // It used to be positioned at left: 50%, which gave it half the window and squeezed the title.
+    <div className="flex shrink-0 justify-center px-4 pt-3">
+      <div role="status" aria-label={`Focus session: ${focusWhat(s)}, ${left} left`} data-focus-bar className="flex max-w-full items-center gap-3 rounded-full border border-accent/40 bg-bg-2/95 py-1.5 pl-4 pr-1.5 text-sm shadow-2 backdrop-blur">
         <Target className="size-4 shrink-0 text-accent" aria-hidden />
         <span className="max-w-64 shrink-0 truncate font-medium" data-focus-what>
           {focusWhat(s)}
