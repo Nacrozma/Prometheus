@@ -16,6 +16,8 @@ pub struct Settings {
     pub routing: RoutingSettings,
     pub permissions: PermissionSettings,
     pub memory: MemorySettings,
+    /// The Knowledge Vault in conversations.
+    pub vault: VaultSettings,
     pub workspace_dir: Option<String>,
     pub appearance: AppearanceSettings,
     pub limits: Limits,
@@ -328,6 +330,23 @@ impl Default for MemorySettings {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct VaultSettings {
+    /// Look up relevant passages in the Knowledge Vault for each message.
+    pub use_in_chat: bool,
+    /// Never send Vault passages to a model that does not run on this computer.
+    pub local_only: bool,
+    /// Most passages added to a single request.
+    pub max_passages: u32,
+}
+
+impl Default for VaultSettings {
+    fn default() -> Self {
+        Self { use_in_chat: true, local_only: false, max_passages: 4 }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Theme {
@@ -522,6 +541,7 @@ impl Settings {
         check("max_output_tokens", l.max_output_tokens, 256, 128_000)?;
         check("font_scale", self.appearance.font_scale, 85, 130)?;
         check("memory.max_retrieved", self.memory.max_retrieved, 0, 20)?;
+        check("vault.max_passages", self.vault.max_passages, 0, 12)?;
         if self.companion.preferred_name.chars().count() > 60 {
             return Err(AtlasError::Validation("preferred name is too long".into()));
         }

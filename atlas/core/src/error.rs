@@ -40,6 +40,17 @@ pub enum AtlasError {
 }
 
 impl AtlasError {
+    /// The detail alone, for the owner (no "invalid input:" prefix).
+    pub fn message(&self) -> String {
+        match self {
+            AtlasError::Storage(m) | AtlasError::Validation(m) | AtlasError::NotFound(m) | AtlasError::PermissionDenied(m) | AtlasError::Credential(m) | AtlasError::Tool(m) | AtlasError::Timeout(m) | AtlasError::Conflict(m) | AtlasError::Io(m) | AtlasError::Internal(m) | AtlasError::BudgetConfirmation(m) | AtlasError::BudgetExceeded(m) => {
+                let mut c = m.chars();
+                c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+            }
+            other => other.to_string(),
+        }
+    }
+
     pub fn code(&self) -> &'static str {
         match self {
             AtlasError::Storage(_) => "storage",

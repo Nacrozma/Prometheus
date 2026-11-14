@@ -30,6 +30,7 @@ pub mod desktop;
 pub mod briefing;
 pub mod focus;
 pub mod recap;
+pub mod vault;
 pub mod scheduler;
 pub mod todos;
 pub mod voice;

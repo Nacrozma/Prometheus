@@ -411,6 +411,71 @@ pub const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_focus_active ON focus_sessions(ended_at);
     ALTER TABLE notifications ADD COLUMN held INTEGER NOT NULL DEFAULT 0;
     "#,
+    // v7 (0.5.0 stage 5): the Knowledge Vault. Imported documents (Atlas keeps its own copy; the
+    // original is never changed), their searchable passages with page or heading, a full-text
+    // index kept in step by triggers, and the sources a reply was given (for citations).
+    // Additive only.
+    r#"
+    CREATE TABLE vault_documents (
+        id TEXT PRIMARY KEY,
+        project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+        title TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        source_path TEXT NOT NULL DEFAULT '',
+        stored_name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('txt','md','pdf','docx')),
+        size_bytes INTEGER NOT NULL,
+        content_hash TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('imported','processing','indexed','needs_reindex','failed')),
+        error TEXT,
+        pages INTEGER,
+        sections INTEGER NOT NULL DEFAULT 0,
+        chunks INTEGER NOT NULL DEFAULT 0,
+        chars INTEGER NOT NULL DEFAULT 0,
+        extractor_version INTEGER NOT NULL DEFAULT 0,
+        index_version INTEGER NOT NULL DEFAULT 0,
+        imported_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        indexed_at TEXT,
+        opened_at TEXT,
+        source_modified_at TEXT
+    );
+    CREATE INDEX idx_vault_docs_project ON vault_documents(project_id, status);
+    CREATE INDEX idx_vault_docs_hash ON vault_documents(content_hash);
+    CREATE TABLE vault_chunks (
+        id TEXT PRIMARY KEY,
+        document_id TEXT NOT NULL REFERENCES vault_documents(id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL,
+        page INTEGER,
+        heading TEXT NOT NULL DEFAULT '',
+        start_offset INTEGER NOT NULL,
+        overlap INTEGER NOT NULL DEFAULT 0,
+        content TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        UNIQUE (document_id, seq)
+    );
+    CREATE VIRTUAL TABLE vault_fts USING fts5(content, heading, title, tokenize = 'unicode61 remove_diacritics 2');
+    CREATE TRIGGER vault_chunks_ai AFTER INSERT ON vault_chunks BEGIN
+        INSERT INTO vault_fts(rowid, content, heading, title)
+        VALUES (new.rowid, new.content, new.heading, (SELECT title FROM vault_documents WHERE id = new.document_id));
+    END;
+    CREATE TRIGGER vault_chunks_ad AFTER DELETE ON vault_chunks BEGIN
+        DELETE FROM vault_fts WHERE rowid = old.rowid;
+    END;
+    CREATE TABLE vault_turn_sources (
+        user_message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        label TEXT NOT NULL,
+        chunk_id TEXT,
+        document_id TEXT,
+        title TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        page INTEGER,
+        heading TEXT NOT NULL DEFAULT '',
+        excerpt TEXT NOT NULL,
+        sent INTEGER NOT NULL,
+        PRIMARY KEY (user_message_id, label)
+    );
+    "#,
 ];
 
 pub const CURRENT_SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

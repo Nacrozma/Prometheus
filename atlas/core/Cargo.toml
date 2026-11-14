@@ -33,6 +33,9 @@ uuid = { version = "1.26.1", features = ["v4", "serde"] }
 # Voice: verified model/engine archives (pure-Rust decompressors) and hardware facts.
 bzip2 = "0.6.1"
 tar = "0.4.46"
+lopdf = { version = "0.44", default-features = false }
+quick-xml = "0.42"
+encoding_rs = "0.8.44"
 zip = { version = "9.4.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 sysinfo = { version = "0.40.1", default-features = false, features = ["system", "disk"] }
 
