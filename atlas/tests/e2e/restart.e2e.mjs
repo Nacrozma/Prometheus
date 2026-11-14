@@ -70,8 +70,9 @@ test("after two hours closed: the interrupted run is listed, not resumed; the Fo
 
   // The Focus session ran out while Atlas was closed: it completes at its planned end, with a summary.
   await driver.wait(async () => (await invoke("focus_status")).active === null, 15000, "the session completed");
-  const last = (await invoke("focus_status")).history[0];
-  assert.equal(last.id, handoff.focus);
+  // Found by id: history is ordered by start time, and this session's start was moved back two hours.
+  const last = (await invoke("focus_status")).history.find((h) => h.id === handoff.focus);
+  assert.ok(last, "the session is in the history");
   assert.equal(last.outcome, "completed");
   assert.equal(Math.round((Date.parse(last.ended_at) - Date.parse(last.started_at)) / 60000), 15, "the 15 minutes set, not the time Atlas was closed");
   assert.equal(last.todo_title, "Prepare the slides");
