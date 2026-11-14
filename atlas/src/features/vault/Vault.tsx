@@ -226,7 +226,7 @@ function Reader({ target, onClose }: { target: { documentId: string; chunkId: st
   }, [focusId]);
   const d = data?.document;
   return (
-    <Dialog open={!!target} onOpenChange={(v) => !v && onClose()} title={d?.title ?? "Document"} description={d ? `${d.file_name} · ${d.kind.toUpperCase()} · ${formatBytes(d.size_bytes)}${d.pages ? ` · ${d.pages} pages` : ""} · ${d.chunks} passages` : undefined} width="max-w-3xl">
+    <Dialog open={!!target} onOpenChange={(v) => !v && onClose()} title={d?.title ?? "Document"} description={d ? `${d.file_name} · ${d.kind.toUpperCase()} · ${formatBytes(d.size_bytes)}${d.pages ? ` · ${d.pages} ${d.pages === 1 ? "page" : "pages"}` : ""} · ${d.chunks} ${d.chunks === 1 ? "passage" : "passages"}` : undefined} width="max-w-3xl">
       <div ref={box} className="max-h-[60vh] space-y-3 overflow-auto pr-1" data-vault-reader>
         {error && <p className="text-sm text-danger">{error}</p>}
         {!data && !error && <Skeleton className="h-40" />}
@@ -266,8 +266,8 @@ function DocumentRow({ d, onOpen, onMove, onRemove }: { d: VaultDocument; onOpen
         </button>
         <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-text-3">
           <span>{d.project_name ? `Project: ${d.project_name}` : "Personal library"}</span>
-          {d.pages != null && <span>{d.pages} pages</span>}
-          {d.chunks > 0 && <span>{d.chunks} passages</span>}
+          {d.pages != null && <span>{d.pages} {d.pages === 1 ? "page" : "pages"}</span>}
+          {d.chunks > 0 && <span>{d.chunks} {d.chunks === 1 ? "passage" : "passages"}</span>}
           <span>{formatBytes(d.size_bytes)}</span>
           <span>imported {relativeTime(d.imported_at)}</span>
           {d.indexed_at && <span>indexed {relativeTime(d.indexed_at)}</span>}
