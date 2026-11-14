@@ -222,7 +222,7 @@ function Reader({ target, onClose }: { target: { documentId: string; chunkId: st
   useEffect(() => {
     if (!focusId) return;
     const el = box.current?.querySelector(`[data-chunk="${CSS.escape(focusId)}"]`);
-    el?.scrollIntoView({ block: "center" });
+    (el as HTMLElement | null)?.scrollIntoView?.({ block: "center" });
   }, [focusId]);
   const d = data?.document;
   return (
