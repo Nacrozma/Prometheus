@@ -1052,8 +1052,8 @@ test("accessibility audit (axe-core) finds no serious or critical issues", async
   await invoke("notification_test");
   await driver.wait(async () => Number(await (await find(By.css("[data-bell]"))).getAttribute("data-unread")) >= 1, 5000);
   const failures = {};
-  for (const [key, page] of [["1", "home"], ["2", "companion"], ["tasks", "tasks"], ["4", "forge"], ["siblings", "siblings"], ["5", "mission-control"], ["7", "memory"], ["vault", "knowledge-vault"], ["9", "integrations"], [",", "settings"]]) {
-    const railLabel = { tasks: "Tasks", siblings: "Siblings", vault: "Knowledge Vault" }[key];
+  for (const [key, page] of [["1", "home"], ["2", "companion"], ["tasks", "tasks"], ["4", "forge"], ["siblings", "siblings"], ["5", "mission-control"], ["7", "memory"], ["vault", "knowledge-vault"], ["trust", "trust-center"], ["9", "integrations"], [",", "settings"]]) {
+    const railLabel = { tasks: "Tasks", siblings: "Siblings", vault: "Knowledge Vault", trust: "Trust Center" }[key];
     if (railLabel) await (await find(By.css(`nav[aria-label="Main"] button[aria-label="${railLabel}"]`))).click();
     else await go(key);
     await driver.sleep(500);
@@ -1173,6 +1173,100 @@ test("Knowledge Vault: four formats imported and indexed, scanned PDFs refused h
   await driver.wait(() => gone('[data-vault-doc="field-notes"]'), 5000);
   assert.equal((await invoke("vault_search", { query: "heron reservoir", library: { kind: "all" } })).length, 0);
   assert.ok(fs.existsSync(f("field-notes.txt")), "the owner's original is untouched");
+});
+
+test("Memory and Trust Center: an approved memory is used later, corrected, removed; suggestions can be switched off and the core refuses; the Trust Center shows real activity", async () => {
+  const newChat = async () => {
+    await go("2");
+    await driver.actions().keyDown(Key.CONTROL).sendKeys("n").keyUp(Key.CONTROL).perform();
+    await driver.sleep(300);
+  };
+  const atlasMemories = async () => (await invoke("memories_list", { scope: "all" })).filter((m) => m.source === "assistant");
+
+  // 1. Atlas proposes a memory; the owner approves it.
+  await newChat();
+  await send("Please remember that I prefer trains to flights for trips under 600 km.");
+  await waitText("Approval needed", 20000);
+  await click("Approve");
+  await driver.wait(async () => (await atlasMemories()).length === 1, 15000, "the approved memory was saved");
+  await waitIdle();
+  const m = (await atlasMemories())[0];
+  assert.equal(m.content, "I prefer trains to flights for trips under 600 km");
+  assert.ok(m.conversation_id, "it records the conversation it came from");
+
+  // 2. A later conversation uses it.
+  await newChat();
+  await send("What do you remember about trains?");
+  await waitText("I remember: I prefer trains to flights for trips under 600 km", 20000);
+  await waitIdle();
+
+  // 3. The owner corrects it on the Memory page; 4. the corrected version is used.
+  await go("7");
+  await find(By.css(`[data-memory="${m.content}"]`));
+  await shot("24-memory");
+  await driver.executeScript("arguments[0].click()", await find(By.css(`button[aria-label="Edit memory: ${m.content}"]`)));
+  const box = await find(By.id("mem-c"));
+  await box.clear();
+  await box.sendKeys("I prefer trains to flights for trips under 800 km");
+  await (await find(exactButton("Save"))).click();
+  await driver.wait(async () => (await atlasMemories())[0]?.content === "I prefer trains to flights for trips under 800 km", 10000, "corrected");
+  await driver.executeScript("arguments[0].click()", (await driver.findElements(By.xpath("//button[normalize-space()='· history']")))[0]);
+  await waitText("Corrected");
+  await waitText("was: “I prefer trains to flights for trips under 600 km”");
+  await shot("24b-memory-history");
+  await newChat();
+  await send("What do you remember about trains?");
+  await waitText("under 800 km", 20000);
+  await waitIdle();
+  assert.equal((await pageText()).includes("I remember: I prefer trains to flights for trips under 600 km."), false);
+
+  // 5. Removed: 6. no longer retrieved.
+  await go("7");
+  await driver.executeScript("arguments[0].click()", await find(By.css('button[aria-label="Delete memory: I prefer trains to flights for trips under 800 km"]')));
+  await (await find(By.xpath("//div[@role='dialog']//button[normalize-space()='Delete']"))).click();
+  await driver.wait(async () => (await atlasMemories()).length === 0, 10000, "deleted");
+  await newChat();
+  await send("What do you remember about trains?");
+  await waitText("I have no saved memory about that.", 20000);
+  await waitIdle();
+
+  // 7. The owner switches off Atlas's memory suggestions in the Trust Center; 8. the core refuses
+  //    the next proposal (no approval prompt, nothing saved).
+  await (await find(By.css('nav[aria-label="Main"] button[aria-label="Trust Center"]'))).click();
+  await find(By.css("[data-trust-permissions]"));
+  await shot("25-trust-center");
+  await driver.executeScript("arguments[0].click()", await find(By.css('[role=switch][aria-label="Memory suggestions from Atlas"]')));
+  await driver.wait(async () => (await invoke("settings_get")).memory.atlas_may_propose === false, 5000);
+  await newChat();
+  await send("Please remember that I like green tea.");
+  await waitText("did not complete", 20000);
+  await waitIdle();
+  assert.deepEqual(await invoke("approvals_pending"), []);
+  assert.equal((await atlasMemories()).length, 0, "nothing saved after the owner turned suggestions off");
+
+  // 9–12. Knowledge Vault activity (from the Vault test) is in the Trust Center: imports, and which
+  //       documents' passages went with a message, to which model, and that they stayed local.
+  const knowledge = await invoke("trust_timeline", { filter: { category: "knowledge", limit: 200 } });
+  assert.ok(knowledge.some((e) => e.kind === "vault.import"));
+  const sent = knowledge.find((e) => e.kind === "vault.passages" && (e.detail.documents ?? []).includes("glacier-report"));
+  assert.ok(sent, "the passages sent with a question are recorded with their document");
+  assert.equal(sent.provider, "E2E scripted provider");
+  assert.equal(sent.left_device, false, "the scripted model runs on this computer");
+  const all = JSON.stringify(await invoke("trust_timeline", { filter: { limit: 200 } }));
+  assert.equal(all.includes("40000 euros"), false, "no document text in the activity log");
+  assert.equal(all.includes("green tea"), false, "no message text in the activity log");
+  // In the page: filter to the Knowledge Vault and open an event's details.
+  await (await find(By.css('nav[aria-label="Main"] button[aria-label="Trust Center"]'))).click();
+  const kind = await find(By.css('select[aria-label="Activity type"]'));
+  await driver.executeScript("arguments[0].value = 'knowledge'; arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", kind);
+  await waitText("passages from glacier-report went with a message", 10000);
+  await driver.executeScript("document.querySelector('[data-trust-timeline]').scrollIntoView({ block: 'start' })");
+  await shot("25b-trust-timeline");
+
+  // Leave one memory for the restart phase, and suggestions on again.
+  await invoke("memory_create", { projectId: null, kind: "preference", content: "Prefers the window seat on long trains", pinned: false });
+  const s = await invoke("settings_get");
+  await invoke("settings_update", { settings: { ...s, memory: { ...s.memory, atlas_may_propose: true } } });
 });
 
 // Must stay the last test: it leaves Atlas mid-work for the restart phase (tests/e2e/restart.e2e.mjs),

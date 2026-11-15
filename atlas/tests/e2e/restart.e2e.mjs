@@ -104,6 +104,12 @@ test("after two hours closed: the interrupted run is listed, not resumed; the Fo
   }
   assert.ok(cited, "a stored citation still resolves to its document after the restart");
 
+  // Memory and the activity record survived too.
+  const mems = await invoke("memories_list", { scope: "all" });
+  assert.ok(mems.some((m) => m.content === "Prefers the window seat on long trains" && m.status === "active"), "memories persist");
+  const act = await invoke("trust_timeline", { filter: { limit: 200 } });
+  for (const k of ["memory.deleted", "approval.decided", "vault.passages", "provider.request"]) assert.ok(act.some((e) => e.kind === k), `${k} survived the restart`);
+
   // The recap: built from what was recorded. The interrupted reply is listed with Open.
   const r = await invoke("recap_get");
   assert.ok(r && !r.empty, JSON.stringify(r));

@@ -30,6 +30,13 @@ fn last_user_text(req: &ChatRequest) -> String {
     }
 }
 
+/// The memories Atlas attached to the last message (the lines of the memory list in its context).
+fn context_memories(req: &ChatRequest) -> Vec<String> {
+    let raw = req.messages.iter().rev().find(|m| m.role == Role::User && !m.text().is_empty()).map(|m| m.text()).unwrap_or_default();
+    let ctx = raw.split("</atlas_context>").next().unwrap_or("");
+    ctx.lines().filter_map(|l| l.strip_prefix("- [")).filter_map(|l| l.split_once("] ").map(|(_, c)| c.trim().to_string())).collect()
+}
+
 /// The first Vault passage given with the last question: (label, text).
 fn first_passage(req: &ChatRequest) -> Option<(String, String)> {
     let raw = req.messages.iter().rev().find(|m| m.role == Role::User && !m.text().is_empty()).map(|m| m.text())?;
@@ -92,6 +99,16 @@ impl ChatProvider for Scripted {
             && let Some(i) = rest.find(" tomorrow")
         {
             return Ok(call("todo_add", json!({"title": &rest[..i], "when": rest[i..].trim(), "remind": true})));
+        }
+        // "Please remember that …": propose a memory (the owner approves it).
+        if let Some(rest) = text.strip_prefix("Please remember that ") {
+            return Ok(call("memory_save", json!({"content": rest.trim_end_matches('.'), "kind": "preference"})));
+        }
+        // "What do you remember about …": answer only from the memories Atlas attached.
+        if lower.starts_with("what do you remember about") {
+            let mems = context_memories(&req);
+            let t = if mems.is_empty() { "I have no saved memory about that.".to_string() } else { format!("I remember: {}", mems.join("; ")) };
+            return stream(reply(t), sink, &cancel).await;
         }
         if lower.contains("create a note") {
             return Ok(call("files_create", json!({"path": "e2e/hello.md", "content": "# Hello from Atlas\n"})));
