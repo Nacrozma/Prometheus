@@ -159,3 +159,17 @@ documents' passages went with a message, to which model, and whether they stayed
 ![Trust Center activity](screenshots/25b-trust-timeline.png)
 
 Captured by the end-to-end suite from the real app (automated-test build, scripted model).
+
+## 0.5.0 (in progress, not released): specialists
+
+Atlas's team: eight specialists, each with its tools, what context it may receive and its limits, and a
+switch. Start a mission with one specialist or a team, here a plan checked against your projects:
+
+![Specialists](screenshots/26-specialists.png)
+
+The result of each specialist, in order, with the model it ran on and what it was given; the second
+built on the first. The same results reach a conversation when Atlas consults a specialist itself:
+
+![Mission result](screenshots/26b-mission-result.png)
+
+Captured by the end-to-end suite from the real app (automated-test build, scripted model).

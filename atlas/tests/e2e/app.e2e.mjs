@@ -1052,8 +1052,8 @@ test("accessibility audit (axe-core) finds no serious or critical issues", async
   await invoke("notification_test");
   await driver.wait(async () => Number(await (await find(By.css("[data-bell]"))).getAttribute("data-unread")) >= 1, 5000);
   const failures = {};
-  for (const [key, page] of [["1", "home"], ["2", "companion"], ["tasks", "tasks"], ["4", "forge"], ["siblings", "siblings"], ["5", "mission-control"], ["7", "memory"], ["vault", "knowledge-vault"], ["trust", "trust-center"], ["9", "integrations"], [",", "settings"]]) {
-    const railLabel = { tasks: "Tasks", siblings: "Siblings", vault: "Knowledge Vault", trust: "Trust Center" }[key];
+  for (const [key, page] of [["1", "home"], ["2", "companion"], ["tasks", "tasks"], ["4", "forge"], ["siblings", "siblings"], ["5", "mission-control"], ["7", "memory"], ["vault", "knowledge-vault"], ["trust", "trust-center"], ["specialists", "specialists"], ["9", "integrations"], [",", "settings"]]) {
+    const railLabel = { tasks: "Tasks", siblings: "Siblings", vault: "Knowledge Vault", trust: "Trust Center", specialists: "Specialists" }[key];
     if (railLabel) await (await find(By.css(`nav[aria-label="Main"] button[aria-label="${railLabel}"]`))).click();
     else await go(key);
     await driver.sleep(500);
@@ -1269,6 +1269,68 @@ test("Memory and Trust Center: an approved memory is used later, corrected, remo
   await invoke("settings_update", { settings: { ...s, memory: { ...s.memory, atlas_may_propose: true } } });
 });
 
+test("specialists: a mission runs in order, Atlas consults one in a conversation, cancel, Trust Center", async () => {
+  const openPage = async () => {
+    await (await find(By.css('nav[aria-label="Main"] button[aria-label="Specialists"]'))).click();
+    await find(By.css("[data-specialists] [data-team]"));
+  };
+  await openPage();
+  // 1. The owner starts a team (Planner, then Project Coordinator) from the page.
+  const team = await find(By.css("#mission-team"));
+  await driver.executeScript("arguments[0].value = 'plan_with_projects'; arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", team);
+  await (await find(By.css("#mission-objective"))).sendKeys("Plan the garden renovation for spring");
+  await shot("26-specialists");
+  await click("Start mission");
+  const done = 'li[data-mission="Plan the garden renovation for spring"][data-mission-status="completed"]';
+  await find(By.css(done), 30000);
+  // 2. Each specialist's result is shown; the second built on the first (results passed forward).
+  await waitText("Planner finished its part.", 10000);
+  await waitText("Project Coordinator finished its part.", 10000);
+  await waitText("built on the earlier result", 10000);
+  const [m] = (await invoke("specialists_overview")).missions.filter((x) => x.title.startsWith("Plan the garden"));
+  assert.deepEqual(m.steps.map((x) => [x.specialist_id, x.status]), [["planner", "completed"], ["project_coordinator", "completed"]]);
+  assert.equal(m.steps[0].provider, "E2E scripted provider");
+  await driver.executeScript(`document.querySelector(${JSON.stringify(done)}).scrollIntoView({ block: "start" })`);
+  await shot("26b-mission-result");
+
+  // 3. Atlas brings in a specialist itself during a conversation and reports the result.
+  await go("2");
+  await driver.actions().keyDown(Key.CONTROL).sendKeys("n").keyUp(Key.CONTROL).perform();
+  await driver.sleep(300);
+  await send("Ask your specialists to plan the move to the new office.");
+  await waitText("Planner finished its part.", 30000);
+  await waitIdle();
+  const fromChat = (await invoke("specialists_overview")).missions.find((x) => x.origin === "atlas");
+  assert.ok(fromChat && fromChat.status === "completed" && fromChat.conversation_id, JSON.stringify(fromChat));
+
+  // 4. A mission can be cancelled while a specialist is working.
+  const slow = await invoke("specialist_mission_start", { objective: "Research slowly the history of trams", specialists: ["researcher", "writer"], projectId: null, forgeProjectId: null });
+  assert.ok(!slow.__error, JSON.stringify(slow));
+  await openPage();
+  const running = `li[data-mission="${slow.title}"]`;
+  await find(By.css(`${running}[data-mission-status="running"] [data-step="researcher"][data-step-status="running"]`), 15000);
+  await driver.executeScript(`[...document.querySelectorAll(${JSON.stringify(running + " button")})].find((b) => b.textContent.includes("Cancel")).click()`);
+  await find(By.css(`${running}[data-mission-status="cancelled"]`), 15000);
+  const cancelled = (await invoke("specialists_overview")).missions.find((x) => x.id === slow.id);
+  assert.deepEqual(cancelled.steps.map((x) => x.status), ["cancelled", "cancelled"], "the running specialist was cancelled, not failed");
+  assert.equal(cancelled.steps[1].started_at, null, "the writer never started");
+
+  // 5. A switched-off specialist cannot be used, by the owner or by Atlas.
+  await invoke("specialist_set_enabled", { id: "writer", enabled: false });
+  const refused = await invoke("specialist_mission_start", { objective: "Write a short note", specialists: ["writer"], projectId: null, forgeProjectId: null });
+  assert.ok(refused.__error, "a switched-off specialist is refused");
+  await invoke("specialist_set_enabled", { id: "writer", enabled: true });
+
+  // 6. Every specialist step is in the Trust Center, without content.
+  const events = await invoke("trust_timeline", { filter: { category: "specialists", limit: 200 } });
+  for (const k of ["specialist.mission_started", "specialist.invoked", "specialist.completed", "specialist.cancelled", "specialist.toggled"]) assert.ok(events.some((e) => e.kind === k), k);
+  assert.equal(JSON.stringify(events).includes("garden renovation"), false, "no objective text in the activity log");
+  await (await find(By.css('nav[aria-label="Main"] button[aria-label="Trust Center"]'))).click();
+  const kind = await find(By.css('select[aria-label="Activity type"]'));
+  await driver.executeScript("arguments[0].value = 'specialists'; arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", kind);
+  await waitText("Planner completed", 10000);
+});
+
 // Must stay the last test: it leaves Atlas mid-work for the restart phase (tests/e2e/restart.e2e.mjs),
 // which relaunches the same app on the same data folder.
 test("before closing: a reply in progress and a Focus session on a task (checked after the restart)", async () => {
@@ -1290,8 +1352,11 @@ test("before closing: a reply in progress and a Focus session on a task (checked
   assert.ok(running && !["completed", "failed", "cancelled", "interrupted"].includes(running.status), JSON.stringify(running));
   const f = await invoke("focus_start", { minutes: 15, todoId: todo.id, label: "" });
   assert.ok(!f.__error, JSON.stringify(f));
+  // A specialist mission still working when Atlas closes.
+  const mission = await invoke("specialist_mission_start", { objective: "Research slowly the canals of the city", specialists: ["researcher"], projectId: null, forgeProjectId: null });
+  assert.ok(!mission.__error, JSON.stringify(mission));
   const kept = (await invoke("notifications_list", { limit: 50 })).items.map((n) => n.id);
-  fs.writeFileSync(path.join(dir, "..", "e2e-handoff.json"), JSON.stringify({ todo: todo.id, task: running.id, conversation: running.conversation_id, focus: f.id, kept, note, noteBefore }));
+  fs.writeFileSync(path.join(dir, "..", "e2e-handoff.json"), JSON.stringify({ todo: todo.id, task: running.id, conversation: running.conversation_id, focus: f.id, kept, note, noteBefore, mission: mission.id }));
   // Atlas is closed right after this test; on the next start it behaves as if two hours passed.
   fs.writeFileSync(path.join(dir, "e2e-away-minutes"), "120");
 });

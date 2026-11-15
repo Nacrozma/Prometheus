@@ -105,6 +105,12 @@ test("after two hours closed: the interrupted run is listed, not resumed; the Fo
   assert.ok(cited, "a stored citation still resolves to its document after the restart");
 
   // Memory and the activity record survived too.
+  // Specialist missions: history kept; the one working at close is interrupted, not resumed.
+  const sp = await invoke("specialists_overview");
+  assert.ok(sp.missions.some((x) => x.title.startsWith("Plan the garden") && x.status === "completed"), "mission history survived");
+  const cut = sp.missions.find((x) => x.id === handoff.mission);
+  assert.equal(cut.status, "interrupted", JSON.stringify(cut));
+  assert.ok(cut.steps.every((x) => x.status !== "running"));
   const mems = await invoke("memories_list", { scope: "all" });
   assert.ok(mems.some((m) => m.content === "Prefers the window seat on long trains" && m.status === "active"), "memories persist");
   const act = await invoke("trust_timeline", { filter: { limit: 200 } });

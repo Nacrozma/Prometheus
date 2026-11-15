@@ -83,6 +83,29 @@ impl ChatProvider for Scripted {
             served_model: "scripted".into(),
             notices: vec![],
         };
+        // A specialist (its own system prompt): return the structured result contract. An
+        // objective containing "slowly" waits until cancelled, so cancellation can be tested.
+        if let Some(rest) = req.system.strip_prefix("You are the ")
+            && let Some((name, _)) = rest.split_once(" specialist inside ATLAS")
+        {
+            let raw = req.messages.iter().find(|m| m.role == Role::User).map(|m| m.text()).unwrap_or_default();
+            if raw.to_lowercase().contains("slowly") {
+                cancel.cancelled().await;
+                return Err(ProviderError::new(ProviderErrorKind::Cancelled, "cancelled"));
+            }
+            let earlier = raw.contains("<previous_result");
+            let out = json!({
+                "summary": format!("{name} finished its part."),
+                "findings": [format!("{name} looked at the objective{}", if earlier { " and built on the earlier result" } else { "" })],
+                "evidence": [{"source": "the objective", "detail": ""}],
+                "recommendations": [format!("Review the {} notes", name.to_lowercase())],
+                "uncertainties": [],
+                "warnings": [],
+                "disagreements": [],
+                "proposed_actions": []
+            });
+            return stream(reply(out.to_string()), sink, &cancel).await;
+        }
         if after_tool {
             let result = match last.unwrap().parts.first() {
                 Some(Part::ToolResult { content, is_error, .. }) => (content.clone(), *is_error),
@@ -109,6 +132,10 @@ impl ChatProvider for Scripted {
             let mems = context_memories(&req);
             let t = if mems.is_empty() { "I have no saved memory about that.".to_string() } else { format!("I remember: {}", mems.join("; ")) };
             return stream(reply(t), sink, &cancel).await;
+        }
+        // "Ask your specialists to …": Atlas brings in a specialist and reports what it found.
+        if let Some(rest) = text.strip_prefix("Ask your specialists to ") {
+            return Ok(call("specialist_consult", json!({"specialists": ["planner"], "objective": rest.trim_end_matches('.')})));
         }
         if lower.contains("create a note") {
             return Ok(call("files_create", json!({"path": "e2e/hello.md", "content": "# Hello from Atlas\n"})));

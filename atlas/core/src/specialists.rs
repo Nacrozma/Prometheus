@@ -871,9 +871,15 @@ impl Atlas {
                 let started = Instant::now();
                 let mut sink = |_e: StreamEvent| {};
                 let r = tokio::select! {
-                    r = tokio::time::timeout(left, provider.stream_chat(req, &mut sink, cancel.clone())) => r,
+                    biased;
                     _ = cancel.cancelled() => break 'steps Err(("cancelled".into(), "cancelled by you".into())),
+                    r = tokio::time::timeout(left, provider.stream_chat(req, &mut sink, cancel.clone())) => r,
                 };
+                // A provider that honours the token can return before the branch above is polled:
+                // that is still the owner's cancellation, not a failure.
+                if cancel.is_cancelled() {
+                    break 'steps Err(("cancelled".into(), "cancelled by you".into()));
+                }
                 let ms = started.elapsed().as_millis();
                 let resp = match r {
                     Err(_) => break 'steps Err(("failed".into(), format!("took longer than {}s", spec.timeout_secs))),

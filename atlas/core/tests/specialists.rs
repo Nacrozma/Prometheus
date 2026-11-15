@@ -194,6 +194,7 @@ async fn cancelling_stops_the_mission_before_the_next_specialist() {
     assert!(h.atlas.cancel_mission(&m.id).unwrap());
     let done = wait_done(&h.atlas, &m.id).await;
     assert_eq!(done.status, "cancelled");
+    assert_eq!(done.steps[0].status, "cancelled", "the running specialist is cancelled, not failed");
     assert_eq!(done.steps[1].status, "cancelled", "the next specialist did not start");
     assert!(events(&h.atlas).iter().any(|e| e.kind == "specialist.mission_finished" && e.outcome == "cancelled"));
 }

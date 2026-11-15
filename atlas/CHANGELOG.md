@@ -74,6 +74,27 @@
   approvals waiting). Runs that were interrupted when Atlas closed are listed with **Open**; nothing is
   resumed by itself. Dismiss hides it until the next time away.
 
+- **Specialists** (new page): a team of eight focused specialists Atlas can bring in: Researcher,
+  Planner, Writer, Data Analyst, Document Analyst, Project Coordinator, Security Reviewer (read-only) and
+  Engineer (Forge, every edit asks first).
+  - **Missions:** start one specialist or a team (Research then a report; a plan checked against your
+    projects; a code change with a security review; your documents then outside research). Steps run in
+    order and each builds on the earlier results. Progress, results (summary, findings, evidence,
+    recommendations, warnings, disagreements, proposed actions), model, local or cloud, tokens and
+    estimated cost per step. Cancel stops the running specialist at once.
+  - **In conversations** Atlas consults a specialist when focused work helps, and presents what it found in
+    its own voice. Simple questions stay with Atlas.
+  - **Safety:** specialists use the same permissions, approvals, offline mode and budgets as Atlas, see only
+    the tools on their list and only the context they need (memories, documents, tasks only when declared),
+    cannot approve anything themselves, and every step is in the Trust Center (without content). Each
+    specialist, or all of them, can be switched off.
+  - Missions running when Atlas closes are marked interrupted at the next start, never resumed.
+- **Personality depth:** Atlas adapts within your chosen style: evidence first when debugging, structure
+  when planning, shorter when casual, careful on sensitive topics, the one thing to do first when urgent.
+  Your explicit instructions win. Identity and safety rules never change with the preset. Replies meant
+  to be read aloud keep the same character with shorter sentences.
+- Schema 9 (additive): specialist missions, steps and switches.
+
 ### Changed
 - Permissions are decided from the settings as they are when an action runs, and again after an approval
   arrives: a permission turned off while an approval was waiting still stops the action.
