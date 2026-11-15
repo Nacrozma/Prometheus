@@ -20,6 +20,26 @@ pub struct UsageEntry<'a> {
 
 pub fn record_entry(db: &Db, settings: &Settings, e: UsageEntry<'_>) -> Option<f64> {
     let est = pricing::estimate(e.kind, e.model, &settings.usage.price_overrides, e.usage.input_tokens, e.usage.output_tokens);
+    // The Trust Center's record of the request: who processed it and whether it left this computer.
+    // Tokens are what the provider reported; the cost is Atlas's estimate from its price table.
+    let label: Option<String> = db.conn().ok().and_then(|c| c.query_row("SELECT label FROM providers WHERE id = ?1", [e.provider_id], |r| r.get(0)).ok());
+    crate::audit::event(
+        db,
+        crate::audit::Event {
+            kind: "provider.request",
+            level: if e.outcome == "ok" { "info" } else { "warn" },
+            resource: e.mission_id,
+            provider: Some(label.as_deref().unwrap_or(e.provider_id)),
+            model: Some(e.model),
+            left_device: !e.kind.is_local(),
+            outcome: if e.outcome == "ok" { "ok" } else { "failed" },
+            detail: serde_json::json!({
+                "input_tokens": e.usage.input_tokens, "output_tokens": e.usage.output_tokens, "tokens_reported_by_provider": e.usage.input_tokens.is_some() || e.usage.output_tokens.is_some(),
+                "estimated_cost_usd": est.map(|c| c.usd), "cost_is_estimate": true, "duration_ms": e.duration_ms as u64, "result": e.outcome,
+            }),
+            ..Default::default()
+        },
+    );
     if let Ok(conn) = db.conn() {
         let _ = conn.execute(
             "INSERT INTO usage_records(ts, provider_id, model, input_tokens, output_tokens, duration_ms, estimated_cost_usd, outcome, price_status, mission_id)

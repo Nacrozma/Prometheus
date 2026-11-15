@@ -476,6 +476,58 @@ pub const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (user_message_id, label)
     );
     "#,
+    // v8 (0.5.0 stage 6): memory quality and the Trust Center. Additive only.
+    // Memories gain a lifecycle (active, needs review, outdated, superseded), the time the owner
+    // last confirmed them, an optional review date, the memory that replaced them, and where they
+    // were saved; edits keep a history (deleted with the memory). Audit events gain structured
+    // fields so the Trust Center can say what happened, who started it, whether data left the
+    // device, whether approval was involved and how it ended; existing events are classified.
+    r#"
+    ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','needs_review','outdated','superseded'));
+    ALTER TABLE memories ADD COLUMN confirmed_at TEXT;
+    ALTER TABLE memories ADD COLUMN review_after TEXT;
+    ALTER TABLE memories ADD COLUMN superseded_by TEXT;
+    ALTER TABLE memories ADD COLUMN conversation_id TEXT;
+    UPDATE memories SET confirmed_at = created_at WHERE confirmed_at IS NULL;
+    CREATE INDEX idx_memories_status ON memories(status);
+    CREATE TABLE memory_history (
+        id TEXT PRIMARY KEY,
+        memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        ts TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('created','edited','confirmed','marked_outdated','superseded','restored','review_due')),
+        actor TEXT NOT NULL CHECK (actor IN ('user','assistant','atlas')),
+        old_content TEXT,
+        new_content TEXT
+    );
+    CREATE INDEX idx_memory_history ON memory_history(memory_id, ts);
+
+    ALTER TABLE audit_events ADD COLUMN category TEXT NOT NULL DEFAULT 'system';
+    ALTER TABLE audit_events ADD COLUMN actor TEXT NOT NULL DEFAULT 'atlas';
+    ALTER TABLE audit_events ADD COLUMN resource TEXT;
+    ALTER TABLE audit_events ADD COLUMN project_id TEXT;
+    ALTER TABLE audit_events ADD COLUMN provider TEXT;
+    ALTER TABLE audit_events ADD COLUMN model TEXT;
+    ALTER TABLE audit_events ADD COLUMN left_device INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE audit_events ADD COLUMN approval TEXT;
+    ALTER TABLE audit_events ADD COLUMN outcome TEXT NOT NULL DEFAULT 'ok';
+    ALTER TABLE audit_events ADD COLUMN reversible INTEGER;
+    ALTER TABLE audit_events ADD COLUMN op_key TEXT;
+    UPDATE audit_events SET category = CASE
+        WHEN kind LIKE 'vault.%' THEN 'knowledge'
+        WHEN kind LIKE 'memory.%' THEN 'memory'
+        WHEN kind LIKE 'tool.%' OR kind LIKE 'file.%' THEN 'tools'
+        WHEN kind LIKE 'forge.%' THEN 'forge'
+        WHEN kind LIKE 'provider.%' OR kind LIKE 'credential.%' THEN 'providers'
+        WHEN kind LIKE 'approval.%' THEN 'approvals'
+        WHEN kind LIKE 'mission%' OR kind LIKE 'sibling.%' THEN 'sibling'
+        WHEN kind LIKE 'scheduler.%' OR kind LIKE 'focus.%' OR kind LIKE 'todo.%' THEN 'background'
+        WHEN kind LIKE 'voice.%' THEN 'voice'
+        WHEN kind LIKE 'settings.%' OR kind LIKE 'desktop.%' OR kind LIKE 'backup.%' THEN 'settings'
+        ELSE 'system' END,
+      outcome = CASE WHEN level IN ('warn','error') THEN 'warning' ELSE 'ok' END;
+    CREATE INDEX idx_audit_category ON audit_events(category, id);
+    CREATE UNIQUE INDEX idx_audit_op_key ON audit_events(op_key) WHERE op_key IS NOT NULL;
+    "#,
 ];
 
 pub const CURRENT_SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

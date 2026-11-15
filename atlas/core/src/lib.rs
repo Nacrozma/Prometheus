@@ -24,6 +24,7 @@ pub mod settings;
 pub mod sibling;
 pub mod storage;
 pub mod tasks;
+pub mod trust;
 pub mod tools;
 pub mod usage;
 pub mod desktop;

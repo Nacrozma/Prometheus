@@ -327,6 +327,63 @@ impl Atlas {
         Ok(())
     }
 
+    // ----- Trust Center -----
+
+    /// The Trust Center overview: activity by category (7 days), what left this computer, providers
+    /// (30 days), the permissions the core enforces with their state, background work, retention.
+    pub fn trust_overview(&self) -> Result<serde_json::Value> {
+        let s = self.settings()?;
+        let providers = self.providers()?;
+        let week = (chrono::Utc::now() - chrono::Duration::days(7)).to_rfc3339();
+        let month = (chrono::Utc::now() - chrono::Duration::days(30)).to_rfc3339();
+        let mut classes = crate::trust::ToolClasses { local_write: vec![], network: vec![], planner: vec![] };
+        for t in self.registry.all() {
+            let d = t.descriptor();
+            if d.category == "planner" && d.permission == crate::tools::PermissionClass::LocalWrite && !d.network {
+                classes.planner.push(d.id.clone());
+            } else if d.network {
+                classes.network.push(d.id.clone());
+            } else if d.permission == crate::tools::PermissionClass::LocalWrite {
+                classes.local_write.push(d.id.clone());
+            }
+        }
+        let left: i64 = self.db.conn()?.query_row("SELECT COUNT(*) FROM audit_events WHERE left_device = 1 AND ts >= ?1", [&week], |r| r.get(0))?;
+        let running = self.turns.lock().map(|t| t.len()).unwrap_or(0);
+        let default_label = providers.iter().find(|p| Some(p.id.as_str()) == s.default_provider_id.as_deref()).map(|p| p.label.clone());
+        Ok(json!({
+            "since": week,
+            "categories": crate::trust::category_counts(&self.db, &week)?,
+            "left_device_7d": left,
+            "providers": crate::trust::providers(&self.db, &s, &providers, &month)?,
+            "routing": {
+                "default_provider": default_label,
+                "default_model": s.default_model,
+                "mode": s.routing.mode,
+                "cross_provider_fallback": s.routing.allow_cross_provider_fallback,
+                "offline_mode": s.network.offline_mode,
+            },
+            "permissions": crate::trust::permissions(&self.db, &s, &providers, &classes)?,
+            "background": crate::trust::background(&self.db, running)?,
+            "retention": crate::trust::retention(&self.db, &s)?,
+        }))
+    }
+
+    pub fn trust_timeline(&self, filter: &crate::audit::PageFilter) -> Result<Vec<audit::AuditEvent>> {
+        audit::page(&self.db, filter)
+    }
+
+    pub fn trust_export(&self, days: u32) -> Result<String> {
+        let out = crate::trust::export(&self.db, days)?;
+        audit::event(&self.db, audit::Event { kind: "trust.exported", actor: "user", detail: json!({ "days": days }), ..Default::default() });
+        Ok(out)
+    }
+
+    pub fn trust_clear(&self, days: u32) -> Result<usize> {
+        let n = crate::trust::clear(&self.db, days)?;
+        notify(&self.bus, Topic::Settings, None);
+        Ok(n)
+    }
+
     // ----- Knowledge Vault -----
 
     /// Queue a document for processing on the Vault worker (started on first use).
@@ -855,25 +912,60 @@ impl Atlas {
     pub fn memories(&self, project: Option<Option<&str>>) -> Result<Vec<memory::Memory>> {
         memory::list(&self.db, project)
     }
+    fn memory_event(&self, kind: &str, id: &str, project_id: Option<&str>, reversible: bool, detail: serde_json::Value) {
+        audit::event(&self.db, audit::Event { kind, actor: "user", resource: Some(id), project_id, reversible: Some(reversible), detail, ..Default::default() });
+        notify(&self.bus, Topic::Memory, Some(id));
+    }
     pub fn create_memory(&self, project_id: Option<&str>, kind: memory::MemoryKind, content: &str, pinned: bool) -> Result<memory::Memory> {
         let m = memory::create(&self.db, project_id, kind, content, "user", pinned)?;
-        notify(&self.bus, Topic::Memory, Some(&m.id));
+        self.memory_event("memory.created", &m.id, project_id, true, json!({ "kind": kind }));
         Ok(m)
     }
     pub fn update_memory(&self, id: &str, content: Option<&str>, kind: Option<memory::MemoryKind>, pinned: Option<bool>, project_id: Option<Option<&str>>) -> Result<memory::Memory> {
+        let before = memory::get(&self.db, id)?;
         let m = memory::update(&self.db, id, content, kind, pinned, project_id)?;
-        notify(&self.bus, Topic::Memory, Some(id));
+        let corrected = before.content != m.content;
+        self.memory_event(if corrected { "memory.corrected" } else { "memory.updated" }, id, m.project_id.as_deref(), true, json!({ "pinned": m.pinned, "kind": m.kind }));
         Ok(m)
     }
+    pub fn confirm_memory(&self, id: &str) -> Result<memory::Memory> {
+        let m = memory::confirm(&self.db, id)?;
+        self.memory_event("memory.confirmed", id, m.project_id.as_deref(), true, json!({}));
+        Ok(m)
+    }
+    pub fn mark_memory_outdated(&self, id: &str) -> Result<memory::Memory> {
+        let m = memory::mark_outdated(&self.db, id)?;
+        self.memory_event("memory.outdated", id, m.project_id.as_deref(), true, json!({}));
+        Ok(m)
+    }
+    pub fn restore_memory(&self, id: &str) -> Result<memory::Memory> {
+        let m = memory::restore(&self.db, id)?;
+        self.memory_event("memory.restored", id, m.project_id.as_deref(), true, json!({}));
+        Ok(m)
+    }
+    /// The owner replaces `old_id` with a new memory (a correction kept as a new version).
+    pub fn replace_memory(&self, old_id: &str, content: &str) -> Result<memory::Memory> {
+        let old = memory::get(&self.db, old_id)?;
+        let m = memory::save(&self.db, memory::NewMemory { project_id: old.project_id.as_deref(), kind: old.kind, content, source: "user", pinned: old.pinned, conversation_id: None, review_after: None })?;
+        memory::supersede(&self.db, old_id, &m.id, "user")?;
+        self.memory_event("memory.replaced", old_id, old.project_id.as_deref(), true, json!({ "replaced_by": m.id }));
+        Ok(m)
+    }
+    pub fn memory_history(&self, id: &str) -> Result<Vec<memory::HistoryEntry>> {
+        memory::history_of(&self.db, id)
+    }
+    pub fn memory_similar(&self, content: &str, project_id: Option<&str>, except: Option<&str>) -> Result<Vec<memory::Similar>> {
+        memory::similar(&self.db, content, project_id, except)
+    }
     pub fn delete_memory(&self, id: &str) -> Result<()> {
+        let project = memory::get(&self.db, id).ok().and_then(|m| m.project_id);
         memory::delete(&self.db, id)?;
-        audit::record(&self.db, "memory.deleted", "info", None, None, json!({}));
-        notify(&self.bus, Topic::Memory, Some(id));
+        self.memory_event("memory.deleted", id, project.as_deref(), false, json!({}));
         Ok(())
     }
     pub fn delete_all_memories(&self) -> Result<usize> {
         let n = memory::delete_all(&self.db)?;
-        audit::record(&self.db, "memory.deleted_all", "warn", None, None, json!({"count": n}));
+        audit::event(&self.db, audit::Event { kind: "memory.deleted_all", level: "warn", actor: "user", reversible: Some(false), detail: json!({"count": n}), ..Default::default() });
         notify(&self.bus, Topic::Memory, None);
         Ok(n)
     }

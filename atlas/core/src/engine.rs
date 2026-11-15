@@ -301,10 +301,11 @@ impl Atlas {
         let mut mem_refs = Vec::new();
         let (retrieved, pinned) = if settings.memory.enabled && settings.memory.max_retrieved > 0 {
             let max = settings.memory.max_retrieved as usize;
-            let pinned: Vec<_> = memory::pinned(&self.db, conv.project_id.as_deref())?.into_iter().take(max).collect();
+            let pinned: Vec<_> = memory::pinned(&self.db, conv.project_id.as_deref())?;
             let mut r = memory::search(&self.db, text, conv.project_id.as_deref(), max as u32)?;
             r.retain(|x| !pinned.iter().any(|pm| pm.id == x.memory.id));
-            r.truncate(max.saturating_sub(pinned.len()));
+            // Bounded by count and by characters, no text twice.
+            let (pinned, r) = memory::fit_budget(pinned, r, max, memory::CONTEXT_CHAR_BUDGET);
             (r, pinned)
         } else {
             (vec![], vec![])
@@ -316,6 +317,22 @@ impl Atlas {
             mem_refs.push(MemoryRef { id: r.memory.id.clone(), content: r.memory.content.clone(), reason: r.reason.clone() });
         }
         memory::mark_used(&self.db, &mem_refs.iter().map(|m| m.id.clone()).collect::<Vec<_>>());
+        if !mem_refs.is_empty() {
+            // Which memories went with this message, and to which model (ids only, never text).
+            crate::audit::event(
+                &self.db,
+                crate::audit::Event {
+                    kind: "memory.used",
+                    resource: Some(&conv.id),
+                    project_id: conv.project_id.as_deref(),
+                    provider: Some(&route.provider.label),
+                    model: Some(&route.model),
+                    left_device: !route.provider.local,
+                    detail: serde_json::json!({ "memories": mem_refs.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), "count": mem_refs.len() }),
+                    ..Default::default()
+                },
+            );
+        }
 
         // Knowledge Vault: relevant passages from the personal library and this conversation's
         // project only. With local-only on, they are never sent to a model outside this computer.
@@ -366,13 +383,23 @@ impl Atlas {
             let _ = crate::vault::save_turn_sources(&self.db, &user_message_id, &vault_sources);
         }
         if !vault_sources.is_empty() {
-            crate::audit::record(
+            // Which documents' passages went with this message, to which model, and whether they
+            // left this computer (titles and ids only, never passage text).
+            let mut docs: Vec<&str> = vault_sources.iter().map(|s| s.title.as_str()).collect();
+            docs.dedup();
+            crate::audit::event(
                 &self.db,
-                "vault.passages",
-                "info",
-                None,
-                None,
-                serde_json::json!({ "conversation": conv.id, "passages": vault_sources.len(), "sent": vault_sent, "provider_local": route.provider.local }),
+                crate::audit::Event {
+                    kind: if vault_sent { "vault.passages" } else { "vault.passages_withheld" },
+                    resource: Some(&conv.id),
+                    project_id: conv.project_id.as_deref(),
+                    provider: Some(&route.provider.label),
+                    model: Some(&route.model),
+                    left_device: vault_sent && !route.provider.local,
+                    outcome: if vault_sent { "ok" } else { "denied" },
+                    detail: serde_json::json!({ "passages": vault_sources.len(), "sent": vault_sent, "documents": docs, "document_ids": vault_sources.iter().filter_map(|s| s.document_id.as_deref()).collect::<Vec<_>>() }),
+                    ..Default::default()
+                },
             );
         }
         if conv.message_count == 0 && conv.title == "New conversation" {

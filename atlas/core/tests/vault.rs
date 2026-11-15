@@ -543,7 +543,7 @@ fn upgrading_a_v6_database_adds_the_vault_and_keeps_everything() {
     .unwrap();
     migrations::apply(&conn).unwrap();
     let one = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
-    assert_eq!(one("PRAGMA user_version"), 7);
+    assert_eq!(one("PRAGMA user_version"), migrations::CURRENT_SCHEMA_VERSION);
     assert_eq!(one("SELECT COUNT(*) FROM notifications WHERE id='n1'") + one("SELECT COUNT(*) FROM focus_sessions"), 2);
     // Foreign keys and triggers work on the upgraded database.
     conn.execute_batch(

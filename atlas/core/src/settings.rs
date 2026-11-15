@@ -322,11 +322,14 @@ pub struct MemorySettings {
     pub enabled: bool,
     /// Maximum memories added to a single request.
     pub max_retrieved: u32,
+    /// Atlas may propose memories in a conversation (each needs the owner's approval). Off: only
+    /// the owner adds memories.
+    pub atlas_may_propose: bool,
 }
 
 impl Default for MemorySettings {
     fn default() -> Self {
-        Self { enabled: true, max_retrieved: 6 }
+        Self { enabled: true, max_retrieved: 6, atlas_may_propose: true }
     }
 }
 

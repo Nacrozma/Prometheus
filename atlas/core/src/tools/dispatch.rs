@@ -92,13 +92,32 @@ impl Dispatcher {
             None,
             None,
         );
-        crate::audit::record(
+        let approval: Option<String> = self.db.conn().ok().and_then(|c| c.query_row("SELECT status FROM approvals WHERE step_id = ?1", [&step_id], |r| r.get(0)).ok());
+        let network = self.registry.get(tool_id).is_some_and(|t| t.descriptor().network);
+        let outcome = match result.status.as_str() {
+            "completed" | "succeeded" | "ok" => "ok",
+            "denied" | "rejected" => "denied",
+            "cancelled" | "expired" => "cancelled",
+            _ if result.is_error => "failed",
+            _ => "ok",
+        };
+        crate::audit::event(
             &self.db,
-            "tool.step",
-            if result.is_error { "warn" } else { "info" },
-            Some(task_id),
-            Some(tool_id),
-            json!({"status": result.status, "step_id": step_id}),
+            crate::audit::Event {
+                kind: "tool.step",
+                level: if result.is_error { "warn" } else { "info" },
+                actor: "assistant",
+                resource: Some(tool_id),
+                project_id: ctx.project_id.as_deref(),
+                left_device: network && outcome == "ok",
+                approval: Some(approval.as_deref().unwrap_or("not_needed")),
+                outcome,
+                task_id: Some(task_id),
+                tool_id: Some(tool_id),
+                op_key: Some(&format!("step:{step_id}")),
+                detail: json!({"status": result.status, "step_id": step_id}),
+                ..Default::default()
+            },
         );
         notify(&self.bus, Topic::Tasks, Some(task_id));
         notify(&self.bus, Topic::Registry, Some(tool_id));
@@ -140,7 +159,10 @@ impl Dispatcher {
         }
 
         let mut approval_id: Option<String> = None;
-        match policy::decide_tool(&d.category, d.permission, d.network, &ctx.settings) {
+        // Permissions are decided from the settings as they are now, not as they were when the turn
+        // started: a gate the owner tightened (or offline mode) applies to the very next action.
+        let live = crate::settings::Settings::load(&self.db).unwrap_or_else(|_| ctx.settings.clone());
+        match policy::decide_tool(&d.category, d.permission, d.network, &live) {
             Decision::Deny { reason } => return failed(tool_id, None, "denied", format!("permission denied: {reason}")),
             Decision::Allow => {}
             Decision::Ask => {
@@ -157,6 +179,10 @@ impl Dispatcher {
                     }
                 notify(&self.bus, Topic::Approvals, Some(&id));
                 notify(&self.bus, Topic::Tasks, Some(task_id));
+                crate::audit::event(
+                    &self.db,
+                    crate::audit::Event { kind: "approval.requested", actor: "assistant", resource: Some(tool_id), approval: Some("requested"), task_id: Some(task_id), tool_id: Some(tool_id), detail: json!({ "approval_id": id, "action": preview.action, "target": preview.target }), ..Default::default() },
+                );
                 let _ = self.notifications.raise(
                     &ctx.settings.desktop.notifications,
                     crate::desktop::NewNotification {
@@ -174,6 +200,23 @@ impl Dispatcher {
                 notify(&self.bus, Topic::Approvals, Some(&id));
                 if tasks::status(&self.db, task_id).ok() == Some(TaskStatus::AwaitingApproval) {
                     let _ = tasks::transition(&self.db, task_id, TaskStatus::Running);
+                }
+                let (decided, ok) = match outcome {
+                    Outcome::Approved => ("approved", "ok"),
+                    Outcome::Rejected => ("declined", "denied"),
+                    Outcome::Expired => ("expired", "cancelled"),
+                    Outcome::Cancelled => ("cancelled", "cancelled"),
+                };
+                crate::audit::event(
+                    &self.db,
+                    crate::audit::Event { kind: "approval.decided", actor: "user", resource: Some(tool_id), approval: Some(decided), outcome: ok, task_id: Some(task_id), tool_id: Some(tool_id), detail: json!({ "approval_id": id }), ..Default::default() },
+                );
+                // Checked again: a permission revoked while the approval was pending still applies.
+                if outcome == Outcome::Approved {
+                    let now_settings = crate::settings::Settings::load(&self.db).unwrap_or_else(|_| ctx.settings.clone());
+                    if let Decision::Deny { reason } = policy::decide_tool(&d.category, d.permission, d.network, &now_settings) {
+                        return failed(tool_id, None, "denied", format!("permission denied after approval: {reason}"));
+                    }
                 }
                 match outcome {
                     Outcome::Approved => approval_id = Some(id),
@@ -239,7 +282,8 @@ impl Dispatcher {
             .validate_input(tool_id, input)
             .map_err(|e| AtlasError::Validation(e.join("; ")))?;
         let hash = action_hash(tool_id, input);
-        match policy::decide_tool(&d.category, d.permission, d.network, &ctx.settings) {
+        let live = crate::settings::Settings::load(&self.db).unwrap_or_else(|_| ctx.settings.clone());
+        match policy::decide_tool(&d.category, d.permission, d.network, &live) {
             Decision::Deny { reason } => return Err(AtlasError::PermissionDenied(reason)),
             Decision::Allow => {}
             Decision::Ask => {
