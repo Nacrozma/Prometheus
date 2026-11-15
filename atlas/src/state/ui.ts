@@ -13,6 +13,7 @@ export type Route =
   | "files"
   | "vault"
   | "trust"
+  | "specialists"
   | "integrations"
   | "voice"
   | "settings";

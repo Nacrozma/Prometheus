@@ -2,6 +2,7 @@ import { SiblingsPage } from "@/features/siblings/Siblings";
 import { FocusBar, FocusDialog } from "@/features/focus/Focus";
 import { VaultPage } from "@/features/vault/Vault";
 import { TrustPage } from "@/features/trust/Trust";
+import { SpecialistsPage } from "@/features/specialists/Specialists";
 import { ForgePage } from "@/features/forge/Forge";
 import { lazy, Suspense, useEffect } from "react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -83,6 +84,7 @@ export function Shell() {
           {route === "files" && <FilesPage />}
           {route === "vault" && <VaultPage />}
           {route === "trust" && <TrustPage />}
+          {route === "specialists" && <SpecialistsPage />}
           {route === "integrations" && <IntegrationsPage />}
           {route === "voice" && <VoicePage />}
           {route === "settings" && <SettingsPage />}

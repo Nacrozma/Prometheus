@@ -42,6 +42,7 @@ export const SettingsSchema = z.object({
   permissions: z.object({ local_write: gate, network_tools: gate, planner: gate.default("allow") }),
   memory: z.object({ enabled: z.boolean(), max_retrieved: z.number(), atlas_may_propose: z.boolean().default(true) }),
   vault: z.object({ use_in_chat: z.boolean(), local_only: z.boolean(), max_passages: z.number() }).default({ use_in_chat: true, local_only: false, max_passages: 4 }),
+  specialists: z.object({ enabled: z.boolean() }).default({ enabled: true }),
   workspace_dir: z.string().nullable(),
   appearance: z.object({
     theme: z.enum(["dark", "light", "system"]),
@@ -536,6 +537,7 @@ export const TOPICS = [
   "todos",
   "focus",
   "vault",
+  "specialists",
 ] as const;
 export type Topic = (typeof TOPICS)[number];
 export const ChangeEventSchema = z.object({ topic: z.enum(TOPICS), id: z.string().nullable() });
@@ -1060,3 +1062,88 @@ export const TrustOverviewSchema = z.object({
 });
 export type TrustOverview = z.infer<typeof TrustOverviewSchema>;
 export type TrustFilter = { category?: string | null; search?: string | null; left_device_only?: boolean; outcome?: string | null; before_id?: number | null; limit?: number };
+
+// ---------------- Specialists ----------------
+
+export const SpecialistResultSchema = z.object({
+  summary: z.string(),
+  findings: z.array(z.string()).default([]),
+  evidence: z.array(z.object({ source: z.string(), detail: z.string().default("") })).default([]),
+  recommendations: z.array(z.string()).default([]),
+  uncertainties: z.array(z.string()).default([]),
+  warnings: z.array(z.string()).default([]),
+  disagreements: z.array(z.string()).default([]),
+  proposed_actions: z.array(z.string()).default([]),
+});
+export type SpecialistResult = z.infer<typeof SpecialistResultSchema>;
+export const MissionStepSchema = z.object({
+  id: z.string(),
+  seq: z.number(),
+  specialist_id: z.string(),
+  specialist_version: z.number(),
+  status: z.enum(["pending", "running", "completed", "failed", "invalid_output", "cancelled", "skipped", "interrupted"]),
+  task_id: z.string().nullable(),
+  provider: z.string().nullable(),
+  model: z.string().nullable(),
+  local: z.boolean().nullable(),
+  input_tokens: z.number().nullable(),
+  output_tokens: z.number().nullable(),
+  estimated_cost_usd: z.number().nullable(),
+  context_manifest: z.record(z.string(), z.unknown()).nullable().default({}),
+  result: SpecialistResultSchema.nullable(),
+  error: z.string().nullable(),
+  started_at: z.string().nullable(),
+  finished_at: z.string().nullable(),
+  awaiting_approval: z.boolean().default(false),
+});
+export type MissionStep = z.infer<typeof MissionStepSchema>;
+export const SpecialistMissionSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  objective: z.string(),
+  workflow: z.array(z.string()),
+  origin: z.enum(["user", "atlas"]),
+  status: z.enum(["queued", "running", "completed", "partial", "failed", "cancelled", "interrupted"]),
+  conversation_id: z.string().nullable(),
+  project_id: z.string().nullable(),
+  forge_project_id: z.string().nullable(),
+  error: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  finished_at: z.string().nullable(),
+  steps: z.array(MissionStepSchema),
+});
+export type SpecialistMission = z.infer<typeof SpecialistMissionSchema>;
+export const SpecialistDefSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  summary: z.string(),
+  domain: z.string(),
+  version: z.number(),
+  tools: z.array(z.string()),
+  memories: z.number(),
+  vault_passages: z.number(),
+  tasks: z.boolean(),
+  projects: z.boolean(),
+  forge: z.string().nullable(),
+  tier_hint: z.string(),
+  max_steps: z.number(),
+  timeout_secs: z.number(),
+  max_output_tokens: z.number(),
+  needs: z.string(),
+  role: z.string(),
+});
+export type SpecialistDef = z.infer<typeof SpecialistDefSchema>;
+export const SpecialistsOverviewSchema = z.object({
+  enabled: z.boolean(),
+  specialists: z.array(
+    z.object({
+      specialist: SpecialistDefSchema,
+      enabled: z.boolean(),
+      tools: z.array(z.object({ id: z.string(), registered: z.boolean(), enabled: z.boolean(), permission: z.string().nullable(), network: z.boolean().nullable() })),
+    }),
+  ),
+  workflows: z.array(z.object({ id: z.string(), name: z.string(), steps: z.array(z.string()) })),
+  missions: z.array(SpecialistMissionSchema),
+});
+export type SpecialistsOverview = z.infer<typeof SpecialistsOverviewSchema>;

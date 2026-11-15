@@ -39,6 +39,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         memories_list, memory_create, memory_update, memory_delete, memory_delete_all, memory_search, memory_export,
         memory_confirm, memory_mark_outdated, memory_restore, memory_replace, memory_history, memory_similar,
         trust_overview, trust_timeline, trust_export, trust_clear,
+        specialists_overview, specialist_set_enabled, specialist_mission_start, specialist_mission_get, specialist_mission_cancel,
         projects_list, project_create, project_update, project_delete, project_export,
         file_share_pick, grants_list, grant_revoke,
         usage_summary, map_graph,
@@ -823,6 +824,41 @@ fn memory_history(state: State<'_, AppState>, id: String) -> R<Vec<atlas_core::m
 #[tauri::command]
 fn memory_similar(state: State<'_, AppState>, content: String, project_id: Option<String>, except: Option<String>) -> R<Vec<atlas_core::memory::Similar>> {
     state.atlas.memory_similar(&content, project_id.as_deref(), except.as_deref())
+}
+
+// ---------------- Specialists ----------------
+
+#[tauri::command]
+fn specialists_overview(state: State<'_, AppState>) -> R<Value> {
+    state.atlas.specialists_overview()
+}
+
+#[tauri::command]
+fn specialist_set_enabled(state: State<'_, AppState>, id: String, enabled: bool) -> R<()> {
+    state.atlas.specialist_set_enabled(&id, enabled)
+}
+
+/// Start a mission (runs in the background; progress arrives through the "specialists" topic).
+#[tauri::command]
+async fn specialist_mission_start(state: State<'_, AppState>, objective: String, specialists: Vec<String>, project_id: Option<String>, forge_project_id: Option<String>) -> R<atlas_core::specialists::Mission> {
+    state.atlas.start_mission(atlas_core::specialists::NewMission {
+        objective: &objective,
+        workflow: specialists,
+        origin: "user",
+        conversation_id: None,
+        project_id: project_id.as_deref(),
+        forge_project_id: forge_project_id.as_deref(),
+    })
+}
+
+#[tauri::command]
+fn specialist_mission_get(state: State<'_, AppState>, id: String) -> R<atlas_core::specialists::Mission> {
+    state.atlas.mission(&id)
+}
+
+#[tauri::command]
+fn specialist_mission_cancel(state: State<'_, AppState>, id: String) -> R<bool> {
+    state.atlas.cancel_mission(&id)
 }
 
 // ---------------- Trust Center (read-only views; changes go through the ordinary commands) ----------------

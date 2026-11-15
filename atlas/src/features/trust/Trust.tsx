@@ -19,6 +19,7 @@ export const CATEGORY_LABEL: Record<string, string> = {
   forge: "Atlas Forge",
   approvals: "Approvals",
   sibling: "Prometheus (sibling)",
+  specialists: "Specialists",
   background: "Background work",
   voice: "Voice",
   settings: "Settings and permissions",
@@ -27,6 +28,8 @@ export const CATEGORY_LABEL: Record<string, string> = {
 };
 
 const n = (v: unknown) => (typeof v === "number" ? v : 0);
+const SPECIALIST_NAMES: Record<string, string> = { researcher: "Researcher", planner: "Planner", writer: "Writer", data_analyst: "Data Analyst", document_analyst: "Document Analyst", project_coordinator: "Project Coordinator", security_reviewer: "Security Reviewer", engineer: "Engineer" };
+const specialistName = (id: string) => SPECIALIST_NAMES[id] ?? id;
 const s = (v: unknown) => (typeof v === "string" ? v : "");
 
 /** One plain sentence for an event, from its recorded fields only. */
@@ -82,6 +85,22 @@ export function describe(e: AuditEvent): string {
       return "An approved action ran";
     case "tool.step":
       return `Tool ${e.resource ?? e.tool_id ?? ""} ${e.outcome === "ok" ? "ran" : e.outcome === "denied" ? "was refused" : e.outcome === "cancelled" ? "was stopped" : "failed"}`;
+    case "specialist.mission_started":
+      return `${e.actor === "assistant" ? "Atlas" : "You"} started a specialist mission (${(Array.isArray(d.specialists) ? (d.specialists as string[]) : []).map(specialistName).join(" → ")})`;
+    case "specialist.invoked":
+      return `${e.actor === "assistant" ? "Atlas" : "You"} invoked ${s(d.name) || specialistName(s(d.specialist))}${who}${d.context && typeof d.context === "object" && Object.keys(d.context as object).length ? ` with ${Object.keys(d.context as object).map((k) => k.replace(/_/g, " ")).join(", ")}` : ""}`;
+    case "specialist.completed":
+      return `${s(d.name) || specialistName(s(d.specialist))} completed: ${n(d.findings)} finding${n(d.findings) === 1 ? "" : "s"}${n(d.warnings) ? `, ${n(d.warnings)} warning${n(d.warnings) === 1 ? "" : "s"}` : ""}${n(d.disagreements) ? `, ${n(d.disagreements)} disagreement${n(d.disagreements) === 1 ? "" : "s"}` : ""}`;
+    case "specialist.failed":
+      return `${specialistName(s(d.specialist))} did not finish: ${s(d.reason)}`;
+    case "specialist.cancelled":
+      return `${specialistName(s(d.specialist))} was stopped`;
+    case "specialist.tool_refused":
+      return `A specialist tried to use ${e.resource ?? "a tool"} outside its allowed tools; refused`;
+    case "specialist.mission_finished":
+      return `A specialist mission ended: ${s(d.status)} (${n(d.completed_steps)} of ${n(d.steps)} steps)`;
+    case "specialist.toggled":
+      return `You ${d.enabled ? "switched on" : "switched off"} the ${specialistName(e.resource ?? "")} specialist`;
     case "trust.history_cleared":
       return `You cleared ${n(d.removed)} activity records`;
     case "trust.exported":

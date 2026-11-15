@@ -249,6 +249,11 @@ export const api = {
   replaceMemory: (id: string, content: string) => call("memory_replace", { id, content }, S.MemorySchema),
   memoryHistory: (id: string) => call("memory_history", { id }, z.array(S.MemoryHistorySchema)),
   memorySimilar: (content: string, projectId: string | null, except: string | null) => call("memory_similar", { content, projectId, except }, z.array(S.MemorySimilarSchema)),
+  specialistsOverview: () => call("specialists_overview", {}, S.SpecialistsOverviewSchema),
+  setSpecialistEnabled: (id: string, enabled: boolean) => call("specialist_set_enabled", { id, enabled }, Void),
+  startSpecialistMission: (objective: string, specialists: string[], projectId: string | null, forgeProjectId: string | null) =>
+    call("specialist_mission_start", { objective, specialists, projectId, forgeProjectId }, S.SpecialistMissionSchema),
+  cancelSpecialistMission: (id: string) => call("specialist_mission_cancel", { id }, z.boolean()),
   trustOverview: () => call("trust_overview", {}, S.TrustOverviewSchema),
   trustTimeline: (filter: S.TrustFilter) => call("trust_timeline", { filter }, z.array(S.AuditEventSchema)),
   trustExport: (days: number) => call("trust_export", { days }, z.string().nullable()),
