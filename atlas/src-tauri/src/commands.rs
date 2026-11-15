@@ -37,6 +37,8 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         approvals_pending, approval_decide,
         tasks_list, task_detail, task_cancel, task_dismiss, task_retry_step, emergency_stop, active_turns,
         memories_list, memory_create, memory_update, memory_delete, memory_delete_all, memory_search, memory_export,
+        memory_confirm, memory_mark_outdated, memory_restore, memory_replace, memory_history, memory_similar,
+        trust_overview, trust_timeline, trust_export, trust_clear,
         projects_list, project_create, project_update, project_delete, project_export,
         file_share_pick, grants_list, grant_revoke,
         usage_summary, map_graph,
@@ -793,6 +795,69 @@ fn memory_update(state: State<'_, AppState>, id: String, patch: MemoryPatch) -> 
     let project = patch.project_id.as_ref().map(|o| o.as_deref());
     state.atlas.update_memory(&id, patch.content.as_deref(), patch.kind, patch.pinned, project)
 }
+#[tauri::command]
+fn memory_confirm(state: State<'_, AppState>, id: String) -> R<atlas_core::memory::Memory> {
+    state.atlas.confirm_memory(&id)
+}
+
+#[tauri::command]
+fn memory_mark_outdated(state: State<'_, AppState>, id: String) -> R<atlas_core::memory::Memory> {
+    state.atlas.mark_memory_outdated(&id)
+}
+
+#[tauri::command]
+fn memory_restore(state: State<'_, AppState>, id: String) -> R<atlas_core::memory::Memory> {
+    state.atlas.restore_memory(&id)
+}
+
+#[tauri::command]
+fn memory_replace(state: State<'_, AppState>, id: String, content: String) -> R<atlas_core::memory::Memory> {
+    state.atlas.replace_memory(&id, &content)
+}
+
+#[tauri::command]
+fn memory_history(state: State<'_, AppState>, id: String) -> R<Vec<atlas_core::memory::HistoryEntry>> {
+    state.atlas.memory_history(&id)
+}
+
+#[tauri::command]
+fn memory_similar(state: State<'_, AppState>, content: String, project_id: Option<String>, except: Option<String>) -> R<Vec<atlas_core::memory::Similar>> {
+    state.atlas.memory_similar(&content, project_id.as_deref(), except.as_deref())
+}
+
+// ---------------- Trust Center (read-only views; changes go through the ordinary commands) ----------------
+
+#[tauri::command]
+fn trust_overview(state: State<'_, AppState>) -> R<Value> {
+    state.atlas.trust_overview()
+}
+
+#[tauri::command]
+fn trust_timeline(state: State<'_, AppState>, filter: Option<atlas_core::audit::PageFilter>) -> R<Vec<atlas_core::audit::AuditEvent>> {
+    state.atlas.trust_timeline(&filter.unwrap_or_default())
+}
+
+/// Export the activity record (content-free) to a file the owner chooses.
+#[tauri::command]
+async fn trust_export(app: AppHandle, state: State<'_, AppState>, days: Option<u32>) -> R<Option<String>> {
+    let json = state.atlas.trust_export(days.unwrap_or(30))?;
+    match save_file(&app, "Export Atlas activity", "atlas-activity", "json").await? {
+        Some(p) => {
+            std::fs::write(&p, json)?;
+            Ok(Some(p.to_string_lossy().to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+fn trust_clear(state: State<'_, AppState>, days: u32, confirm: String) -> R<usize> {
+    if confirm != "CLEAR" {
+        return Err(AtlasError::Validation("type CLEAR to confirm".into()));
+    }
+    state.atlas.trust_clear(days)
+}
+
 #[tauri::command]
 fn memory_delete(state: State<'_, AppState>, id: String) -> R<()> {
     state.atlas.delete_memory(&id)

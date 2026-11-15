@@ -12,6 +12,7 @@ export type Route =
   | "memory"
   | "files"
   | "vault"
+  | "trust"
   | "integrations"
   | "voice"
   | "settings";

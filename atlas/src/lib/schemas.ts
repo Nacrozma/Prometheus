@@ -40,7 +40,7 @@ export const SettingsSchema = z.object({
     heavy: TierModelSchema.nullable(),
   }),
   permissions: z.object({ local_write: gate, network_tools: gate, planner: gate.default("allow") }),
-  memory: z.object({ enabled: z.boolean(), max_retrieved: z.number() }),
+  memory: z.object({ enabled: z.boolean(), max_retrieved: z.number(), atlas_may_propose: z.boolean().default(true) }),
   vault: z.object({ use_in_chat: z.boolean(), local_only: z.boolean(), max_passages: z.number() }).default({ use_in_chat: true, local_only: false, max_passages: 4 }),
   workspace_dir: z.string().nullable(),
   appearance: z.object({
@@ -397,8 +397,16 @@ export const MemorySchema = z.object({
   last_used_at: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
+  status: z.enum(["active", "needs_review", "outdated", "superseded"]).default("active"),
+  confirmed_at: z.string().nullable().default(null),
+  review_after: z.string().nullable().default(null),
+  superseded_by: z.string().nullable().default(null),
+  conversation_id: z.string().nullable().default(null),
 });
 export type Memory = z.infer<typeof MemorySchema>;
+export const MemoryHistorySchema = z.object({ ts: z.string(), action: z.string(), actor: z.string(), old_content: z.string().nullable(), new_content: z.string().nullable() });
+export type MemoryHistory = z.infer<typeof MemoryHistorySchema>;
+export const MemorySimilarSchema = z.object({ memory: MemorySchema, relation: z.enum(["duplicate", "related"]), overlap: z.number() });
 export const RetrievedSchema = z.object({ memory: MemorySchema, reason: z.string(), score: z.number() });
 export type Retrieved = z.infer<typeof RetrievedSchema>;
 
@@ -472,6 +480,16 @@ export const AuditEventSchema = z.object({
   task_id: z.string().nullable(),
   tool_id: z.string().nullable(),
   detail: z.unknown(),
+  category: z.string().default("system"),
+  actor: z.string().default("atlas"),
+  resource: z.string().nullable().default(null),
+  project_id: z.string().nullable().default(null),
+  provider: z.string().nullable().default(null),
+  model: z.string().nullable().default(null),
+  left_device: z.boolean().default(false),
+  approval: z.string().nullable().default(null),
+  outcome: z.string().default("ok"),
+  reversible: z.boolean().nullable().default(null),
 });
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
@@ -992,3 +1010,53 @@ export const VaultReaderSchema = z.object({
 export type VaultReader = z.infer<typeof VaultReaderSchema>;
 
 export type VaultLibrary = { kind: "all" } | { kind: "personal" } | { kind: "project"; project_id: string };
+
+// ---------------- Trust Center ----------------
+
+export const TrustPermissionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  allows: z.string(),
+  status: z.string(),
+  open: z.boolean(),
+  scope: z.string(),
+  component: z.string(),
+  last_used_at: z.string().nullable(),
+  control: z.object({ kind: z.enum(["gate", "switch", "provider", "grant", "page"]), setting: z.string().optional(), provider_id: z.string().optional(), grant_id: z.string().optional(), route: z.string().optional() }),
+});
+export type TrustPermission = z.infer<typeof TrustPermissionSchema>;
+export const TrustProviderSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  kind: z.string(),
+  local: z.boolean(),
+  enabled: z.boolean(),
+  is_default: z.boolean(),
+  requests_30d: z.number(),
+  failed_30d: z.number(),
+  input_tokens_30d: z.number(),
+  output_tokens_30d: z.number(),
+  estimated_cost_usd_30d: z.number(),
+  unpriced_requests_30d: z.number(),
+  last_used_at: z.string().nullable(),
+});
+export const TrustOverviewSchema = z.object({
+  since: z.string(),
+  categories: z.array(z.object({ category: z.string(), events: z.number(), problems: z.number() })),
+  left_device_7d: z.number(),
+  providers: z.array(TrustProviderSchema),
+  routing: z.object({ default_provider: z.string().nullable(), default_model: z.string().nullable(), mode: z.unknown(), cross_provider_fallback: z.boolean(), offline_mode: z.boolean() }),
+  permissions: z.array(TrustPermissionSchema),
+  background: z.object({
+    running_conversations: z.number(),
+    pending_approvals: z.number(),
+    scheduler: z.object({ pending: z.number(), running: z.number(), missed_7d: z.number(), next_at: z.string().nullable() }),
+    vault: z.array(z.object({ id: z.string(), title: z.string(), status: z.string() })),
+    missions_active: z.number(),
+    forge_runs_running: z.number(),
+    tasks_interrupted_7d: z.number(),
+  }),
+  retention: z.object({ events_stored: z.number(), oldest_event: z.string().nullable(), max_events: z.number(), audit_days: z.number().nullable(), conversation_days: z.number().nullable() }),
+});
+export type TrustOverview = z.infer<typeof TrustOverviewSchema>;
+export type TrustFilter = { category?: string | null; search?: string | null; left_device_only?: boolean; outcome?: string | null; before_id?: number | null; limit?: number };
