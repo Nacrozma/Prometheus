@@ -154,10 +154,14 @@ pub fn similar(db: &Db, content: &str, project_id: Option<&str>, except: Option<
         stmt.query_map(rusqlite::params![fts_query, project_id, except], row)?.collect::<std::result::Result<_, _>>()?
     };
     let norm = normalized(content);
+    // Duplicates are judged on every word, numbers and short words included ("room 12" is not
+    // "room 14"); a possible conflict on the meaningful terms.
+    let words = |s: &str| normalized(s).split(' ').filter(|w| !w.is_empty() && !STOPWORDS.contains(w)).map(str::to_string).collect::<Vec<_>>();
+    let all_words = words(content);
     let mut out = Vec::new();
     for m in candidates {
         let overlap = jaccard(&ts, &terms(&m.content));
-        let relation = if normalized(&m.content) == norm || overlap >= 0.85 {
+        let relation = if normalized(&m.content) == norm || jaccard(&all_words, &words(&m.content)) >= 0.9 {
             "duplicate"
         } else if overlap >= 0.4 {
             "related"
@@ -556,6 +560,9 @@ mod tests {
         let p = crate::projects::create(&db, "P", "", "").unwrap();
         assert!(create(&db, Some(&p.id), MemoryKind::Preference, "Prefers tea over coffee in the morning", "user", false).is_ok());
         assert!(similar(&db, "Completely unrelated sentence about bicycles", None, None).unwrap().is_empty());
+        // Different numbers are different memories, not duplicates.
+        create(&db, None, MemoryKind::Fact, "Meeting room 12 has the projector", "user", false).unwrap();
+        assert!(create(&db, None, MemoryKind::Fact, "Meeting room 14 has the projector", "user", false).is_ok());
     }
 
     #[test]

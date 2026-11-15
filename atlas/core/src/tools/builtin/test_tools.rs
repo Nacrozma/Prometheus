@@ -172,3 +172,36 @@ impl Tool for BadOutput {
         Ok(json!({"n": "not a number"}))
     }
 }
+
+/// A read-only tool that "uses the internet" (it does not; it counts calls). For permission tests:
+/// it follows the internet-tools gate and offline mode.
+pub struct Fetch(ToolDescriptor, std::sync::Arc<std::sync::atomic::AtomicUsize>);
+impl Fetch {
+    pub fn new(calls: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        Self(
+            descriptor(
+                "test.fetch",
+                "Fetch (test)",
+                "Pretends to fetch a web page.",
+                "test",
+                PermissionClass::ReadOnly,
+                true,
+                json!({"type":"object","properties":{"url":{"type":"string"}},"required":["url"],"additionalProperties":false}),
+                json!({"type":"object"}),
+                5,
+                "none",
+            ),
+            calls,
+        )
+    }
+}
+#[async_trait]
+impl Tool for Fetch {
+    fn descriptor(&self) -> &ToolDescriptor {
+        &self.0
+    }
+    async fn execute(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+        self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(json!({"fetched": true}))
+    }
+}

@@ -117,6 +117,7 @@ fn gate(db: &Db, id: &str, name: &str, allows: &str, g: GatePolicy, component: &
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn switch(id: &str, name: &str, allows: &str, on: bool, on_text: &str, off_text: &str, open_when_on: bool, component: &str, setting: &str, last: Option<String>) -> Permission {
     Permission {
         id: id.into(),
