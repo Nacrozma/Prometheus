@@ -523,6 +523,9 @@ fn set_step(db: &Db, step_id: &str, fields: &[(&str, &dyn rusqlite::ToSql)]) -> 
     Ok(())
 }
 
+/// title, due date, priority, status, project name
+type TaskRow = (String, Option<String>, String, String, Option<String>);
+
 /// What a specialist step received, as recorded (categories, ids, counts; never content).
 #[derive(Debug, Default)]
 struct Context {
@@ -669,7 +672,7 @@ impl Atlas {
             }
         }
         if spec.tasks {
-            let rows: Vec<(String, Option<String>, String, String, Option<String>)> = {
+            let rows: Vec<TaskRow> = {
                 let conn = self.db.conn()?;
                 let mut st = conn.prepare(
                     "SELECT t.title, t.due_date, t.priority, t.status, p.name FROM todos t LEFT JOIN projects p ON p.id = t.project_id
@@ -923,13 +926,13 @@ impl Atlas {
                         let mut on_ev = |_e: crate::tools::dispatch::DispatchEvent| {};
                         self.dispatcher().run(&ctx, &task_id, &call_id, &tool_id, input.clone(), &mut on_ev).await
                     };
-                    if let (Some(p), Some(d)) = (path, d) {
-                        if r.status == "succeeded" {
-                            if d.permission == crate::tools::PermissionClass::ReadOnly {
-                                files_read.push(p);
-                            } else {
-                                files_changed.push(p);
-                            }
+                    if let (Some(p), Some(d)) = (path, d)
+                        && r.status == "succeeded"
+                    {
+                        if d.permission == crate::tools::PermissionClass::ReadOnly {
+                            files_read.push(p);
+                        } else {
+                            files_changed.push(p);
                         }
                     }
                     results.push(Part::ToolResult { call_id, content: r.content_for_model, is_error: r.is_error });
