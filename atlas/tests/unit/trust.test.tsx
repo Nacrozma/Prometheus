@@ -97,7 +97,7 @@ describe("Trust Center", () => {
     await waitFor(() => expect(gate.value).toBe("ask"));
     fireEvent.change(gate, { target: { value: "allow" } });
     await waitFor(() => expect(updateSettings).toHaveBeenCalled());
-    expect(updateSettings.mock.calls[0][0].permissions.local_write).toBe("allow");
+    expect(updateSettings.mock.calls[0]![0].permissions.local_write).toBe("allow");
     // "Background activity" is shown as running; turning it off pauses (inverted setting).
     fireEvent.click(screen.getByRole("switch", { name: "Background activity" }));
     await waitFor(() => expect(updateSettings.mock.calls[1]?.[0].schedule.paused).toBe(true));
@@ -112,7 +112,7 @@ describe("Trust Center", () => {
     timeline.mockResolvedValueOnce(page1).mockResolvedValue([ev({ id: 10, kind: "app.start" })]);
     render(<TooltipProvider><TrustPage /></TooltipProvider>);
     await screen.findAllByText("Tool files.read ran");
-    expect(timeline.mock.calls[0][0]).toMatchObject({ before_id: null, limit: 40, left_device_only: false });
+    expect(timeline.mock.calls[0]![0]).toMatchObject({ before_id: null, limit: 40, left_device_only: false });
     fireEvent.click(screen.getByRole("button", { name: "Show older activity" }));
     await waitFor(() => expect(timeline).toHaveBeenCalledWith(expect.objectContaining({ before_id: 61 })));
     fireEvent.click(screen.getByRole("button", { name: "Left this computer" }));
