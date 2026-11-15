@@ -2,6 +2,7 @@
 
 | Date | Commit | Rust | Frontend | Python | End-to-end | CI | Install/upgrade |
 |---|---|---|---|---|---|---|---|
+| 2026-11-15 | 0.5.0 stage 7 (unreleased) | 235 pass | 92 pass | not run | 28 of 28 (27 + restart 1) | on push | Schema 1–8 → 9 tested |
 | 2026-11-15 | 0.5.0 stage 6 (unreleased) | 222 pass | 88 pass | not run | 27 of 27 (26 + restart 1) | on push | Schema 1–7 → 8 tested |
 | 2026-11-14 | 0.5.0 stage 5 (unreleased) | 209 pass | 82 pass | not run | 26 of 26 (25 + restart 1) | on push | Schema 1–6 → 7 tested |
 | 2026-11-14 | 0.5.0 stage 4 (unreleased) | 184 pass | 75 pass | not run | 25 of 25 (24 + restart 1) | on push | Schema 1–5 → 6 tested |

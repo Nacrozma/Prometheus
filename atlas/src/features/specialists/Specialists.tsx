@@ -34,8 +34,8 @@ export function contextWords(m: Record<string, unknown> | null): string[] {
   if (Array.isArray(m.memories) && m.memories.length) out.push(`${m.memories.length} relevant ${m.memories.length === 1 ? "memory" : "memories"}`);
   if (Array.isArray(m.vault_documents)) out.push(`passages from ${(m.vault_documents as string[]).join(", ")}`);
   if (typeof m.vault_withheld === "number") out.push("document passages withheld (local-only)");
-  if (typeof m.tasks === "number") out.push(`${m.tasks} open tasks`);
-  if (typeof m.projects === "number") out.push(`${m.projects} projects`);
+  if (typeof m.tasks === "number") out.push(`${m.tasks} open ${m.tasks === 1 ? "task" : "tasks"}`);
+  if (typeof m.projects === "number") out.push(`${m.projects} ${m.projects === 1 ? "project" : "projects"}`);
   if (typeof m.forge_project === "string") out.push("a Forge project");
   if (Array.isArray(m.files_changed)) out.push(`changed ${(m.files_changed as string[]).join(", ")}`);
   return out;

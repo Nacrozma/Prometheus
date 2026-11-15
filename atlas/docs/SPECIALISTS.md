@@ -38,8 +38,8 @@ allowlist, a declared context budget and limits; it is not a separate program.
 
 | Specialist | Tools (allowlist) | Context it may receive | Forge |
 |---|---|---|---|
-| Researcher | `web.search`, `vault.search` | objective, earlier results | — |
-| Planner | `todo.list`, `calc.evaluate`, `time.now` | up to 2 relevant memories | — |
+| Researcher | `web.search`, `vault.search` | up to 4 Vault passages | — |
+| Planner | `todo.list`, `calc.evaluate`, `time.now` | up to 2 relevant memories, open tasks | — |
 | Writer | `files.create` (asks first) | up to 2 relevant memories | — |
 | Data Analyst | `calc.evaluate`, `data.import_preview`, `files.list`, `files.read` | objective, earlier results | — |
 | Document Analyst | `vault.search` | up to 8 Vault passages | — |
@@ -66,7 +66,7 @@ through the `specialist.consult` tool (1–3 specialists). The core then:
    rules, the specialist's role, the owner's style, and the result contract.
 3. **Bounds the context** (`gather_context`): the objective; earlier specialists' results, quoted as data
    in `<previous_result>`; memories only if the specialist declares them and memory is on; Vault passages
-   only for the Document Analyst, and withheld from a cloud model when the Vault is local-only; tasks and
+   only for the Document Analyst and the Researcher, and withheld from a cloud model when the Vault is local-only; tasks and
    projects only for those that declare them. What was given is recorded per step (the context manifest)
    and shown on the page.
 4. **Routes** with the owner's routing and the specialist's tier hint; records provider, model, local or
