@@ -18,6 +18,8 @@ pub struct Settings {
     pub memory: MemorySettings,
     /// The Knowledge Vault in conversations.
     pub vault: VaultSettings,
+    /// Specialist agents Atlas can consult.
+    pub specialists: SpecialistSettings,
     pub workspace_dir: Option<String>,
     pub appearance: AppearanceSettings,
     pub limits: Limits,
@@ -330,6 +332,20 @@ pub struct MemorySettings {
 impl Default for MemorySettings {
     fn default() -> Self {
         Self { enabled: true, max_retrieved: 6, atlas_may_propose: true }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct SpecialistSettings {
+    /// Atlas may consult specialists in a conversation (each specialist's tools still follow every
+    /// permission and approval).
+    pub enabled: bool,
+}
+
+impl Default for SpecialistSettings {
+    fn default() -> Self {
+        Self { enabled: true }
     }
 }
 

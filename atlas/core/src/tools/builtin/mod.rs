@@ -7,6 +7,7 @@ pub mod forge_tools;
 pub mod memory_tools;
 pub mod planner;
 pub mod sibling_tools;
+pub mod specialist_tools;
 pub mod system;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_tools;
@@ -66,6 +67,7 @@ pub fn register_all(reg: &ToolRegistry) -> crate::error::Result<()> {
         Arc::new(memory_tools::SearchMemory::new()),
         Arc::new(memory_tools::SaveMemory::new()),
         Arc::new(vault_tools::SearchVault::new()),
+        Arc::new(specialist_tools::Consult::new()),
         Arc::new(web::WebSearch::new()),
         Arc::new(data::ImportPreview::new()),
         Arc::new(data::Export::new()),

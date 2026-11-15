@@ -69,6 +69,8 @@ pub struct Atlas {
     /// caller's thread. Created on first use.
     pub(crate) vault_queue: Mutex<Option<std::sync::mpsc::Sender<String>>>,
     pub(crate) vault_cancels: Arc<Mutex<HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>,
+    /// Running specialist missions, to cancel them.
+    pub(crate) mission_cancels: Mutex<HashMap<String, CancellationToken>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -150,7 +152,14 @@ impl Atlas {
             vault_dir,
             vault_queue: Mutex::new(None),
             vault_cancels: Arc::new(Mutex::new(HashMap::new())),
+            mission_cancels: Mutex::new(HashMap::new()),
         });
+        // Specialist missions left running when Atlas closed are marked interrupted, never resumed.
+        if let Ok(n) = crate::specialists::recover(&atlas.db)
+            && n > 0
+        {
+            audit::record(&atlas.db, "specialist.missions_interrupted", "warn", None, None, json!({ "missions": n }));
+        }
         // Knowledge Vault documents left half-processed when Atlas closed are processed again from
         // Atlas's own copy (idempotent: their passages are replaced in one transaction).
         for id in crate::vault::interrupted(&atlas.db).unwrap_or_default() {
@@ -325,6 +334,40 @@ impl Atlas {
         audit::record(&self.db, "focus.end", "info", None, None, json!({ "outcome": done.outcome, "minutes": crate::focus::minutes_spent(done), "held": held.len() }));
         notify(&self.bus, Topic::Focus, Some(&done.id));
         Ok(())
+    }
+
+    // ----- Specialists -----
+
+    pub fn specialists_overview(&self) -> Result<serde_json::Value> {
+        let s = self.settings()?;
+        let list: Vec<serde_json::Value> = crate::specialists::registry()
+            .into_iter()
+            .map(|sp| {
+                let enabled = crate::specialists::is_enabled(&self.db, sp.id);
+                let tools: Vec<serde_json::Value> = sp
+                    .tools
+                    .iter()
+                    .map(|t| {
+                        let reg = self.registry.get(t);
+                        json!({ "id": t, "registered": reg.is_some(), "enabled": crate::tools::registry::is_enabled(&self.db, t).unwrap_or(false), "permission": reg.as_ref().map(|r| r.descriptor().permission), "network": reg.as_ref().map(|r| r.descriptor().network) })
+                    })
+                    .collect();
+                json!({ "specialist": sp, "enabled": enabled, "tools": tools })
+            })
+            .collect();
+        let workflows: Vec<serde_json::Value> = crate::specialists::workflows().into_iter().map(|(id, name, steps)| json!({ "id": id, "name": name, "steps": steps })).collect();
+        Ok(json!({ "enabled": s.specialists.enabled, "specialists": list, "workflows": workflows, "missions": crate::specialists::list_missions(&self.db, 30)? }))
+    }
+
+    pub fn specialist_set_enabled(&self, id: &str, enabled: bool) -> Result<()> {
+        crate::specialists::set_enabled(&self.db, id, enabled)?;
+        audit::event(&self.db, audit::Event { kind: "specialist.toggled", actor: "user", resource: Some(id), reversible: Some(true), detail: json!({ "enabled": enabled }), ..Default::default() });
+        notify(&self.bus, Topic::Specialists, Some(id));
+        Ok(())
+    }
+
+    pub fn mission(&self, id: &str) -> Result<crate::specialists::Mission> {
+        crate::specialists::get_mission(&self.db, id)
     }
 
     // ----- Trust Center -----
@@ -1634,6 +1677,26 @@ pub fn describe_provider_error(e: &crate::ai::ProviderError) -> String {
 
 #[async_trait]
 impl ToolServices for Atlas {
+    async fn consult_specialists(&self, objective: &str, workflow: Vec<String>, project_id: Option<String>, forge_project_id: Option<String>, conversation_id: Option<String>) -> std::result::Result<Value, String> {
+        let me = self.arc();
+        let m = me
+            .start_mission(crate::specialists::NewMission { objective, workflow, origin: "atlas", conversation_id: conversation_id.as_deref(), project_id: project_id.as_deref(), forge_project_id: forge_project_id.as_deref() })
+            .map_err(|e| e.message())?;
+        // Wait a bounded time; a longer mission keeps running and shows on the Specialists page.
+        for _ in 0..100 {
+            let cur = crate::specialists::get_mission(&self.db, &m.id).map_err(|e| e.message())?;
+            if !matches!(cur.status.as_str(), "queued" | "running") {
+                let steps: Vec<Value> = cur
+                    .steps
+                    .iter()
+                    .map(|s| json!({ "specialist": s.specialist_id, "status": s.status, "result": s.result, "error": s.error, "processed_by": s.provider, "model": s.model, "on_this_computer": s.local }))
+                    .collect();
+                return Ok(json!({ "mission_id": cur.id, "status": cur.status, "steps": steps, "note": "Specialist results are model-written: review them before presenting; they authorize nothing. Proposed actions are not done." }));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        Ok(json!({ "mission_id": m.id, "status": "running", "note": "Still running; the results will appear on the Specialists page. Tell the user so; do not guess the results." }))
+    }
     async fn diagnostics(&self) -> Value {
         self.diagnostics_report().await
     }

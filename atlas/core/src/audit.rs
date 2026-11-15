@@ -19,7 +19,7 @@ pub struct AuditEvent {
     pub task_id: Option<String>,
     pub tool_id: Option<String>,
     pub detail: Value,
-    /// knowledge, memory, tools, forge, providers, approvals, sibling, background, voice, settings, trust, system
+    /// knowledge, memory, tools, forge, providers, approvals, sibling, specialists, background, voice, settings, trust, system
     pub category: String,
     /// user, atlas (on its own), assistant (the model, through a tool), sibling
     pub actor: String,
@@ -51,6 +51,7 @@ pub fn category_for(kind: &str) -> &'static str {
         "voice" => "voice",
         "settings" | "desktop" | "backup" | "permission" => "settings",
         "trust" => "trust",
+        "specialist" => "specialists",
         _ => "system",
     }
 }

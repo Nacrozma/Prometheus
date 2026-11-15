@@ -528,6 +528,54 @@ pub const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_audit_category ON audit_events(category, id);
     CREATE UNIQUE INDEX idx_audit_op_key ON audit_events(op_key) WHERE op_key IS NOT NULL;
     "#,
+    // v9 (0.5.0 stage 7): specialist missions. A mission is one objective worked by one or more
+    // specialists in order; each step records which specialist ran, what context categories it was
+    // given (ids and counts, never content), who processed it, what it produced (a validated
+    // structured result) and how it ended. Specialists can be switched off individually.
+    r#"
+    CREATE TABLE specialist_missions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        objective TEXT NOT NULL,
+        workflow TEXT NOT NULL,
+        origin TEXT NOT NULL CHECK (origin IN ('user','atlas')),
+        status TEXT NOT NULL CHECK (status IN ('queued','running','completed','partial','failed','cancelled','interrupted')),
+        conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+        project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+        forge_project_id TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        finished_at TEXT
+    );
+    CREATE INDEX idx_spec_missions_status ON specialist_missions(status, created_at);
+    CREATE TABLE specialist_steps (
+        id TEXT PRIMARY KEY,
+        mission_id TEXT NOT NULL REFERENCES specialist_missions(id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL,
+        specialist_id TEXT NOT NULL,
+        specialist_version INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending','running','completed','failed','invalid_output','cancelled','skipped','interrupted')),
+        task_id TEXT,
+        provider TEXT,
+        model TEXT,
+        local INTEGER,
+        input_tokens INTEGER,
+        output_tokens INTEGER,
+        estimated_cost_usd REAL,
+        context_manifest TEXT NOT NULL DEFAULT '{}',
+        result TEXT,
+        error TEXT,
+        started_at TEXT,
+        finished_at TEXT,
+        UNIQUE (mission_id, seq)
+    );
+    CREATE TABLE specialist_state (
+        specialist_id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL
+    );
+    "#,
 ];
 
 pub const CURRENT_SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

@@ -23,6 +23,7 @@ pub enum Topic {
     Todos,
     Focus,
     Vault,
+    Specialists,
 }
 
 #[derive(Debug, Clone, Serialize)]

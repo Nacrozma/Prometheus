@@ -21,6 +21,7 @@ pub mod projects;
 pub mod providers;
 pub mod redact;
 pub mod settings;
+pub mod specialists;
 pub mod sibling;
 pub mod storage;
 pub mod tasks;

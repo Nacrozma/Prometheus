@@ -105,6 +105,10 @@ pub trait ToolServices: Send + Sync {
     async fn sibling_consult(&self, _question: &str, _context: &str) -> Result<Value, String> {
         Err("no sibling is paired".into())
     }
+    /// Run a specialist mission for Atlas and wait (bounded) for its structured results.
+    async fn consult_specialists(&self, _objective: &str, _workflow: Vec<String>, _project_id: Option<String>, _forge_project_id: Option<String>, _conversation_id: Option<String>) -> Result<Value, String> {
+        Err("specialists are not available here".into())
+    }
 }
 
 pub struct ToolContext {
