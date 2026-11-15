@@ -434,7 +434,7 @@ impl Atlas {
         for p in paths.iter().take(200) {
             match crate::vault::import(&self.db, &self.vault_dir, std::path::Path::new(p), project_id) {
                 Ok(d) => {
-                    audit::record(&self.db, "vault.import", "info", None, None, json!({ "document": d.id, "kind": d.kind, "bytes": d.size_bytes, "project": d.project_id.is_some() }));
+                    audit::event(&self.db, audit::Event { kind: "vault.import", actor: "user", resource: Some(&d.id), project_id: d.project_id.as_deref(), reversible: Some(true), detail: json!({ "document": d.id, "kind": d.kind, "bytes": d.size_bytes, "project": d.project_id.is_some() }), ..Default::default() });
                     self.vault_enqueue(&d.id);
                     out.push(Ok(d));
                 }
@@ -465,7 +465,7 @@ impl Atlas {
     /// when that has changed).
     pub fn vault_reindex(&self, id: &str) -> Result<crate::vault::Document> {
         let d = crate::vault::prepare_reindex(&self.db, &self.vault_dir, id)?;
-        audit::record(&self.db, "vault.reindex", "info", None, None, json!({ "document": id }));
+        audit::event(&self.db, audit::Event { kind: "vault.reindex", actor: "user", resource: Some(id), detail: json!({ "document": id }), ..Default::default() });
         self.vault_enqueue(id);
         notify(&self.bus, Topic::Vault, Some(id));
         Ok(d)
@@ -485,7 +485,7 @@ impl Atlas {
 
     pub fn vault_move(&self, id: &str, project_id: Option<&str>) -> Result<crate::vault::Document> {
         let d = crate::vault::move_to(&self.db, id, project_id)?;
-        audit::record(&self.db, "vault.move", "info", None, None, json!({ "document": id, "project": project_id.is_some() }));
+        audit::event(&self.db, audit::Event { kind: "vault.move", actor: "user", resource: Some(id), project_id, reversible: Some(true), detail: json!({ "document": id, "project": project_id.is_some() }), ..Default::default() });
         notify(&self.bus, Topic::Vault, Some(id));
         Ok(d)
     }
@@ -494,7 +494,7 @@ impl Atlas {
     pub fn vault_remove(&self, id: &str) -> Result<crate::vault::Document> {
         let _ = self.vault_cancel(id);
         let d = crate::vault::remove(&self.db, &self.vault_dir, id)?;
-        audit::record(&self.db, "vault.remove", "info", None, None, json!({ "document": id, "kind": d.kind, "passages": d.chunks }));
+        audit::event(&self.db, audit::Event { kind: "vault.remove", actor: "user", resource: Some(id), reversible: Some(false), detail: json!({ "document": id, "kind": d.kind, "passages": d.chunks }), ..Default::default() });
         notify(&self.bus, Topic::Vault, Some(id));
         Ok(d)
     }

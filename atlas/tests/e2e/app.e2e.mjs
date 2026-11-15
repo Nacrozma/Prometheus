@@ -293,7 +293,7 @@ test("memory can be added, found and deleted", async () => {
   await click("Save");
   await waitText("Prefers metric units for measurements");
   await shot("10-memory");
-  await driver.findElement(By.css('[aria-label="Delete memory"]')).click();
+  await driver.findElement(By.css('[aria-label="Delete memory: Prefers metric units for measurements"]')).click();
   await click("Delete", "button[ancestor::*[@role='dialog']]");
   await driver.wait(async () => !(await pageText()).includes("Prefers metric units"), 10000);
 });

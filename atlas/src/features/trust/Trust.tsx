@@ -45,7 +45,7 @@ export function describe(e: AuditEvent): string {
     case "vault.import":
       return `A ${s(d.kind).toUpperCase() || "document"} was imported into the Knowledge Vault`;
     case "vault.indexed":
-      return `A document was indexed: ${n(d.passages)} passages${d.pages ? `, ${n(d.pages)} pages` : ""}`;
+      return `A document was indexed: ${n(d.passages)} passage${n(d.passages) === 1 ? "" : "s"}${d.pages ? `, ${n(d.pages)} page${n(d.pages) === 1 ? "" : "s"}` : ""}`;
     case "vault.failed":
       return "A document could not be indexed";
     case "vault.reindex":
@@ -462,7 +462,7 @@ export function TrustPage() {
             <section aria-label="Permissions" className="space-y-2" data-trust-permissions>
               <h2 className="font-display text-md font-semibold">What Atlas may do</h2>
               <p className="text-xs text-text-3">
-                {open.length} of {data.permissions.length} let something happen without asking. Every one of these is checked by Atlas's core at the moment an action runs, so a change here applies to the very next action.
+                {open.length} of {data.permissions.length} are on or allowed without asking. Every one of these is checked by Atlas's core at the moment an action runs, so a change here applies to the very next action.
               </p>
               <ul className="space-y-1.5">
                 {data.permissions.map((p) => (

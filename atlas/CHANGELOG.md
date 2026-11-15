@@ -35,6 +35,24 @@
   "waiting for Focus to end", with no toast or system notification); **approvals and failures always
   come through**. When the session ends, on time or stopped, one summary says how long you focused and
   what waited. One session at a time.
+- **Trust Center** (new page): what Atlas did, what it sent and where, and what it may do, built only from
+  what Atlas recorded on this computer. A summary of the week (activity, what left the computer, problems,
+  what is running now); running and waiting work (replies, approvals, scheduler, Vault processing,
+  missions, Forge); where your messages go for each provider, local or cloud, with tokens as the provider
+  reported them and cost as an estimate; every permission the core enforces with a working control
+  (approval gates, offline mode, memory and Vault switches, the global pause, notifications, shortcut,
+  voice, each provider, each granted folder, siblings, integrations); and a searchable activity timeline in
+  plain sentences, filtered by area, by "left this computer" or by problems, loaded 40 at a time. Export the
+  record to a file, or clear it (the clearing itself is recorded). Records never hold the text of messages,
+  documents or memories, or any key.
+- **Memory that stays accurate:** every memory says who worded it and when you last confirmed it, which
+  conversation it came from, and keeps a history of corrections. Facts not confirmed for a year (notes:
+  six months) are marked for review and Atlas says they may be out of date; mark a memory outdated, replace
+  it with a newer version (the old one stays visible, marked replaced), confirm it, or restore it. Saving
+  something Atlas already remembers is refused; a memory that may conflict with one you have is shown before
+  you save it, and in Atlas's own suggestions, which can replace the older one. Outdated and replaced
+  memories are never used. You can switch off Atlas's memory suggestions; Atlas never saves anything on its
+  own.
 - **Knowledge Vault** (new page): import text, Markdown, PDF and Word documents into a personal library
   or a project's library. Atlas keeps its own copy and reads it on this computer; originals are never
   changed. Documents are checked by their content (not just the name), processed in the background with
@@ -57,6 +75,12 @@
   resumed by itself. Dismiss hides it until the next time away.
 
 ### Changed
+- Permissions are decided from the settings as they are when an action runs, and again after an approval
+  arrives: a permission turned off while an approval was waiting still stops the action.
+- Memories sent with a message are bounded by count and length, never repeated, and labelled with who
+  worded them and whether they may be out of date; the message itself always takes precedence.
+- Database schema 8 (memory lifecycle and history; structured activity records). The database is copied to
+  `atlas.pre-v8.bak` before upgrading; memories, documents and existing activity are kept (tested).
 - Database schema 7 (Knowledge Vault: documents, passages, full-text index, sources per answer). The
   database is copied to `atlas.pre-v7.bak` before upgrading; every earlier schema upgrades with its data
   kept (tested).
