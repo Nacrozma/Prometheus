@@ -14,7 +14,7 @@ self-test) runs on every push.
 | Window smoke test | `tests/test_desktop_app.py::TestWindowSmoke` | the real window starts offscreen; all 12 sections open without error; a dangerous tool shows an approval card and Deny reaches the worker; an Architect mission refuses a write with no card; new/rename/delete conversation; a result becomes a toast and is kept in the activity centre; the activity drawer opens; navigation selection and last section are remembered; the launch overlay starts and finishes without blocking; all eleven avatar states render; auto-approve off by default |
 | Packaged self-test (source) | `python -m app --self-test=report.json` | ok: 12 pages, 32 tools, dangerous tools gated |
 | Offline evaluations | `python evals/run_evals.py --quick` | ran (exit 0); synthetic |
-| Windows CI | workflow `prometheus-desktop` | run 9 failed on a Windows-only path bug in project intelligence (short path names expanded by realpath), fixed in `405f1a9`; run 5: success; run 6: one test failed on Windows (it expected a backslash inside a zip entry name; zip entries always use /), fixed; later runs: see the Actions tab |
+| Windows CI | workflow `prometheus-desktop` | **runs 10, 11 and 12 passed** (12 = all Second Birth code); run 9 failed on a Windows-only path bug in project intelligence (short path names expanded by realpath), fixed in `405f1a9`; run 5: success; run 6: one test failed on Windows (it expected a backslash inside a zip entry name; zip entries always use /), fixed; later runs: see the Actions tab |
 
 ## Visual QA
 See `RENAISSANCE_VISUAL_QA.md`. 40 screenshots (launch phases, avatar states, three window sizes) of the real window (`screenshots/renaissance/`), captured by `tools/renaissance_screens.py`.

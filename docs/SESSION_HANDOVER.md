@@ -26,8 +26,8 @@ PAGE_SPECIFICATIONS (renamed from UX_SPECIFICATIONS), MOTION_SYSTEM, LAUNCH_ANIM
 ACCESSIBILITY, and updates to DESIGN_SYSTEM, VISUAL_QA, TEST_REPORT.
 
 ## Next action
-Check the latest `prometheus-desktop` Windows run on the branch; if green, the next step is the owner's
-check on a real Windows PC.
+Windows CI run 12 (commit 4fe3a1d, all Second Birth code) passed: tests, build, install, upgrade,
+uninstall, packaged self-test. Next: the owner's check on a real Windows PC.
 
 ## Needs the owner
 1. Try it on a real Windows PC (CI artifact) — the release gate in `desktop-evolution/RELEASE_CHECKLIST.md`.
