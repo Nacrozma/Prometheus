@@ -1,29 +1,28 @@
 # Installing Prometheus Desktop on Windows
 
-Prometheus Desktop 0.1.0 · Windows 10/11 64-bit · about 10 minutes.
+Prometheus Desktop 2.0.0 ("Renaissance") · Windows 10/11 64-bit · about 10 minutes.
 (This is Prometheus, the solar orb. ATLAS Co-Pilot is a different app: see the repository's INSTALL.md.)
 
 ## 1. Get the installer
-The installer is built by the `prometheus-desktop` workflow on GitHub Actions and attached to the run
-as the artifact **prometheus-desktop-windows-x64-unsigned** (kept 14 days; current build: [run 4](https://github.com/Nacrozma/Prometheus/actions/runs/43269570303), 49.4 MB, SHA-256 `c168c1e2ff5526e26127e61f9fc21abc93ec0e56eff5b3744a8971c2f5d019a7`). It contains:
-`Prometheus-Setup-0.1.0-x64-unsigned.exe`, `SHA256SUMS.txt`, `build-report.txt` and the self-test
-reports. It has **not** been published as a release.
+Download **Prometheus-Setup-2.0.0-x64-unsigned.exe** and **SHA256SUMS.txt** from the release page:
+https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.0.0
 
-Check the download (PowerShell):
+Check the download (PowerShell, in the folder you downloaded to):
 ```
-Get-FileHash .\Prometheus-Setup-0.1.0-x64-unsigned.exe -Algorithm SHA256
+Get-FileHash .\Prometheus-Setup-2.0.0-x64-unsigned.exe -Algorithm SHA256
 ```
-The result must match `SHA256SUMS.txt`.
+The result must match the value in `SHA256SUMS.txt` (also shown on the release page).
 
 ## 2. Install
 Double-click the installer. It is **not code-signed**, so Windows SmartScreen says "Windows protected
 your PC": choose **More info → Run anyway** only if the checksum matched.
 * Installs for your user only (no administrator rights) into `%LOCALAPPDATA%\Programs\Prometheus`.
 * Adds a Start-menu entry; a desktop shortcut is optional.
-* Silent install: `Prometheus-Setup-0.1.0-x64-unsigned.exe /VERYSILENT /CURRENTUSER`.
+* Silent install: `Prometheus-Setup-2.0.0-x64-unsigned.exe /VERYSILENT /CURRENTUSER`.
 
 ## 3. First start
-Prometheus opens on **Settings** the first time. Pick one:
+The birth of the sun plays once (click or press Esc to skip it), then a short welcome helps you connect a
+model. Pick one:
 * **A cloud provider**: paste an OpenRouter, Groq or Cerebras key and press *Save*. It is stored in
   Windows Credential Manager (entry "Prometheus Desktop"), not in a file.
 * **Ollama (free, local)**: install Ollama, run `ollama pull llama3.2` and `ollama serve`, then press

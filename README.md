@@ -4,7 +4,7 @@
 > ([download the installer](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.4.2/ATLAS-Co-Pilot-Setup-x64.exe)).
 > Its source is in [`atlas/`](atlas/) and does not share code with Prometheus.
 
-> **Prometheus 2.0 "Renaissance" (desktop, not yet released):** the same Prometheus as a desktop app with
+> **Prometheus 2.0 "Renaissance" (desktop):** [download the Windows installer](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.0.0) (unsigned; check the SHA-256). the same Prometheus as a desktop app with
 > the living solar avatar, a command centre, search across everything (Ctrl+K), many conversations, memory
 > you control, Forge missions (Architect, Builder, Debugger, Reconstructor), workspace and Git, engineering,
 > reminders, Obsidian, arm simulation, Reflection and Trust & safety. Start it from a checkout with

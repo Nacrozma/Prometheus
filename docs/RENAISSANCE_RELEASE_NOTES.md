@@ -1,6 +1,13 @@
-# Prometheus 2.0 "Renaissance" — release notes (draft, not released)
+# Prometheus 2.0 "Renaissance" — release notes
 
-Version 2.0.0 of Prometheus Desktop (0.1.0 was never published). Not released: waiting for the owner.
+Version 2.0.0 of Prometheus Desktop (0.1.0 was never published), released with the owner's approval as
+`prometheus-desktop-v2.0.0`. Unsigned installer; verified on GitHub's Windows VMs; first check on a
+physical Windows PC is the owner's.
+
+## Also in 2.0.0 (experience-first redesign and Second Birth)
+* The birth of the sun when Prometheus starts; a distinct environment for every section; toasts and an
+  activity centre; avatar states you can tell apart by shape; approval cards that explain the action with
+  a real diff; a memory map; grouped search; secure-storage problems explained with a fix.
 
 ## New
 * **A new look:** Solar × Cosmic design system: deep cosmic surfaces, solar gold and amber, consistent

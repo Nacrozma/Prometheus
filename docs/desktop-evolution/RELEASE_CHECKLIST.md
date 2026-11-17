@@ -3,7 +3,7 @@
 A release is published **only with the owner's explicit approval**. CI builds an installer artifact;
 it never creates a GitHub release.
 
-## Gates (0.1.0 status)
+## Gates (0.1.0 status; 2.0.0: see the release page and RENAISSANCE_TEST_REPORT.md)
 | # | Gate | Status |
 |---|---|---|
 | 1 | Full test suite passes on Linux | ✅ 467 passed, 2 skipped (this environment) |
@@ -18,7 +18,7 @@ it never creates a GitHub release.
 | 10 | Screenshots of every section | ✅ `screenshots/01–15` (Linux, software OpenGL) |
 | 11 | Manual check on a physical Windows PC: window, orb on a GPU, tray, notification, start at sign-in, a real conversation with a provider key, approval card, voice output | ❌ **not done**: needs the owner |
 | 12 | Code signing | ❌ not available (installer is named `-unsigned`) |
-| 13 | Owner approval to publish | ❌ not given |
+| 13 | Owner approval to publish | ✅ given 2026-11-17 for 2.0.0 (the owner tests on a physical PC after publishing) |
 
 ## Build record
 | | |

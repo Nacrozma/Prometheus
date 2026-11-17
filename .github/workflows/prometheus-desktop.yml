@@ -2,11 +2,20 @@
 # the installer with Inno Setup, then check it on a real Windows VM: the packaged app starts (self-test),
 # its child-Python mode works, a silent per-user install works, an upgrade over an older build keeps
 # the user's data, and uninstalling removes the program but keeps the data.
-# The installer is uploaded as a workflow artifact only. Nothing is published as a release.
+# The installer is uploaded as a workflow artifact. A GitHub release is published only by the
+# `publish` job: when the workflow is started by hand with publish = true, or when a tag named
+# prometheus-desktop-v<version> is pushed (owner-approved releases only), and only after every check
+# above has passed on Windows.
 name: prometheus-desktop
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish a GitHub release (owner-approved only)"
+        type: boolean
+        default: false
   push:
+    tags: ["prometheus-desktop-v*"]
     paths:
       - "app/**"
       - "packaging/**"
@@ -149,3 +158,49 @@ jobs:
             dist/build-report.txt
             dist/selftest-*.json
           retention-days: 14
+
+  publish:
+    needs: [tests-windows, build-and-verify]
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.publish) || startsWith(github.ref, 'refs/tags/prometheus-desktop-v') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: prometheus-desktop-windows-x64-unsigned
+          path: release
+      - name: Verify the checksum
+        working-directory: release
+        run: sha256sum -c SHA256SUMS.txt
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: prometheus-desktop-v${{ env.APP_VERSION }}
+        run: |
+          sha=$(cut -d' ' -f1 release/SHA256SUMS.txt)
+          cat > notes.md <<NOTES
+          # Prometheus Desktop ${APP_VERSION} — the Renaissance
+
+          Windows 10/11, 64-bit. **Unsigned installer**: Windows SmartScreen will warn about an unknown publisher.
+          Check the SHA-256 before running it, then choose *More info → Run anyway*.
+
+          SHA-256 of \`Prometheus-Setup-${APP_VERSION}-x64-unsigned.exe\`: \`${sha}\`
+
+          What is new: [docs/RENAISSANCE_RELEASE_NOTES.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/RENAISSANCE_RELEASE_NOTES.md) ·
+          How to install: [WINDOWS_INSTALLATION.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/desktop-evolution/WINDOWS_INSTALLATION.md) ·
+          Known limitations: [KNOWN_LIMITATIONS.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/desktop-evolution/KNOWN_LIMITATIONS.md)
+
+          Verified on GitHub's Windows VMs before publishing: the test suite, the packaged app's self-test,
+          install, upgrade over an older build (data kept) and uninstall (data kept). Not yet tried on a
+          physical Windows PC.
+          NOTES
+          files="release/Prometheus-Setup-${APP_VERSION}-x64-unsigned.exe release/SHA256SUMS.txt"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" $files --clobber
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" $files --title "Prometheus Desktop ${APP_VERSION}" --notes-file notes.md --target "$GITHUB_SHA"
+          fi
