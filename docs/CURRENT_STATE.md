@@ -6,5 +6,5 @@
 Prometheus 2.0 "Renaissance" (including the experience-first redesign: a distinct composition and interaction model per screen, toasts, an activity centre) is implemented and tested on Linux; Windows CI builds and installs it on every
 push. Waiting for the owner: try it on a real Windows PC, then decide on release and code signing.
 
-Read next: `../CLAUDE.md` (root constitution; received incomplete, see its last line), `RENAISSANCE_UX_AUDIT.md`, `RENAISSANCE_UX_SPECIFICATIONS.md`, `RENAISSANCE_AUDIT.md` (what existed, preservation checklist), `RENAISSANCE_FEATURES.md`
+Read next: `../CLAUDE.md` (the permanent project constitution, complete), `RENAISSANCE_UX_AUDIT.md`, `RENAISSANCE_UX_SPECIFICATIONS.md`, `RENAISSANCE_AUDIT.md` (what existed, preservation checklist), `RENAISSANCE_FEATURES.md`
 (what is implemented, tested, not implemented), `RENAISSANCE_TEST_REPORT.md`, `SESSION_HANDOVER.md`.

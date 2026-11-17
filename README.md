@@ -13,6 +13,10 @@
 > [docs/desktop-evolution/WINDOWS_INSTALLATION.md](docs/desktop-evolution/WINDOWS_INSTALLATION.md).
 > Not yet validated on a physical Windows PC.
 
+> **Working on Prometheus (people and Claude Code):** start with the project constitution in
+> [CLAUDE.md](CLAUDE.md), then [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) and
+> [docs/SESSION_HANDOVER.md](docs/SESSION_HANDOVER.md).
+
 A local, terminal-based AI assistant written in Python. It talks to LLM providers through an
 OpenAI-compatible router, keeps persistent memory and task state in JSON files, and can call a
 set of tools (files, shell, web search, scheduling, sandboxed code execution).

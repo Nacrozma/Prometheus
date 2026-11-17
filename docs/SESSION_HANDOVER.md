@@ -18,7 +18,6 @@ activity centre; intent-based navigation; 31 screenshots at three sizes; UX spec
 visual QA.
 
 ## Needs the owner
-0. The root CLAUDE.md arrived cut off at section 5 ("2. Read `CURRENT"); send the rest.
 1. Try it on a real Windows PC (CI artifact) — the release gate in `desktop-evolution/RELEASE_CHECKLIST.md`.
 2. Decide on new providers (Anthropic, Mistral; OpenAI was removed on purpose) — paid services need approval.
 3. Release and code signing decisions. Nothing is published.
