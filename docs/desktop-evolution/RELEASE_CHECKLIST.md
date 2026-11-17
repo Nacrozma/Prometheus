@@ -20,7 +20,16 @@ it never creates a GitHub release.
 | 12 | Code signing | ❌ not available (installer is named `-unsigned`) |
 | 13 | Owner approval to publish | ✅ given 2026-11-17 for 2.0.0 (the owner tests on a physical PC after publishing) |
 
-## Build record
+## Release record: 2.0.0 (published 2026-11-17)
+| | |
+|---|---|
+| Release | [prometheus-desktop-v2.0.0](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.0.0) |
+| Installer | `Prometheus-Setup-2.0.0-x64-unsigned.exe`, 52.0 MB |
+| SHA-256 | `2a5a775620114abda176e02ad5e090eb09f3062b5498c8851a4e4bc5edcfaadd` |
+| Built and checked by | [prometheus-desktop run 13](https://github.com/Nacrozma/Prometheus/actions/runs/44136900224) (tests, build, self-test, install, upgrade, uninstall, then publish) at commit `cc9ca56` |
+| Physical-PC check | pending (the owner) |
+
+## Build record (0.1.0, never published)
 | | |
 |---|---|
 | Version | 0.1.0 |

@@ -27,12 +27,13 @@ ACCESSIBILITY, and updates to DESIGN_SYSTEM, VISUAL_QA, TEST_REPORT.
 
 ## Next action
 Windows CI run 12 (commit 4fe3a1d, all Second Birth code) passed: tests, build, install, upgrade,
-uninstall, packaged self-test. Next: the owner's check on a real Windows PC.
+uninstall, packaged self-test. Released as prometheus-desktop-v2.0.0 (run 13, SHA-256 2a5a7756…faadd).
+Next: act on the owner's report from their Windows PC.
 
 ## Needs the owner
 1. Try it on a real Windows PC (CI artifact) — the release gate in `desktop-evolution/RELEASE_CHECKLIST.md`.
 2. Decide on new providers (Anthropic, Mistral; OpenAI was removed on purpose) — paid services need approval.
-3. Release and code signing decisions. Nothing is published.
+3. Code signing decision. 2.0.0 is published (unsigned).
 
 ## Suggested next work
 Document import (PDF/DOCX/XLSX) feeding memory and search; diff view for edit approvals; persisted
