@@ -46,6 +46,12 @@ two lines and one action · chips (`QPushButton#chip`) for segmented choices · 
 toasts and the activity drawer (`app/ui/feedback.py`) · page header variants (`full`, `compact`, `none`) so
 screens compose their own top area. Reusable pieces stay generic; screens decide their composition.
 
+## Second Birth additions
+Avatar sign vocabulary (`avatar_overlay.py`, see `RENAISSANCE_AVATAR_SYSTEM.md`); decision buttons
+(`QPushButton#decision`, equal weight for Approve and Deny); notice frame (`QFrame#notice`) for explained
+limitations; launch tokens (`launch.py`: wordmark from t = 0.80, 650 ms fade); motion tokens in
+`RENAISSANCE_MOTION_SYSTEM.md`; readable paths (`display_path`).
+
 ## Icons
 33 original line icons (24 × 24, 1.75 stroke, round caps) rendered from SVG at any size and tinted per
 state. No icon font or third-party icon set is bundled.

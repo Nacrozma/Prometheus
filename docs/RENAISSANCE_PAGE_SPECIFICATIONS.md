@@ -1,4 +1,4 @@
-# Prometheus 2.0: UX specifications (experience-first pass)
+# Prometheus 2.0: page specifications
 
 One identity, many experiences: every screen below has its own purpose, composition and interaction
 model. Shared: tokens, icons, toasts, the activity centre, keyboard access. Screenshots in
@@ -20,3 +20,7 @@ model. Shared: tokens, icons, toasts, the activity centre, keyboard access. Scre
 | Settings (12) | Change one thing | Category rail (Models & providers, Workspace, Desktop, Appearance, Privacy & autonomy, Voice, Data & backups, About) with focused pages | Changes save immediately and confirm with a toast; connection test with model choice | Secure-store warning in words · test failures name the reason |
 | Activity centre (18) | "What happened?" | Drawer from the bell | Session notifications then recent audit events; selecting one opens its source | "Nothing yet…" |
 | Toasts (19) | Know the result | Bottom-right stack, icon + word + text + detail | Tone words: Done / Working / Attention / Problem; also announced through the window's accessible description; dismiss by click | — |
+| Launch (00a–00e) | First impression; never in the way | Full-window sequence over the built app | Click/Esc/Enter/Space skips; once per start | — · — · fades into Home · skipped on any error |
+| Approval card (14) | Decide safely | Title, why, what, diff or content, facts, arguments on request | Equal-weight Deny / Approve; Deny is the Enter default; nothing runs until chosen | — · — · "You approved/denied …" line · refused calls explained |
+| Memory map (24) | See how knowledge connects | Force layout of stored entities; size = memories, solid = relation, dashed = mentioned together | Hover for details, click or Enter opens the memories | "The map appears once memories mention people, projects, tools or topics." |
+

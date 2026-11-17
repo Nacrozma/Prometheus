@@ -1,7 +1,7 @@
 # Prometheus 2.0: features
 
 > The experience-first pass changed how each screen works; per-screen interaction models are in
-> `RENAISSANCE_UX_SPECIFICATIONS.md`. New in that pass and tested: Forge mission stages from recorded
+> `RENAISSANCE_PAGE_SPECIFICATIONS.md`. New in that pass and tested: Forge mission stages from recorded
 > events, Obsidian reader with backlinks, Engineering project intelligence (summary, tests found, code
 > search), planner with a step checklist, reply lists saved as task steps, toasts and the activity centre.
 

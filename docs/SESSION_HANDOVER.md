@@ -3,7 +3,7 @@
 ## Run and test
 * Run: `pip install -r requirements.txt` then `python -m app` (set `PROMETHEUS_HOME`/`PROMETHEUS_WORKSPACE`
   to throwaway folders when testing).
-* Tests: `python -m pytest tests -q` (481 pass). Window smoke test is in `tests/test_desktop_app.py`.
+* Tests: `python -m pytest tests -q` (485 pass, 2 skipped by design). Window smoke test is in `tests/test_desktop_app.py`.
 * Screenshots: `xvfb-run -s "-screen 0 1600x1000x24" python tools/renaissance_screens.py docs/screenshots/renaissance [names]`.
 
 ## Done (Renaissance)
@@ -16,6 +16,18 @@ Engineering workbench + project intelligence, Forge mission studio, Workspace ex
 reader, Robot arm lab, Reflection insights with charts, Trust oversight timeline, Settings rail); toasts;
 activity centre; intent-based navigation; 31 screenshots at three sizes; UX specs, interaction guide,
 visual QA.
+
+## Done (Second Birth)
+Launch sequence (`app/ui/launch.py`, reusing `gui_birth.py`), avatar signs per state (`app/ui/avatar_overlay.py`,
+PAUSED for approvals), approval cards (`app/services/approval.py`), memory map (`app/ui/memory_map.py`,
+`memory_ops.graph`), grouped search, mission diffs, secure-storage explanation (`credentials.explain_unavailable`),
+~ paths, arm technical output, engineering copy; 40 screenshots; docs: SECOND_BIRTH_AUDIT, PRODUCT_EXPERIENCE,
+PAGE_SPECIFICATIONS (renamed from UX_SPECIFICATIONS), MOTION_SYSTEM, LAUNCH_ANIMATION, AVATAR_SYSTEM,
+ACCESSIBILITY, and updates to DESIGN_SYSTEM, VISUAL_QA, TEST_REPORT.
+
+## Next action
+Check the latest `prometheus-desktop` Windows run on the branch; if green, the next step is the owner's
+check on a real Windows PC.
 
 ## Needs the owner
 1. Try it on a real Windows PC (CI artifact) — the release gate in `desktop-evolution/RELEASE_CHECKLIST.md`.
