@@ -63,8 +63,28 @@ def shoot(win, name: str) -> None:
     win.grab().save(os.path.join(OUT, f"{name}.png"))
 
 
+def onboarding(win, then) -> None:
+    dlg = getattr(win, "onboarding", None)
+    if dlg is None or not dlg.isVisible():
+        then()
+        return
+
+    def page(i=0):
+        if i >= dlg.stack.count():
+            dlg.accept()
+            QTimer.singleShot(400, then)
+            return
+        dlg._go(i)
+        QTimer.singleShot(700, lambda: ((not ONLY or f"00-onboarding-{i + 1}" in ONLY) and dlg.grab().save(os.path.join(OUT, f"00-onboarding-{i + 1}.png")), page(i + 1)))
+
+    page()
+
+
 def run(win) -> None:
-    app = QApplication.instance()
+    onboarding(win, lambda: run_main(win))
+
+
+def run_main(win) -> None:
     seed(win)
     steps = [
         ("01-home", lambda: win.go("Home")),

@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 
 from PyQt6.QtCore import QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import QCheckBox, QFileDialog, QGridLayout, QHBoxLayout, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLineEdit, QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from ... import APP_NAME, __version__
 from ...credentials import KNOWN_KEYS, CredentialError
 from .. import theme as T
-from ..widgets import Card, Page, label
+from .. import icons
+from ..widgets import Card, Page, label, pill, run_bg
 
 
 class SettingsPage(Page):
     title = "Settings"
-    subtitle = "Providers, workspace, desktop behaviour and data."
+    subtitle = "Providers and models, workspace, desktop behaviour, voice, data and backups."
     restart_requested = pyqtSignal()
     behaviour_changed = pyqtSignal()
 
@@ -66,11 +66,16 @@ class SettingsPage(Page):
         reload_btn = QPushButton("Reconnect providers")
         reload_btn.clicked.connect(self._reload)
         row.addWidget(reload_btn)
+        self.test_btn = QPushButton(icons.icon("plug", T.TEXT_SECONDARY), " Test connections")
+        self.test_btn.setToolTip("Asks each configured provider for its model list (no tokens are used) and measures the response time")
+        self.test_btn.clicked.connect(self._test)
+        row.addWidget(self.test_btn)
         prov.body.addLayout(row)
-        self.router_detail = QPlainTextEdit()
-        self.router_detail.setReadOnly(True)
-        self.router_detail.setMaximumHeight(120)
-        prov.body.addWidget(self.router_detail)
+        self.health = QGridLayout()
+        self.health.setHorizontalSpacing(12)
+        prov.body.addLayout(self.health)
+        self.health_msg = label("Test connections to check each provider and choose its model.", "faint")
+        prov.body.addWidget(self.health_msg)
         col.addWidget(prov)
 
         # ---- workspace ----
@@ -133,6 +138,10 @@ class SettingsPage(Page):
         open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(paths.data_dir)))
         dt.body.addWidget(open_btn)
         dt.body.addWidget(label("Back up by copying this folder while Prometheus is closed. Keys are not in it (they are in the credential store).", "faint"))
+        exp = QPushButton(icons.icon("export", T.TEXT_SECONDARY), " Export a backup (.zip)…")
+        exp.setToolTip("Everything in the data folder except .env files, logs and anything named like a key or secret")
+        exp.clicked.connect(self._export)
+        dt.body.addWidget(exp)
         imp = QPushButton("Import data from another Prometheus folder…")
         imp.clicked.connect(self._import)
         dt.body.addWidget(imp)
@@ -155,8 +164,74 @@ class SettingsPage(Page):
             lab.setStyleSheet(f"color: {T.OK if info['source'] != 'not set' else T.TEXT_FAINT};")
         st = self.core.router_status()
         active = st.get("active_providers", [])
-        self.router_lbl.setText(("Active: " + ", ".join(active)) if active else "No provider is active.")
-        self.router_detail.setPlainText(json.dumps({k: v for k, v in st.items() if k != "status"}, indent=2, default=str))
+        order = st.get("current_priority_order") or []
+        cool = st.get("providers_on_cooldown") or {}
+        text = ("Active: " + ", ".join(active)) if active else "No provider is active."
+        if order:
+            text += " · Order tried: " + " → ".join(str(o[0] if isinstance(o, (list, tuple)) else o) for o in order)
+        if cool:
+            text += " · Cooling down: " + ", ".join(f"{k} ({int(v)} s)" for k, v in cool.items())
+        self.router_lbl.setText(text)
+
+    def _test(self) -> None:
+        from ...services import providers
+
+        self.test_btn.setEnabled(False)
+        self.health_msg.setText("Testing… (up to 8 seconds per provider)")
+        run_bg(lambda: providers.test_all(self.core), self._show_health, lambda m: (self.health_msg.setText("Test failed: " + m.splitlines()[0]), self.test_btn.setEnabled(True)), owner=self)
+
+    def _show_health(self, results) -> None:
+        from ...services import providers
+
+        self.test_btn.setEnabled(True)
+        while self.health.count():
+            w = self.health.takeAt(0).widget()
+            if w is not None:
+                w.setParent(None)
+        if not results:
+            self.health_msg.setText("No provider is configured: add a key above, or start Ollama and reconnect.")
+            return
+        for r, res in enumerate(results):
+            self.health.addWidget(label(res["provider"]), r, 0)
+            if res["ok"]:
+                self.health.addWidget(pill(f"ok · {res['ms']} ms", "ok"), r, 1)
+                combo = QComboBox()
+                combo.setAccessibleName(f"{res['provider']} model")
+                combo.addItem(f"{res['default_model']} (current)", res["default_model"])
+                for m in res.get("models", []):
+                    if m != res["default_model"]:
+                        combo.addItem(m, m)
+                combo.setMaximumWidth(380)
+                self.health.addWidget(combo, r, 2)
+                use = QPushButton("Use")
+                use.clicked.connect(lambda _=False, n=res["provider"], c=combo: self._use_model(n, c.currentData()))
+                self.health.addWidget(use, r, 3)
+                note = f"{res['model_count']} models" + ("" if res.get("default_offered") in (True, None) else " · the current model is not in the provider's list")
+                self.health.addWidget(label(note, "faint" if res.get("default_offered") in (True, None) else "warn"), r, 4)
+            else:
+                self.health.addWidget(pill("unreachable", "err"), r, 1)
+                self.health.addWidget(label(res["error"], "faint"), r, 2, 1, 3)
+        self.health_msg.setText("Changing a model applies to new requests and is saved with Prometheus's settings. Prometheus never switches you to a different provider or model on its own beyond the fallback order you can see above.")
+
+    def _use_model(self, name: str, model: str) -> None:
+        from ...services import providers
+
+        notes = providers.set_model(name, model)
+        self.health_msg.setText(f"{name} now uses {model}." + (" " + " ".join(notes) if notes else ""))
+        self.refresh()
+
+    def _export(self) -> None:
+        from ...services import export as E
+
+        path, _ = QFileDialog.getSaveFileName(self, "Save a backup", os.path.join(os.path.expanduser("~"), f"prometheus-backup-{__import__('time').strftime('%Y%m%d')}.zip"), "Zip archive (*.zip)")
+        if not path:
+            return
+        try:
+            res = E.export(self.paths.data_dir, path)
+        except Exception as e:
+            QMessageBox.warning(self, "Backup not saved", str(e))
+            return
+        self.import_lbl.setText(f"Backup saved to {res['path']}: {res['files']} files ({res['skipped']} left out: keys, logs, temporary files).")
 
     def _save_key(self, name: str, edit: QLineEdit) -> None:
         try:

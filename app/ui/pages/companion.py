@@ -282,6 +282,9 @@ class CompanionPage(Page):
         head = QHBoxLayout()
         self.conv_title = label("", "h2", wrap=False)
         head.addWidget(self.conv_title, 1)
+        self.mission_pill = label("", "pill", wrap=False)
+        self.mission_pill.setVisible(False)
+        head.addWidget(self.mission_pill)
         head.addWidget(icon_button("edit", "Rename this conversation", lambda: self.rename_conversation(self.conv["id"])))
         head.addWidget(icon_button("copy", "Copy the whole conversation", self._copy_all))
         lay.addLayout(head)
@@ -389,6 +392,15 @@ class CompanionPage(Page):
             it.setFlags(Qt.ItemFlag.NoItemFlags)
             self.conv_list.addItem(it)
         self.conv_title.setText(self.conv.get("title") or "New conversation")
+        m = self.conv.get("mission")
+        if m:
+            from ...services.forge_missions import DISCIPLINES
+
+            d = DISCIPLINES.get(m.get("discipline"), {})
+            self.mission_pill.setText(f"Forge · {d.get('name', m.get('discipline'))} · {m.get('project')}")
+            self.mission_pill.setStyleSheet(T.pill_style("accent"))
+            self.mission_pill.setToolTip(d.get("boundary", ""))
+        self.mission_pill.setVisible(bool(m))
 
     def _conv_menu(self, pos) -> None:
         it = self.conv_list.itemAt(pos)
@@ -636,7 +648,8 @@ class CompanionPage(Page):
     def _start(self) -> None:
         self.spoke = False
         self.last_error = ""
-        w = self.g.PrometheusWorker(self.core.router, self.messages, auto_approve=self.settings.get("auto_approve"), fallback_models=self.config.get("fallback_models"))
+        auto = bool(self.settings.get("auto_approve")) and not self.conv.get("mission")  # never inside a Forge mission
+        w = self.g.PrometheusWorker(self.core.router, self.messages, auto_approve=auto, fallback_models=self.config.get("fallback_models"))
         w.state_changed.connect(self._worker_state)
         w.status_updated.connect(self._status)
         w.tool_executed.connect(self._tool_done)
@@ -715,6 +728,22 @@ class CompanionPage(Page):
         self.add("Tool", f"{tool} — {word}", colour)
 
     def _confirm(self, tool: str, args_json: str) -> None:
+        m = self.conv.get("mission")
+        if m:
+            from ...services import forge_missions as F
+
+            try:
+                args = json.loads(args_json)
+            except Exception:
+                args = {}
+            ok, reason = F.decide(m.get("discipline", ""), tool, args if isinstance(args, dict) else {}, self.core.paths()["workspace"])
+            if not ok:
+                if self.worker is not None:
+                    self.worker.provide_confirmation(False)
+                self.core.p.audit_log.record(tool, args, "refused", f"forge discipline {m.get('discipline')}: {reason}")
+                F.MissionLog(self.core.paths()["data"]).count_refusal(m.get("id", ""))
+                self.add("System", f"Refused {tool}: {reason}", T.WARN)
+                return
         self.set_state("WARNING")
         self._clear_card()
         self.card = ApprovalCard(tool, args_json)
@@ -769,6 +798,32 @@ class CompanionPage(Page):
             self.set_state("SUCCESS")
         if self.state != "ERROR":
             self._idle_timer.start(2500 if not (self.tts and self.tts.is_busy) else 6000)
+
+    def start_mission(self, discipline: str, project: str, objective: str) -> bool:
+        """Open a new conversation framed by a Forge discipline and send the mission."""
+        from ...services import forge_missions as F
+
+        if self.busy():
+            self.add("System", "Stop the current request before starting a Forge mission.", T.WARN)
+            return False
+        if not self.core.router.configured:
+            self.add("System", "No model provider is configured, so the mission was not started. Add a key in Settings → Providers, or start Ollama.", T.WARN)
+            return False
+        self._save()
+        name = F.DISCIPLINES[discipline]["name"]
+        self.conv = self.store.create([], title=f"{name} · {project}: {objective}"[:80])
+        mission = F.MissionLog(self.core.paths()["data"]).start(discipline, project, objective, self.conv["id"])
+        self.conv["mission"] = {"id": mission["id"], "discipline": discipline, "project": project}
+        self.store.save(self.conv)
+        self.messages = self.conv["messages"]
+        self._reset_view()
+        self._reload_list()
+        text = F.prompt(discipline, project, objective)
+        self.add("You", text)
+        self.messages.append({"role": "user", "content": text})
+        self._save()
+        self._start()
+        return True
 
     def new_conversation(self) -> None:
         if self.busy():

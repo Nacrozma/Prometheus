@@ -106,7 +106,7 @@ def main(argv=None) -> int:
     self_test = next((a.split("=", 1)[1] for a in argv if a.startswith("--self-test=")), "")
     if self_test:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
-    from PyQt6.QtCore import Qt
+    from PyQt6.QtCore import Qt, QTimer
     from PyQt6.QtGui import QSurfaceFormat
     from PyQt6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 
@@ -192,9 +192,14 @@ def main(argv=None) -> int:
     splash.finish(win)
     if not settings.get("first_run_done"):
         settings.set("first_run_done", True)
-        if not core.router.configured or core.router.active_providers == ["ollama"]:
-            win.go("Settings")
-            win.statusBar().showMessage("Welcome. Add a provider key (or start Ollama) to begin.", 0)
+        from .ui.onboarding import Onboarding
+
+        # opened (window-modal, non-blocking) once the event loop runs
+        win.onboarding = Onboarding(core, creds, paths, win)
+        win.onboarding.finished.connect(lambda _: (win.go("Home"), win.pages["Home"].refresh()))
+        QTimer.singleShot(300, win.onboarding.open)
+        if not core.router.configured:
+            win.statusBar().showMessage("No model provider yet: add a key in Settings → Providers, or start Ollama.", 0)
 
     def excepthook(t, v, tb):
         _crash_log(paths.data_dir, "".join(traceback.format_exception(t, v, tb)))

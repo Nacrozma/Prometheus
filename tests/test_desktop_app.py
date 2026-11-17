@@ -392,7 +392,22 @@ SMOKE = textwrap.dedent(
         out["card"] = comp.card is not None
         comp.card.answered.emit(False)
         out["denied_passed"] = comp.worker.answer is False
+        # a read-only Forge mission refuses a write before any card is shown
+        comp.conv["mission"] = {{"id": "m1", "discipline": "architect", "project": "p"}}
+        comp.worker = W()
+        comp._confirm("write_file", json.dumps({{"path": "x.txt", "content": "x"}}))
+        out["architect_refused"] = comp.card is None and comp.worker.answer is False
+        comp.conv.pop("mission")
         comp.worker = None
+        # conversations: new, rename, delete (no dialogs)
+        comp.messages.append({{"role": "user", "content": "first message"}})
+        comp._save()
+        first = comp.conv["id"]
+        comp.new_conversation()
+        out["new_conv"] = comp.conv["id"] != first
+        win.conversations.rename(first, "Renamed")
+        out["renamed"] = win.conversations.get(first)["title"] == "Renamed"
+        out["deleted"] = comp.delete_conversation(first, confirm=False) and win.conversations.get(first) is None
         out["dangerous"] = win.core.is_dangerous("write_file") and win.core.is_dangerous("execute_shell")
         out["auto_default"] = win.settings.get("auto_approve")
         print("RESULT" + json.dumps(out))
@@ -423,6 +438,8 @@ class TestWindowSmoke(unittest.TestCase):
         self.assertEqual(out["errors"], [])
         self.assertTrue(out["card"])
         self.assertTrue(out["denied_passed"])
+        self.assertTrue(out["architect_refused"])
+        self.assertTrue(out["new_conv"] and out["renamed"] and out["deleted"])
         self.assertTrue(out["dangerous"])
         self.assertFalse(out["auto_default"])
         self.assertEqual(r.returncode, 0, r.stderr[-2000:])

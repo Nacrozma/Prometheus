@@ -203,4 +203,6 @@ QProgressBar::chunk {{ background: {ACCENT}; border-radius: 3px; }}
 def pill_style(tone: str) -> str:
     """Background and text colour for a status pill of the given tone."""
     c = TONES.get(tone, TEXT_SECONDARY)
-    return f"background: {c}22; color: {c}; border: 1px solid {c}55;"
+    r, g, b = int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16)
+    # rgba(), not #RRGGBBAA: Qt reads 8-digit hex as #AARRGGBB
+    return f"background: rgba({r}, {g}, {b}, 0.13); color: {c}; border: 1px solid rgba({r}, {g}, {b}, 0.33);"

@@ -5,20 +5,25 @@ audit log apply. The stages are kept distinct: proposed → validated → approv
 from __future__ import annotations
 
 import json
+import os
 
-from PyQt6.QtWidgets import QAbstractItemView, QHBoxLayout, QHeaderView, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QAbstractItemView, QButtonGroup, QComboBox, QGridLayout, QHBoxLayout, QHeaderView, QListWidget, QListWidgetItem, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget
 
+from .. import icons
+from .. import theme as T
 from ..widgets import Card, Page, label, tidy_table
 
 
 class ForgePage(Page):
     title = "Forge"
-    subtitle = "Skills Prometheus has learned, and changes it has proposed to itself."
+    subtitle = "Project work in four disciplines, skills Prometheus has learned, and changes it has proposed to itself."
 
     def __init__(self, core, frozen: bool, parent=None):
         super().__init__(core, parent)
         self.frozen = frozen
         tabs = QTabWidget()
+        tabs.addTab(self._missions_tab(), "Missions")
         # Skills
         sk = QWidget()
         sl = QVBoxLayout(sk)
@@ -55,7 +60,108 @@ class ForgePage(Page):
         tabs.addTab(pt, "Patches")
         self.content.addWidget(tabs, 1)
 
+    # ----- missions -----
+    def _missions_tab(self) -> QWidget:
+        from ...services.forge_missions import DISCIPLINES
+
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setSpacing(12)
+        grid = QGridLayout()
+        grid.setSpacing(10)
+        self.disc = QButtonGroup(self)
+        self.disc.setExclusive(True)
+        self.disc_keys = list(DISCIPLINES)
+        for i, key in enumerate(self.disc_keys):
+            d = DISCIPLINES[key]
+            card = Card(d["name"], interactive=True, icon_name={"architect": "search", "builder": "forge", "debugger": "alert", "reconstructor": "file"}[key])
+            card.body.addWidget(label(d["summary"], "sub"))
+            card.body.addWidget(label(d["boundary"], "faint"))
+            pick = QPushButton("Choose")
+            pick.setCheckable(True)
+            pick.setChecked(i == 0)
+            self.disc.addButton(pick, i)
+            card.body.addWidget(pick, 0, Qt.AlignmentFlag.AlignRight)
+            grid.addWidget(card, i // 2, i % 2)
+        lay.addLayout(grid)
+        form = Card("Start a mission", icon_name="bolt")
+        row = QHBoxLayout()
+        row.addWidget(label("Project", "sub"))
+        self.project = QComboBox()
+        self.project.setAccessibleName("Project")
+        row.addWidget(self.project, 1)
+        form.body.addLayout(row)
+        self.objective = QPlainTextEdit()
+        self.objective.setPlaceholderText("Objective or problem (for example: add drag to the trajectory model and a test for delta_v)")
+        self.objective.setAccessibleName("Objective")
+        self.objective.setFixedHeight(70)
+        form.body.addWidget(self.objective)
+        frow = QHBoxLayout()
+        self.mission_msg = label("The mission runs in the Companion as its own conversation; you approve each change there.", "faint")
+        frow.addWidget(self.mission_msg, 1)
+        go = QPushButton(icons.icon("send", T.ON_ACCENT), " Start mission")
+        go.setObjectName("primary")
+        go.clicked.connect(self._start_mission)
+        frow.addWidget(go)
+        form.body.addLayout(frow)
+        lay.addWidget(form)
+        lay.addWidget(label("Mission history", "h2"))
+        self.history = QListWidget()
+        self.history.setObjectName("plain")
+        self.history.setAccessibleName("Mission history")
+        self.history.itemActivated.connect(self._open_mission)
+        self.history.itemClicked.connect(self._open_mission)
+        lay.addWidget(self.history, 1)
+        return w
+
+    def _start_mission(self) -> None:
+        objective = self.objective.toPlainText().strip()
+        project = self.project.currentData()
+        if not project:
+            self.mission_msg.setText("Put a project folder in the workspace first (Workspace page).")
+            return
+        if len(objective) < 5:
+            self.mission_msg.setText("Describe the objective in a sentence.")
+            return
+        key = self.disc_keys[max(0, self.disc.checkedId())]
+        win = self.window()
+        if hasattr(win, "companion") and win.companion.start_mission(key, project, objective):
+            self.objective.clear()
+            win.go("Companion")
+        else:
+            self.mission_msg.setText("The mission did not start: see the Companion for the reason.")
+
+    def _open_mission(self, item) -> None:
+        cid = item.data(Qt.ItemDataRole.UserRole)
+        win = self.window()
+        if cid and hasattr(win, "companion"):
+            win.go("Companion")
+            win.companion.open_conversation(cid)
+
     def refresh(self) -> None:
+        from ...services import forge_missions as F
+        from ...services import workspace_info as W
+
+        root = self.core.paths()["workspace"]
+        current = self.project.currentData()
+        self.project.clear()
+        for p in W.projects(root):
+            rel = os.path.relpath(p["path"], root)
+            self.project.addItem(f"{p['name']}" + ("  (git)" if p["git"] else ""), "." if rel == "." else rel)
+        if current:
+            self.project.setCurrentIndex(max(0, self.project.findData(current)))
+        self.history.clear()
+        for m in F.MissionLog(self.core.paths()["data"]).list()[:50]:
+            d = F.DISCIPLINES.get(m["discipline"], {"name": m["discipline"]})
+            it = QListWidgetItem(icons.icon("forge", T.ACCENT), f"{d['name']} · {m['project']} — {m['objective'][:90]}   ·   {m['started'][:16].replace('T', ' ')}" + (f"   ·   {m['refused']} refused" if m.get("refused") else ""))
+            it.setData(Qt.ItemDataRole.UserRole, m.get("conversation_id"))
+            it.setToolTip("Open the conversation that holds this mission's work")
+            self.history.addItem(it)
+        if not self.history.count():
+            self.history.addItem("No missions yet.")
+        self._refresh_skills()
+
+    def _refresh_skills(self) -> None:
         skills = self.core.skills()
         self.skills.setRowCount(0)
         for s in skills:
