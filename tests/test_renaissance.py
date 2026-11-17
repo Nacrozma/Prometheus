@@ -243,7 +243,7 @@ class TestExportAndWorkspace(unittest.TestCase):
                 f.write("{}")
             res = E.export(data, os.path.join(tmp, "b.zip"))
             names = set(zipfile.ZipFile(res["path"]).namelist())
-            self.assertEqual(names, {"memory_graph.json", os.path.join("conversations", "a.json"), "PROMETHEUS_BACKUP.txt"})
+            self.assertEqual(names, {"memory_graph.json", "conversations/a.json", "PROMETHEUS_BACKUP.txt"})  # zip entries always use /
             self.assertEqual(res["skipped"], 4)
             with self.assertRaises(ValueError):
                 E.export(data, os.path.join(data, "inside.zip"))
