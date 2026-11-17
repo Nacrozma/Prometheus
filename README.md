@@ -4,11 +4,14 @@
 > ([download the installer](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.4.2/ATLAS-Co-Pilot-Setup-x64.exe)).
 > Its source is in [`atlas/`](atlas/) and does not share code with Prometheus.
 
-> **Prometheus Desktop (new, 0.1.0):** the same Prometheus as an installable Windows app with the
-> solar orb, approval cards, memory, engineering, Forge, reminders, Obsidian, arm simulation and a
-> Trust page. Start it from a checkout with `python -m app`; installing and the unsigned Windows
-> installer: [docs/desktop-evolution/WINDOWS_INSTALLATION.md](docs/desktop-evolution/WINDOWS_INSTALLATION.md).
-> Not yet validated on a physical Windows PC: see [KNOWN_LIMITATIONS](docs/desktop-evolution/KNOWN_LIMITATIONS.md).
+> **Prometheus 2.0 "Renaissance" (desktop, not yet released):** the same Prometheus as a desktop app with
+> the living solar avatar, a command centre, search across everything (Ctrl+K), many conversations, memory
+> you control, Forge missions (Architect, Builder, Debugger, Reconstructor), workspace and Git, engineering,
+> reminders, Obsidian, arm simulation, Reflection and Trust & safety. Start it from a checkout with
+> `python -m app`. What it does: [docs/RENAISSANCE_FEATURES.md](docs/RENAISSANCE_FEATURES.md) ·
+> screenshots: [docs/screenshots/renaissance](docs/screenshots/renaissance) · installing:
+> [docs/desktop-evolution/WINDOWS_INSTALLATION.md](docs/desktop-evolution/WINDOWS_INSTALLATION.md).
+> Not yet validated on a physical Windows PC.
 
 A local, terminal-based AI assistant written in Python. It talks to LLM providers through an
 OpenAI-compatible router, keeps persistent memory and task state in JSON files, and can call a

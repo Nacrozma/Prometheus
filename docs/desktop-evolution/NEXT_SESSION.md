@@ -1,3 +1,5 @@
+> **Superseded by the Renaissance (2.0):** see `docs/SESSION_HANDOVER.md` and `docs/CURRENT_STATE.md`.
+
 # Next session: handover
 
 ## Where things are

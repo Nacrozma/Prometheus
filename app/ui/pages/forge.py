@@ -18,11 +18,13 @@ from ..widgets import Card, Page, label, tidy_table
 class ForgePage(Page):
     title = "Forge"
     subtitle = "Project work in four disciplines, skills Prometheus has learned, and changes it has proposed to itself."
+    scroll = True
 
     def __init__(self, core, frozen: bool, parent=None):
         super().__init__(core, parent)
         self.frozen = frozen
         tabs = QTabWidget()
+        tabs.setMinimumHeight(760)
         tabs.addTab(self._missions_tab(), "Missions")
         # Skills
         sk = QWidget()
@@ -75,7 +77,9 @@ class ForgePage(Page):
         for i, key in enumerate(self.disc_keys):
             d = DISCIPLINES[key]
             card = Card(d["name"], interactive=True, icon_name={"architect": "search", "builder": "forge", "debugger": "alert", "reconstructor": "file"}[key])
-            card.body.addWidget(label(d["summary"], "sub"))
+            summ = label(d["summary"], "sub")
+            summ.setMinimumHeight(38)
+            card.body.addWidget(summ)
             card.body.addWidget(label(d["boundary"], "faint"))
             pick = QPushButton("Choose")
             pick.setCheckable(True)

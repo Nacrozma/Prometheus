@@ -139,6 +139,8 @@ QPushButton#primary:focus {{ border: 2px solid {FOCUS}; }}
 QPushButton#primary:disabled {{ background: {BRONZE}; color: #2A1E08; }}
 QPushButton#ghost {{ background: transparent; border: 1px solid transparent; color: {TEXT_SECONDARY}; }}
 QPushButton#ghost:hover {{ background: {SURFACE_ELEVATED}; color: {TEXT}; border-color: {BORDER}; }}
+QPushButton#ghost:checked {{ background: {ACCENT_SOFT}; color: {ACCENT}; border-color: {BORDER_WARM}; font-weight: 600; }}
+QPushButton:checked {{ background: {ACCENT_SOFT}; color: {ACCENT}; border-color: {ACCENT}; }}
 QPushButton#danger {{ border-color: {ERR}; color: {ERR}; background: transparent; }}
 QPushButton#danger:hover {{ background: rgba(255, 107, 94, 0.10); }}
 QPushButton#link {{ background: transparent; border: none; color: {ACCENT}; padding: 0; text-align: left; }}

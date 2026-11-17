@@ -103,22 +103,22 @@ onboarding, Forge disciplines. Each is planned below or recorded as not done.
 PyQt6 6.12, PyOpenGL, openai, python-dotenv, keyring, edge-tts (optional), openai-whisper (optional,
 large). No new dependency is needed for the Renaissance shell.
 
-## Feature preservation checklist (must still work at the end)
-- [ ] Terminal `python prometheus.py` and HUD `python gui_orb.py` start (tests)
-- [ ] Every one of the 11 sections opens (self-test)
-- [ ] Approval cards gate all 9 dangerous tools; Deny is default; Esc stops
-- [ ] Streaming, Markdown (escaped), copy code
-- [ ] Session persistence across restarts
-- [ ] Memory recall, stats, Trust labels (unverified/verified)
-- [ ] 17 engineering calculators
-- [ ] Skills list + rollback; patches listed (unavailable in packaged app)
-- [ ] Workspace tree + safe preview
-- [ ] Reminders add/cancel/list; due reminders delivered + tray notification
-- [ ] Obsidian vault + export through approval
-- [ ] Arm simulation (FK/IK/limits), simulation banner
-- [ ] Reflection stats + synthetic eval label
-- [ ] Trust: policy table, audit tail + verify, undo
-- [ ] Settings: keys in OS store, reconnect, workspace, tray, notifications, sign-in, reduced motion,
+## Feature preservation checklist (verified at the end by tests, the window smoke test and the self-test; Windows behaviour by CI)
+- [x] Terminal `python prometheus.py` and HUD `python gui_orb.py` start (tests)
+- [x] Every one of the 11 sections opens (self-test)
+- [x] Approval cards gate all 9 dangerous tools; Deny is default; Esc stops
+- [x] Streaming, Markdown (escaped), copy code
+- [x] Session persistence across restarts
+- [x] Memory recall, stats, Trust labels (unverified/verified)
+- [x] 17 engineering calculators
+- [x] Skills list + rollback; patches listed (unavailable in packaged app)
+- [x] Workspace tree + safe preview
+- [x] Reminders add/cancel/list; due reminders delivered + tray notification
+- [x] Obsidian vault + export through approval
+- [x] Arm simulation (FK/IK/limits), simulation banner
+- [x] Reflection stats + synthetic eval label
+- [x] Trust: policy table, audit tail + verify, undo
+- [x] Settings: keys in OS store, reconnect, workspace, tray, notifications, sign-in, reduced motion,
       auto-approve warning, data import
-- [ ] Tray, single instance, Ctrl+K, Ctrl+N, Ctrl+,, Ctrl+Q
-- [ ] Packaging spec and installer script unchanged in behaviour
+- [x] Tray, single instance, Ctrl+K, Ctrl+N, Ctrl+,, Ctrl+Q
+- [x] Packaging spec and installer script unchanged in behaviour
