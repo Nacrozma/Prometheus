@@ -41,6 +41,7 @@ def is_test_file(path: str) -> bool:
 def summary(workspace: str, project: str) -> Dict[str, Any]:
     if not inside(workspace, project):
         return {"error": "outside the workspace"}
+    project = os.path.realpath(project)  # the walk yields resolved paths (Windows expands short names)
     langs: Counter = Counter()
     lines = 0
     files = 0
@@ -70,6 +71,7 @@ def grep(workspace: str, project: str, needle: str, limit: int = 80) -> List[Dic
     """Plain, case-insensitive substring search in text files of a project."""
     if not inside(workspace, project) or len(needle.strip()) < 2:
         return []
+    project = os.path.realpath(project)
     q = needle.lower()
     out: List[Dict[str, Any]] = []
     for p in _walk(project):
