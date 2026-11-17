@@ -19,23 +19,25 @@ import time
 
 from PyQt6.QtCore import QRectF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPen
+from PyQt6.QtWidgets import QWidget
 
 import gui_orb as g
 
 # semantic state → (shader mode, energy, tint rgb, dim)
 STATES = {
     "IDLE": (0, 0.62, (1.0, 1.0, 1.0), 1.0),
-    "SUCCESS": (0, 0.75, (1.0, 1.02, 0.96), 1.0),
-    "THINKING": (1, 1.05, (1.0, 1.0, 1.0), 1.0),
+    "SUCCESS": (0, 0.8, (1.0, 1.03, 0.95), 1.0),
+    "THINKING": (1, 1.05, (1.0, 1.02, 1.02), 1.0),
     "WORKING": (1, 1.2, (1.04, 0.97, 0.9), 1.0),
-    "RESEARCHING": (1, 1.0, (1.0, 1.04, 1.06), 1.0),
-    "BUILDING": (1, 1.3, (1.08, 0.95, 0.85), 1.0),
+    "RESEARCHING": (1, 1.0, (0.97, 1.03, 1.1), 1.0),
+    "BUILDING": (1, 1.35, (1.12, 0.92, 0.78), 1.0),
     "ADAPTING": (3, 1.4, (1.0, 1.0, 1.0), 1.0),
-    "SPEAKING": (2, 1.45, (1.0, 1.0, 1.0), 1.0),
-    "LISTENING": (2, 0.9, (0.96, 1.02, 1.08), 1.0),
-    "WARNING": (0, 0.9, (1.08, 1.0, 0.8), 1.0),
-    "ERROR": (0, 0.55, (1.2, 0.7, 0.6), 0.9),
-    "OFFLINE": (0, 0.35, (0.8, 0.8, 0.82), 0.55),
+    "SPEAKING": (2, 1.45, (1.04, 1.0, 0.95), 1.0),
+    "LISTENING": (2, 0.85, (0.92, 1.0, 1.1), 0.95),
+    "PAUSED": (0, 0.55, (0.95, 0.95, 0.95), 0.85),
+    "WARNING": (0, 0.55, (0.95, 0.95, 0.95), 0.85),
+    "ERROR": (0, 0.5, (1.18, 0.72, 0.62), 0.8),
+    "OFFLINE": (0, 0.3, (0.62, 0.62, 0.68), 0.45),
 }
 ACTIVE = {"THINKING", "WORKING", "RESEARCHING", "BUILDING", "ADAPTING"}
 AUDIO = {"SPEAKING", "LISTENING"}
@@ -67,6 +69,8 @@ class SolarAvatar(g.SolarSunWidget):
         self._active_window = True
         self._has_tint = False
         self.setAccessibleName("Prometheus, the solar avatar")
+        self._sign = _StateSign(self)
+        self._sign.setGeometry(self.rect())
 
     # ----- state -----
     def set_semantic(self, state: str) -> None:
@@ -76,6 +80,8 @@ class SolarAvatar(g.SolarSunWidget):
         self.STATE_ENERGY = {**g.SolarSunWidget.STATE_ENERGY, mode: energy}
         self._target_tint, self._target_dim = tint, dim
         self.setAccessibleDescription(self.semantic.capitalize())
+        if getattr(self, "_sign", None) is not None:
+            self._sign.update()
         if self._reduced:
             self.energy, self.tint, self.dim = energy, tint, dim
             self.state_mix = 1.0 if mode == 3 else 0.0
@@ -88,6 +94,8 @@ class SolarAvatar(g.SolarSunWidget):
         if self.semantic not in AUDIO:
             self.audio_level *= 0.85  # a level that stopped arriving fades instead of sticking
         super().advance_frame()
+        if self._sign is not None:
+            self._sign.update()
 
     # ----- frame rate -----
     def set_reduced_motion(self, reduced: bool) -> None:
@@ -136,33 +144,31 @@ class SolarAvatar(g.SolarSunWidget):
         super().paintGL()
 
     def _draw_hud_overlay(self) -> None:
-        """Only real signals: an activity arc while working, a level ring while audio flows."""
-        if self.semantic not in ACTIVE and self.semantic not in AUDIO:
+        """Nothing inside the GL frame: the state's sign is drawn by the overlay layer above it."""
+        return
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        if getattr(self, "_sign", None) is not None:
+            self._sign.setGeometry(self.rect())
+
+
+class _StateSign(QWidget):
+    """A transparent layer over the shader sun that draws the state's sign (avatar_overlay.py)."""
+
+    def __init__(self, avatar: "SolarAvatar"):
+        super().__init__(avatar)
+        self.avatar = avatar
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+    def paintEvent(self, _e) -> None:
+        from . import avatar_overlay
+
+        a = self.avatar
+        if a.birth.active:
             return
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height()
-        r = min(w, h) * 0.42
-        rect = QRectF(w / 2 - r, h / 2 - r, 2 * r, 2 * r)
-        if self.semantic in ACTIVE:
-            pen = QPen(QColor(247, 217, 139, 150), 1.6)
-            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            p.setPen(pen)
-            start = int(((self.time * 70.0) % 360) * 16)
-            p.drawArc(rect, -start, 70 * 16)
-        else:
-            level = max(0.0, min(1.0, float(self.audio_level)))
-            col = QColor(247, 217, 139) if self.semantic == "LISTENING" else QColor(244, 181, 44)
-            col.setAlpha(int(60 + 150 * level))
-            p.setPen(QPen(col, 1.2 + 2.5 * level))
-            grow = r * (1.0 + 0.05 * level)
-            p.drawEllipse(QRectF(w / 2 - grow, h / 2 - grow, 2 * grow, 2 * grow))
-            # a few ticks whose length follows the level, for a visible voice even at small sizes
-            p.setPen(QPen(col, 1.4))
-            for i in range(36):
-                a = i * math.tau / 36
-                length = 3 + 10 * level * (0.6 + 0.4 * math.sin(self.time * 7 + i))
-                x1, y1 = w / 2 + math.cos(a) * (grow + 3), h / 2 + math.sin(a) * (grow + 3)
-                x2, y2 = w / 2 + math.cos(a) * (grow + 3 + length), h / 2 + math.sin(a) * (grow + 3 + length)
-                p.drawLine(int(x1), int(y1), int(x2), int(y2))
+        avatar_overlay.draw(p, self.width(), self.height(), a.semantic, 0.0 if a._reduced else a.time, float(a.audio_level))
         p.end()

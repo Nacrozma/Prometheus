@@ -190,14 +190,15 @@ def main(argv=None) -> int:
         win.statusBar().showMessage(f"Desktop settings were unreadable and were reset: {settings.load_error}", 0)
     win.show()
     splash.finish(win)
+    win.play_launch()
     if not settings.get("first_run_done"):
         settings.set("first_run_done", True)
         from .ui.onboarding import Onboarding
 
-        # opened (window-modal, non-blocking) once the event loop runs
+        # opened (window-modal, non-blocking) once the event loop runs, after the launch sequence
         win.onboarding = Onboarding(core, creds, paths, win)
         win.onboarding.finished.connect(lambda _: (win.go("Home"), win.pages["Home"].refresh()))
-        QTimer.singleShot(300, win.onboarding.open)
+        win.after_launch.append(win.onboarding.open)
         if not core.router.configured:
             win.statusBar().showMessage("No model provider yet: add a key in Settings → Providers, or start Ollama.", 0)
 

@@ -18,6 +18,7 @@ from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLineEdit,
@@ -48,7 +49,8 @@ ORB_STATES = {
     "EXECUTING": (1, "Running a tool", T.SECONDARY_ACCENT),
     "SPEAKING": (2, "Speaking", T.ACCENT),
     "SUCCESS": (0, "Done", T.OK),
-    "WARNING": (0, "Needs you", T.WARN),
+    "WARNING": (0, "Waiting for your approval", T.HIGHLIGHT),
+    "PAUSED": (0, "Waiting for your approval", T.HIGHLIGHT),
     "ERROR": (0, "Something went wrong", T.ERR),
     "ADAPTING": (3, "Adapting", T.SECONDARY_ACCENT),
     "OFFLINE": (0, "No provider", T.TEXT_FAINT),
@@ -85,43 +87,103 @@ MD_THEME = {
 
 
 class ApprovalCard(QFrame):
-    """The exact tool and arguments, as plain text. Deny is the default."""
+    """A deliberate approval: what Prometheus wants to do and why, what it affects, whether it can be
+    undone, what leaves the computer, what happens if you deny — then the real diff or content, and the
+    exact arguments on request. Approve and Deny carry equal visual weight; nothing is preselected."""
 
     answered = pyqtSignal(bool)
 
-    def __init__(self, tool: str, args_json: str, parent: Optional[QWidget] = None):
+    def __init__(self, tool: str, args_json: str, parent: Optional[QWidget] = None, workspace: str = "", reason: str = ""):
         super().__init__(parent)
+        from ...services.approval import describe
+        import gui_markdown as md
+
         self.setObjectName("approval")
+        self.setAccessibleName(f"Approval needed: {tool}")
+        try:
+            args = json.loads(args_json)
+            pretty = json.dumps(args, indent=2, ensure_ascii=False)
+        except Exception:
+            args, pretty = {}, args_json
+        d = describe(tool, args if isinstance(args, dict) else {}, workspace)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setContentsMargins(18, 14, 18, 14)
         lay.setSpacing(8)
         head = QHBoxLayout()
         ic = label()
-        ic.setPixmap(icons.pixmap("alert", T.SECONDARY_ACCENT, 18))
+        ic.setPixmap(icons.pixmap("shield", T.HIGHLIGHT, 20))
         head.addWidget(ic)
-        head.addWidget(label(f"Prometheus wants to run a tool with real-world effects: {tool}", "warn"), 1)
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        col.addWidget(label("PROMETHEUS ASKS YOUR PERMISSION", "eyebrow"))
+        t = label(d["title"], "h2")
+        t.setStyleSheet("font-size: 13pt;")
+        col.addWidget(t)
+        head.addLayout(col, 1)
+        tl = label(tool, "mono", wrap=False)
+        head.addWidget(tl, 0, Qt.AlignmentFlag.AlignTop)
         lay.addLayout(head)
-        try:
-            pretty = json.dumps(json.loads(args_json), indent=2, ensure_ascii=False)
-        except Exception:
-            pretty = args_json
-        box = QPlainTextEdit(pretty)
-        box.setReadOnly(True)
-        box.setMaximumHeight(160)
-        box.setAccessibleName("Tool arguments")
-        box.setStyleSheet(f"font-family: {T.FONT_MONO}; font-size: 9pt;")
-        lay.addWidget(box)
+        if reason.strip():
+            r = label("Why: " + " ".join(reason.split())[:320], "sub")
+            lay.addWidget(r)
+        lay.addWidget(label(d["what"]))
+        if d["diff"]:
+            view = QTextBrowser()
+            view.setAccessibleName("Changes")
+            view.setMaximumHeight(200)
+            rows = []
+            for ln in d["diff"]:
+                colr = T.OK if ln.startswith("+") and not ln.startswith("+++") else T.ERR if ln.startswith("-") and not ln.startswith("---") else T.INFO if ln.startswith("@@") else T.TEXT_SECONDARY
+                rows.append(f'<span style="color:{colr};">{md.esc(ln)}</span>')
+            view.setHtml('<pre style="font-family:Consolas,monospace; font-size:9pt; margin:0;">' + "\n".join(rows) + "</pre>")
+            lay.addWidget(view)
+        elif d["preview"]:
+            box = QPlainTextEdit(d["preview"])
+            box.setReadOnly(True)
+            box.setMaximumHeight(160)
+            box.setAccessibleName("Content")
+            box.setStyleSheet(f"font-family: {T.FONT_MONO}; font-size: 9pt;")
+            lay.addWidget(box)
+        facts = QGridLayout()
+        facts.setHorizontalSpacing(14)
+        facts.setVerticalSpacing(3)
+        for r_, (k, v) in enumerate((("Affects", ", ".join(d["affects"]) or "—"), ("Undo", d["reversible"]), ("Your data", d["leaves"]), ("If you deny", d["if_denied"]))):
+            kl = label(k, "faint", wrap=False)
+            facts.addWidget(kl, r_, 0, Qt.AlignmentFlag.AlignTop)
+            facts.addWidget(label(v, "sub"), r_, 1)
+        facts.setColumnStretch(1, 1)
+        lay.addLayout(facts)
+        self.details = QPlainTextEdit(pretty)
+        self.details.setReadOnly(True)
+        self.details.setMaximumHeight(150)
+        self.details.setAccessibleName("Tool arguments")
+        self.details.setStyleSheet(f"font-family: {T.FONT_MONO}; font-size: 9pt;")
+        self.details.setVisible(False)
         row = QHBoxLayout()
-        row.addWidget(label("Nothing runs until you choose. The call is checked again by the safety policy and recorded in the audit log.", "faint"), 1)
-        deny = QPushButton("Deny")
-        allow = QPushButton("Approve")
-        allow.setObjectName("primary")
+        more = QPushButton("Show the exact arguments")
+        more.setObjectName("link")
+        more.setCheckable(True)
+        more.toggled.connect(lambda on: (self.details.setVisible(on), more.setText("Hide the exact arguments" if on else "Show the exact arguments")))
+        row.addWidget(more)
+        row.addStretch(1)
+        row.addWidget(label("Nothing runs until you choose. The core checks the call again and records it in the audit log.", "faint"), 0)
+        lay.addLayout(row)
+        lay.addWidget(self.details)
+        btns = QHBoxLayout()
+        btns.addStretch(1)
+        deny = QPushButton(icons.icon("stop", T.TEXT), "  Deny")
+        allow = QPushButton(icons.icon("check", T.TEXT), "  Approve")
+        for b in (deny, allow):
+            b.setObjectName("decision")
+            b.setMinimumWidth(130)
         deny.setDefault(True)
+        deny.setAccessibleName(f"Deny {d['title']}")
+        allow.setAccessibleName(f"Approve {d['title']}")
         deny.clicked.connect(lambda: self.answered.emit(False))
         allow.clicked.connect(lambda: self.answered.emit(True))
-        row.addWidget(deny)
-        row.addWidget(allow)
-        lay.addLayout(row)
+        btns.addWidget(deny)
+        btns.addWidget(allow)
+        lay.addLayout(btns)
 
 
 class Composer(QPlainTextEdit):
@@ -840,7 +902,8 @@ class CompanionPage(Page):
                 return
         self.set_state("WARNING")
         self._clear_card()
-        self.card = ApprovalCard(tool, args_json)
+        reason = next((m.get("content") or "" for m in reversed(self.messages) if m.get("role") == "assistant" and m.get("tool_calls")), "")
+        self.card = ApprovalCard(tool, args_json, workspace=self.core.paths()["workspace"], reason=reason)
         self.card.answered.connect(lambda ok, t=tool: self._answer(t, ok))
         self.card_slot.addWidget(self.card)
         self.window().activateWindow()

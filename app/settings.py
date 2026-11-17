@@ -31,6 +31,8 @@ DEFAULTS: Dict[str, Any] = {
     "home_hidden": [],
     #: Companion panels shown beside the conversation (toggled in the Companion, remembered).
     "companion_history": True,
+    #: The birth-of-the-sun sequence when Prometheus starts (skipped anyway under Reduce motion).
+    "launch_animation": True,
     "companion_context": False,
     #: A folder to import data from at the next start (before the core loads its state).
     "pending_import": "",

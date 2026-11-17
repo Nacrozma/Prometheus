@@ -266,6 +266,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.core, self.settings, self.creds, self.platform, self.paths = core, settings, creds, platform, paths
         self._quitting = False
+        self.after_launch: list = []
+        self.launch = None
         self.notifications = Notifications()
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(icon)
@@ -377,6 +379,25 @@ class MainWindow(QMainWindow):
         start = settings.get("last_section") if settings.get("last_section") in self.pages else "Home"
         self.go(start)
 
+    # ----- launch -----
+    def play_launch(self) -> None:
+        """The birth of the sun, once per application start (never on tray restore or navigation)."""
+        callbacks, self.after_launch = self.after_launch, []
+        run_after = lambda: [QTimer.singleShot(150, cb) for cb in callbacks]  # noqa: E731
+        if not self.settings.get("launch_animation") or self.settings.get("reduced_motion"):
+            run_after()
+            return
+        try:
+            from .launch import LaunchOverlay
+            from .pages.companion import _gl_available
+
+            self.launch = LaunchOverlay(self, _gl_available())
+            self.launch.done.connect(run_after)
+            self.launch.start()
+        except Exception as e:  # the app is already usable; never let the animation block it
+            self.statusBar().showMessage(f"Launch animation skipped: {e}", 6000)
+            run_after()
+
     # ----- top bar -----
     def _topbar(self) -> QWidget:
         bar = QWidget()
@@ -447,6 +468,11 @@ class MainWindow(QMainWindow):
         super().resizeEvent(e)
         if hasattr(self, "activity"):
             self._place_overlays()
+        if getattr(self, "launch", None) is not None:
+            try:
+                self.launch.setGeometry(self.rect())
+            except RuntimeError:
+                self.launch = None
 
     # ----- navigation -----
     def go(self, name: str) -> None:

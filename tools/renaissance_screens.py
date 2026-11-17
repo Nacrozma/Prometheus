@@ -11,6 +11,7 @@ Use throwaway folders only: the script sets PROMETHEUS_HOME and PROMETHEUS_WORKS
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -157,7 +158,9 @@ def extra(win) -> None:
         def request_stop(self): pass
 
     comp.worker = W()
-    comp._confirm("write_file", '{"path": "rocket-sim/notes.md", "content": "# Notes\\nDrag model next."}')
+    comp.messages.append({"role": "assistant", "content": "I'll add a drag term to delta_v so the estimate accounts for atmospheric losses.", "tool_calls": [{"id": "x", "type": "function", "function": {"name": "edit_file", "arguments": "{}"}}]})
+    comp._confirm("edit_file", json.dumps({"path": "rocket-sim/src/trajectory.py", "old_string": "    return isp * 9.80665 * math.log(m0 / mf)\n", "new_string": "    ideal = isp * 9.80665 * math.log(m0 / mf)\n    return ideal - drag_loss\n"}))
+    comp.messages.pop()
     QTimer.singleShot(1200, lambda: (shoot(win, "14-approval-card"), after_card(win)))
 
 
@@ -165,7 +168,7 @@ def after_card(win) -> None:
     comp = win.companion
     comp._answer("write_file", False)
     comp.worker = None
-    states = ["THINKING", "BUILDING", "SPEAKING", "LISTENING", "ERROR", "OFFLINE"]
+    states = ["IDLE", "THINKING", "RESEARCHING", "WORKING", "BUILDING", "ADAPTING", "LISTENING", "SPEAKING", "PAUSED", "OFFLINE", "ERROR"]
 
     def st(i=0):
         if i >= len(states):
@@ -230,7 +233,10 @@ _orig = QApplication.exec
 def patched(self):
     win = next(w for w in QApplication.topLevelWidgets() if w.__class__.__name__ == "MainWindow")
     win.resize(1440, 900)
-    QTimer.singleShot(1500, lambda: run(win))
+    # the birth of the sun plays first (real overlay over the real window); capture its phases
+    for ms, name in ((500, "00a-launch-void"), (2300, "00b-launch-collapse"), (4300, "00c-launch-protostar"), (5400, "00d-launch-ignition"), (7800, "00e-launch-wordmark")):
+        QTimer.singleShot(ms, lambda n=name: (not ONLY or n in ONLY) and win.grab().save(os.path.join(OUT, f"{n}.png")))
+    QTimer.singleShot(11500, lambda: run(win))
     return _orig()
 
 

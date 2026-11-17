@@ -24,7 +24,8 @@ PALETTES = {
     "SPEAKING": ("#FFA53A", "#F7D98B", 0.5),
     "LISTENING": ("#E79A3A", "#F7D98B", 0.4),
     "ADAPTING": ("#FF6A1A", "#F4B52C", 0.9),
-    "WARNING": ("#F6B44B", "#F6B44B", 0.4),
+    "WARNING": ("#C98A3A", "#F7D98B", 0.15),
+    "PAUSED": ("#C98A3A", "#F7D98B", 0.15),
     "ERROR": ("#C2412E", "#FF6B5E", 0.2),
     "OFFLINE": ("#6B5232", "#4A3A1E", 0.0),
 }
@@ -145,4 +146,7 @@ class SolarGlyph(QWidget):
         pen.setWidthF(max(1.0, R * 0.03))
         p.setPen(pen)
         p.drawEllipse(QRectF(c.x() - R, c.y() - R, 2 * R, 2 * R))
+        from . import avatar_overlay
+
+        avatar_overlay.draw(p, w, h, self.state, t, self.audio)
         p.end()

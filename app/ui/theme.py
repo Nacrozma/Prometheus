@@ -121,7 +121,10 @@ QFrame#cardInteractive {{ background: {SURFACE}; border: 1px solid {BORDER}; bor
 QFrame#cardInteractive:hover {{ border-color: {BORDER_WARM}; }}
 QFrame#hero {{ border: 1px solid {BORDER_WARM}; border-radius: {RADIUS_L}px;
   background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1A1508, stop:0.45 {SURFACE}, stop:1 {BG}); }}
-QFrame#approval {{ background: #1C1508; border: 1px solid {SECONDARY_ACCENT}; border-radius: {RADIUS_L}px; }}
+QFrame#approval {{ background: {SURFACE_ELEVATED}; border: 1px solid {BORDER_WARM}; border-top: 2px solid {HIGHLIGHT}; border-radius: {RADIUS_L}px; }}
+QPushButton#decision {{ background: {SURFACE_RAISED}; border: 1px solid {BORDER_STRONG}; padding: 8px 18px; font-weight: 600; }}
+QPushButton#decision:hover {{ border-color: {HIGHLIGHT}; }}
+QPushButton#decision:focus {{ border: 2px solid {FOCUS}; }}
 QFrame#bubbleUser {{ background: {SURFACE_ELEVATED}; border: 1px solid {BORDER}; border-radius: {RADIUS_L}px; }}
 QFrame#divider {{ background: {BORDER}; max-height: 1px; min-height: 1px; border: none; }}
 QLabel#pill {{ border-radius: 9px; padding: 2px 9px; font-size: {SIZE_CAPTION}pt; font-weight: 600; }}
