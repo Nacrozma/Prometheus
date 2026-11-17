@@ -137,3 +137,32 @@ class MemoryOps:
         if ok:
             self._audit("confirm", {"fact_id": fact_id})
         return {"status": "success" if ok else "error"}
+
+
+def history_of(snapshot_facts: Dict[str, Dict[str, Any]], fact_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+    """Earlier versions of a memory (facts it superseded), newest first."""
+    out: List[Dict[str, Any]] = []
+    current = fact_id
+    for _ in range(limit):
+        prev = next((f for f in snapshot_facts.values() if f.get("superseded_by") == current), None)
+        if not prev:
+            break
+        out.append({"text": prev.get("text", ""), "updated": prev.get("updated", ""), "source": prev.get("source", "")})
+        current = prev.get("id", "")
+    return out
+
+
+def _ops_history(self, fact_id: str) -> List[Dict[str, Any]]:
+    return history_of(self.g.export_snapshot()["facts"], fact_id)
+
+
+def _ops_counts(self) -> Dict[str, int]:
+    rows = self.rows(limit=100000)
+    out = {"all": len(rows), "review": sum(1 for r in rows if r["provenance"] == "Prometheus (suggested)")}
+    for k in KINDS:
+        out[k] = sum(1 for r in rows if r["kind"] == k)
+    return out
+
+
+MemoryOps.history = _ops_history  # type: ignore[attr-defined]
+MemoryOps.counts = _ops_counts  # type: ignore[attr-defined]

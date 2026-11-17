@@ -52,10 +52,11 @@ REMINDER_POLL_MS = 15_000
 #: The sections, in groups. Names are stable identifiers (settings, tests and the palette use them).
 NAV: List[Tuple[str, List[Tuple[str, str]]]] = [
     ("Overview", [("Home", "home")]),
-    ("Converse", [("Companion", "chat"), ("Memory", "memory")]),
-    ("Build", [("Engineering", "engineering"), ("Forge", "forge"), ("Workspace", "workspace")]),
-    ("Organise", [("Reminders & tasks", "tasks"), ("Obsidian", "obsidian")]),
-    ("Lab", [("Robot arm (simulation)", "robot"), ("Reflection", "reflection")]),
+    ("Conversation", [("Companion", "chat")]),
+    ("Knowledge", [("Memory", "memory"), ("Obsidian", "obsidian")]),
+    ("Creation", [("Engineering", "engineering"), ("Forge", "forge"), ("Workspace", "workspace")]),
+    ("Organisation", [("Reminders & tasks", "tasks")]),
+    ("Laboratory", [("Robot arm (simulation)", "robot"), ("Reflection", "reflection")]),
     ("System", [("Trust & safety", "shield"), ("Settings", "settings")]),
 ]
 SECTION_ICON = {name: ic for _, items in NAV for name, ic in items}
@@ -72,8 +73,8 @@ class Notifications:
         self.unread = 0
         self.listeners: List[Callable[[], None]] = []
 
-    def add(self, title: str, body: str = "", tone: str = "info") -> None:
-        self.items.insert(0, {"title": title, "body": body, "tone": tone, "time": time.strftime("%H:%M")})
+    def add(self, title: str, body: str = "", tone: str = "info", source: str = "") -> None:
+        self.items.insert(0, {"title": title, "body": body, "tone": tone, "time": time.strftime("%H:%M"), "source": source})
         del self.items[100:]
         self.unread += 1
         for fn in self.listeners:
@@ -280,11 +281,11 @@ class MainWindow(QMainWindow):
             "Home": HomePage(core, settings, self.conversations, self),
             "Companion": self.companion,
             "Memory": MemoryPage(core),
+            "Obsidian": ObsidianPage(core, self.companion),
             "Engineering": EngineeringPage(core),
             "Forge": ForgePage(core, frozen),
             "Workspace": WorkspacePage(core),
             "Reminders & tasks": TasksPage(core),
-            "Obsidian": ObsidianPage(core, self.companion),
             "Robot arm (simulation)": ArmPage(core),
             "Reflection": ReflectionPage(core),
             "Trust & safety": TrustPage(core, settings),
@@ -312,6 +313,11 @@ class MainWindow(QMainWindow):
         mv.addWidget(self.stack, 1)
         row.addWidget(main, 1)
         self.setCentralWidget(central)
+        from .feedback import ActivityDrawer, ToastHost
+
+        self.toasts = ToastHost(self, lambda: bool(self.settings.get("reduced_motion")))
+        self.activity = ActivityDrawer(self, self.go)
+        self.activity.clear_btn.clicked.connect(lambda: (self.notifications.items.clear(), self.notifications.read_all(), self.activity.hide()))
 
         # status bar: provider, background activity, orb state
         sb = QStatusBar()
@@ -397,10 +403,7 @@ class MainWindow(QMainWindow):
         self.bell = QToolButton()
         self.bell.setIconSize(QSize(18, 18))
         self.bell.setAccessibleName("Notifications")
-        self.bell.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.bell_menu = QMenu(self.bell)
-        self.bell_menu.aboutToShow.connect(self._fill_bell)
-        self.bell.setMenu(self.bell_menu)
+        self.bell.clicked.connect(self.toggle_activity)
         lay.addWidget(self.bell)
         self.notifications.listeners.append(self._bell_badge)
         self._bell_badge()
@@ -413,19 +416,37 @@ class MainWindow(QMainWindow):
         self.bell.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon if n else Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.bell.setToolTip(f"{n} new notifications" if n else "Notifications")
 
-    def _fill_bell(self) -> None:
-        m = self.bell_menu
-        m.clear()
-        if not self.notifications.items:
-            a = m.addAction("Nothing yet. Reminders, failures and finished work appear here.")
-            a.setEnabled(False)
-        for it in self.notifications.items[:20]:
-            a = m.addAction(icons.icon({"ok": "check", "warn": "alert", "err": "alert"}.get(it["tone"], "bell"), T.TONES.get(it["tone"], T.TEXT_SECONDARY)), f"{it['time']}  {it['title']}" + (f" — {it['body'][:80]}" if it["body"] else ""))
-            a.setEnabled(True)
-        if self.notifications.items:
-            m.addSeparator()
-            m.addAction("Clear notifications", lambda: (self.notifications.items.clear(), self.notifications.read_all()))
-        QTimer.singleShot(0, self.notifications.read_all)
+    def toggle_activity(self) -> None:
+        d = self.activity
+        if d.isVisible():
+            d.hide()
+            return
+        try:
+            audit = list(reversed(self.core.audit_tail(60)))
+        except Exception:
+            audit = []
+        d.fill(self.notifications.items, audit)
+        self._place_overlays()
+        d.show()
+        d.raise_()
+        self.notifications.read_all()
+
+    def notify(self, text: str, tone: str = "ok", detail: str = "", source: str = "") -> None:
+        """A toast for the result of an action; kept in the activity centre; announced to screen readers."""
+        self.toasts.show(text, tone, detail)
+        self.notifications.add(text, detail, tone, source or self.current_section())
+        self.setAccessibleDescription(f"{text}. {detail}".strip())
+
+    def _place_overlays(self) -> None:
+        w = min(420, max(320, self.width() // 3))
+        top = 56
+        self.activity.setGeometry(self.width() - w, top, w, self.height() - top - (self.statusBar().height() if self.statusBar() else 0))
+        self.toasts.place()
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        if hasattr(self, "activity"):
+            self._place_overlays()
 
     # ----- navigation -----
     def go(self, name: str) -> None:
@@ -440,7 +461,7 @@ class MainWindow(QMainWindow):
             page.refresh()
         except Exception as e:
             self.statusBar().showMessage(f"Could not refresh {getattr(page, 'title', name)}: {e}", 8000)
-            self.notifications.add(f"Could not refresh {name}", str(e), "err")
+            self.notify(f"Could not load {name}", str(e), "err")
 
     def current_section(self) -> str:
         w = self.stack.currentWidget()
@@ -488,7 +509,7 @@ class MainWindow(QMainWindow):
         ok = self.core.reload_router()
         self._update_provider()
         self.companion.refresh()
-        self.notifications.add("Providers reconnected" if ok else "No provider could be configured", "", "ok" if ok else "warn")
+        self.notify("Providers reconnected" if ok else "No provider could be configured", "" if ok else "Add a key in Settings, or start Ollama.", "ok" if ok else "warn")
 
     # ----- status -----
     def _state(self, state: str) -> None:
@@ -539,7 +560,7 @@ class MainWindow(QMainWindow):
         for job in due:
             text = str(job.get("text") or job.get("task") or "Reminder")
             self.companion.add("Reminder", text, T.AMBER)
-            self.notifications.add("Reminder", text, "accent")
+            self.notify("Reminder", text, "accent", "Reminders & tasks")
             if self.tray is not None and self.settings.get("show_notifications"):
                 self.tray.showMessage(f"{APP_NAME} reminder", text, QSystemTrayIcon.MessageIcon.Information, 10_000)
 

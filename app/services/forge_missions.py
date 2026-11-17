@@ -110,3 +110,74 @@ def prompt(discipline: str, project: str, objective: str) -> str:
 
 def describe(m: Dict[str, Any]) -> str:
     return json.dumps({k: m.get(k) for k in ("discipline", "project", "started")})
+
+
+READ_TOOLS = {"read_file", "read_source_code", "recall_memory", "memory_graph_view", "web_search", "list_skills", "get_router_status", "usage_history"}
+CHANGE_TOOLS = {"write_file", "edit_file", "sculpt_workspace", "propose_code_change", "apply_pending_patch", "synthesize_dynamic_tool"}
+RUN_TOOLS = {"run_code_forge", "execute_shell", "run_skill"}
+
+STAGES = {
+    "architect": ["Started", "Investigating", "Plan written"],
+    "builder": ["Started", "Reading", "Changing", "Verifying", "Report"],
+    "debugger": ["Started", "Reproducing", "Fixing", "Verifying", "Report"],
+    "reconstructor": ["Started", "Investigating", "Writing recovery docs", "Report"],
+}
+
+
+def progress(discipline: str, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """What a mission has actually done, from its conversation: tool calls, their results, the report.
+    Stages are reached only by recorded events; nothing is estimated."""
+    calls: List[Dict[str, Any]] = []
+    results: Dict[str, Dict[str, Any]] = {}
+    for m in messages:
+        if m.get("role") == "assistant":
+            for tc in m.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                try:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except ValueError:
+                    args = {}
+                calls.append({"id": tc.get("id"), "tool": fn.get("name", ""), "args": args if isinstance(args, dict) else {}})
+        elif m.get("role") == "tool":
+            try:
+                res = json.loads(m.get("content") or "{}")
+            except ValueError:
+                res = {"status": "unknown"}
+            results[m.get("tool_call_id", "")] = res if isinstance(res, dict) else {"status": "unknown"}
+    for c in calls:
+        c["status"] = str(results.get(c["id"], {}).get("status", "pending"))
+    reads = [c for c in calls if c["tool"] in READ_TOOLS]
+    changes = [c for c in calls if c["tool"] in CHANGE_TOOLS]
+    runs = [c for c in calls if c["tool"] in RUN_TOOLS]
+    refused = [c for c in calls if c["status"] in ("refused", "denied", "declined")]
+    last_text = next((m.get("content") for m in reversed(messages) if m.get("role") == "assistant" and isinstance(m.get("content"), str) and m["content"].strip() and not m.get("tool_calls")), "")
+    ended_with_text = bool(messages) and messages[-1].get("role") == "assistant" and bool(last_text)
+    names = STAGES.get(discipline, STAGES["builder"])
+    reached = 1 if messages else 0
+    done_changes = [c for c in changes if c["status"] == "success"]
+    if discipline == "architect":
+        reached = 1 + bool(reads) + ended_with_text
+    elif discipline == "reconstructor":
+        reached = 1 + bool(reads) + bool(done_changes) + ended_with_text
+    else:
+        reached = 1 + bool(reads or runs) + bool(changes) + bool(runs and changes and calls.index(runs[-1]) > calls.index(changes[0])) + ended_with_text
+    if not messages:
+        reached = 0  # nothing recorded yet: no stage is claimed
+    files = []
+    for c in changes:
+        p = c["args"].get("path") or c["args"].get("target_file") or c["args"].get("file")
+        if p and p not in [f["path"] for f in files]:
+            files.append({"path": str(p), "tool": c["tool"], "status": c["status"]})
+    return {"stages": names, "reached": min(reached, len(names)), "calls": calls, "reads": len(reads), "changes": len(changes), "runs": runs, "refused": len(refused), "files": files, "report": last_text if ended_with_text else ""}
+
+
+def recommend(objective: str) -> str:
+    """A discipline that fits the wording of an objective (the owner can choose another)."""
+    t = (objective or "").lower()
+    if any(w in t for w in ("bug", "error", "fail", "crash", "broken", "exception", "traceback", "fix", "doesn't work", "does not work")):
+        return "debugger"
+    if any(w in t for w in ("document", "undocumented", "recover", "understand how", "reverse", "legacy", "what does this")):
+        return "reconstructor"
+    if any(w in t for w in ("plan", "review", "architecture", "assess", "audit", "design", "risk", "evaluate")):
+        return "architect"
+    return "builder"

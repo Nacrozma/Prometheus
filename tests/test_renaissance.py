@@ -293,3 +293,104 @@ class TestReflectionSuggestions(unittest.TestCase):
         self.assertTrue(any("web_search failed 5 of 10" in s and "timeout" in s for s in out))
         self.assertTrue(any("read_file was refused 4 times" in s for s in out))
         self.assertEqual(suggestions({"x": {"calls": 2, "failures": 2}}, {}), [], "too few calls to say anything")
+
+
+class TestExperienceServices(unittest.TestCase):
+    def test_mission_progress_comes_only_from_recorded_events(self):
+        from app.services import forge_missions as F
+
+        self.assertEqual(F.progress("builder", [])["reached"], 0)
+        msgs = [{"role": "user", "content": "go"}]
+        self.assertEqual(F.progress("builder", msgs)["reached"], 1, "started, nothing else claimed")
+
+        def call(i, tool, args, status):
+            return [{"role": "assistant", "content": "", "tool_calls": [{"id": f"c{i}", "type": "function", "function": {"name": tool, "arguments": json.dumps(args)}}]},
+                    {"role": "tool", "tool_call_id": f"c{i}", "name": tool, "content": json.dumps({"status": status})}]
+
+        msgs += call(1, "read_file", {"path": "a.py"}, "success")
+        msgs += call(2, "edit_file", {"path": "a.py"}, "refused")
+        p = F.progress("builder", msgs)
+        self.assertEqual((p["reached"], p["refused"], p["files"]), (3, 1, [{"path": "a.py", "tool": "edit_file", "status": "refused"}]))
+        self.assertEqual(p["report"], "", "no report until the mission ends with text")
+        msgs += call(3, "run_code_forge", {}, "success")
+        msgs.append({"role": "assistant", "content": "Done: a.py changed."})
+        p = F.progress("builder", msgs)
+        self.assertEqual(p["reached"], 5)
+        self.assertEqual(p["report"], "Done: a.py changed.")
+        arch = F.progress("architect", msgs[:3] + [{"role": "assistant", "content": "Plan: …"}])
+        self.assertEqual(arch["stages"][arch["reached"] - 1], "Plan written")
+        self.assertEqual(F.recommend("the importer crashes on empty files"), "debugger")
+        self.assertEqual(F.recommend("review the architecture"), "architect")
+        self.assertEqual(F.recommend("document this undocumented legacy tool"), "reconstructor")
+        self.assertEqual(F.recommend("add a CSV export"), "builder")
+
+    def test_vault_reader_links_backlinks_search_and_boundary(self):
+        from app.services import vault_reader as V
+
+        tmp = tempfile.mkdtemp()
+        try:
+            v = os.path.join(tmp, "vault")
+            os.makedirs(os.path.join(v, ".obsidian"))
+            os.makedirs(os.path.join(v, "sub"))
+            with open(os.path.join(v, "A.md"), "w") as f:
+                f.write("Links to [[B]] and [[sub/C|see C]] and [[Missing#part]].")
+            with open(os.path.join(v, "B.md"), "w") as f:
+                f.write("Back to [[A]]. Rocket.")
+            with open(os.path.join(v, "sub", "C.md"), "w") as f:
+                f.write("Nothing.")
+            with open(os.path.join(v, ".obsidian", "x.md"), "w") as f:
+                f.write("[[A]]")
+            notes = V.notes(v)
+            self.assertEqual(sorted(n["name"] for n in notes), ["A", "B", "C"])
+            self.assertEqual(V.links(open(os.path.join(v, "A.md")).read()), ["B", "sub/C", "Missing"])
+            self.assertEqual([n["name"] for n in V.backlinks(v, "A", notes)], ["B"])
+            self.assertEqual([n["name"] for n in V.backlinks(v, "C", notes)], ["A"])
+            self.assertEqual([n["name"] for n in V.search(v, "rocket", notes)], ["B"])
+            with self.assertRaises(ValueError):
+                V.read(v, os.path.join(tmp, "outside.md"))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_project_intel_summary_tests_and_grep(self):
+        from app.services import project_intel as P
+
+        tmp = tempfile.mkdtemp()
+        try:
+            ws = os.path.join(tmp, "ws")
+            proj = os.path.join(ws, "p")
+            os.makedirs(os.path.join(proj, "tests"))
+            os.makedirs(os.path.join(proj, "node_modules"))
+            with open(os.path.join(proj, "main.py"), "w") as f:
+                f.write("def delta_v():\n    return 1\n")
+            with open(os.path.join(proj, "tests", "test_main.py"), "w") as f:
+                f.write("from main import delta_v\n")
+            with open(os.path.join(proj, "node_modules", "x.js"), "w") as f:
+                f.write("delta_v\n")
+            s = P.summary(ws, proj)
+            self.assertEqual(s["tests"], [os.path.join("tests", "test_main.py")])
+            self.assertIn("main.py", s["entry"])
+            self.assertEqual(dict(s["languages"])["Python"], 2)
+            hits = P.grep(ws, proj, "DELTA_V")
+            self.assertEqual(sorted((h["rel"], h["line"]) for h in hits), [("main.py", 1), (os.path.join("tests", "test_main.py"), 1)])
+            self.assertEqual(P.summary(ws, tmp), {"error": "outside the workspace"})
+            self.assertEqual(P.grep(ws, proj, "x"), [], "one character is too short")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_previews_drop_markdown_and_list_items_found(self):
+        from app.services.conversations import plain
+
+        self.assertEqual(plain("**Bold** and `code`\n```py\nx = 1\n```\nend"), "Bold and code end")
+        try:
+            from app.ui.pages.companion import list_items
+            from app.ui.pages.tasks import classify
+        except Exception as e:  # PyQt6 missing
+            self.skipTest(str(e))
+        self.assertEqual(list_items("Plan:\n1. Add drag\n2. Write a **test**\n- Compare"), ["Add drag", "Write a test", "Compare"])
+        self.assertEqual(list_items("Just one:\n- item"), [])
+        import datetime as dt
+
+        now = dt.datetime(2026, 11, 17, 12, 0)
+        jobs = [{"id": "a", "status": "scheduled", "next_fire": "2026-11-17T18:00:00"}, {"id": "b", "status": "scheduled", "next_fire": "2026-11-17T09:00:00", "recurrence_seconds": 3600}, {"id": "c", "status": "scheduled", "next_fire": "2026-11-20T09:00:00"}, {"id": "d", "status": "delivered", "next_fire": "x"}]
+        g = classify(jobs, now)
+        self.assertEqual({k: [j["id"] for j in v] for k, v in g.items()}, {"today": ["a"], "upcoming": ["c"], "overdue": ["b"], "repeating": ["b"], "done": ["d"], "cancelled": []})

@@ -1,6 +1,7 @@
-"""Home: the command centre. Everything on it comes from Prometheus's own data on this computer:
-the router, conversations, reminders, the task record, memory, skills, the audit log and tool stats.
-Sections can be hidden (Customize); nothing here is a placeholder."""
+"""Home: the first expression of Prometheus. Not a dashboard of equal cards: a solar welcome with a real
+ask box, then what matters, in order: what needs you, where to continue, today's reminders, and a quiet
+line about Prometheus's state. Every item comes from Prometheus's own data on this computer; sections
+can be hidden (Customize)."""
 
 from __future__ import annotations
 
@@ -8,22 +9,15 @@ import datetime
 from typing import Any, Dict, List
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QGridLayout, QHBoxLayout, QLineEdit, QMenu, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLineEdit, QMenu, QPushButton, QVBoxLayout, QWidget
 
 from .. import icons
 from .. import theme as T
 from ..sun import SolarGlyph
-from ..widgets import Card, EmptyState, Page, label, pill, run_bg
+from ..widgets import Page, label, run_bg
 
-SECTIONS = [
-    ("conversations", "Recent conversations"),
-    ("reminders", "Upcoming reminders"),
-    ("task", "Current task"),
-    ("providers", "Provider health"),
-    ("engineering", "Engineering & Forge"),
-    ("memory", "Memory"),
-    ("activity", "Recent activity"),
-]
+SECTIONS = [("attention", "Needs you"), ("continue", "Continue"), ("today", "Today and next"), ("glance", "Prometheus at a glance")]
+STARTERS = [("Plan", "Help me plan "), ("Calculate", "Calculate "), ("Review a project", "Review the project in my workspace called "), ("Remember", "Remember that ")]
 
 
 def greeting(now: datetime.datetime) -> str:
@@ -31,8 +25,8 @@ def greeting(now: datetime.datetime) -> str:
     return "Good morning." if 5 <= h < 12 else "Good afternoon." if 12 <= h < 18 else "Good evening."
 
 
-def gather(core, conversations) -> Dict[str, Any]:
-    """Collect what Home shows (runs off the GUI thread). Each part fails on its own."""
+def gather(core, conversations, data_dir: str) -> Dict[str, Any]:
+    """Collect what Home shows (off the GUI thread). Each part fails on its own."""
     out: Dict[str, Any] = {}
 
     def part(key, fn):
@@ -41,28 +35,73 @@ def gather(core, conversations) -> Dict[str, Any]:
         except Exception as e:
             out[key] = {"error": f"{type(e).__name__}: {e}"}
 
-    part("conversations", lambda: [c for c in conversations.list() if c["messages"]][:5])
-    part("reminders", lambda: sorted([j for j in core.scheduled() if j.get("status") == "scheduled"], key=lambda j: str(j.get("next_fire", "")))[:5])
+    part("conversations", lambda: [c for c in conversations.list() if c["messages"]][:3])
+    part("reminders", lambda: sorted([j for j in core.scheduled() if j.get("status") == "scheduled"], key=lambda j: str(j.get("next_fire", "")))[:6])
     part("task", lambda: core.dispatch("read_task_state").get("task_state", {}))
-    part("router", core.router_status)
+    part("patches", core.pending_patches)
+    part("stats", core.tool_stats)
     part("memory", core.memory_stats)
     part("skills", core.skills)
-    part("patches", core.pending_patches)
-    part("activity", lambda: list(reversed(core.audit_tail(6))))
-    part("stats", core.tool_stats)
+
+    def missions():
+        from ...services.forge_missions import MissionLog
+
+        return MissionLog(data_dir).list()[:1]
+
+    part("missions", missions)
     return out
 
 
+def attention_items(d: Dict[str, Any], router, now: datetime.datetime) -> List[Dict[str, str]]:
+    """Real things that need the owner, most important first."""
+    items = []
+    if not router.configured:
+        items.append({"title": "No model provider yet", "body": "Add a key or start Ollama so Prometheus can think.", "go": "Settings", "tone": "warn"})
+    for j in d.get("reminders") if isinstance(d.get("reminders"), list) else []:
+        try:
+            if datetime.datetime.fromisoformat(str(j.get("next_fire"))) < now:
+                items.append({"title": f"Overdue: {j.get('text', '')}", "body": "It is delivered at the next check (every 15 s while Prometheus runs).", "go": "Reminders & tasks", "tone": "warn"})
+        except ValueError:
+            pass
+    patches = d.get("patches")
+    if isinstance(patches, list) and patches:
+        items.append({"title": f"{len(patches)} self-patch{'es' if len(patches) > 1 else ''} waiting for review", "body": "Prometheus proposed changes to its own code.", "go": "Forge", "tone": "accent"})
+    stats = d.get("stats")
+    if isinstance(stats, dict) and "error" not in stats:
+        for tool, s in stats.items():
+            calls, fails = s.get("calls", 0), s.get("failures", 0)
+            if calls >= 5 and fails / max(1, calls) >= 0.3:
+                items.append({"title": f"{tool} keeps failing", "body": f"{fails} of {calls} calls failed.", "go": "Reflection", "tone": "err"})
+    return items
+
+
 class HomePage(Page):
-    title = "Command centre"
-    subtitle = ""
+    title = "Home"
+    header = "none"
     scroll = True
+    margins = (36, 28, 36, 24)
 
     def __init__(self, core, settings, conversations, window, parent=None):
         super().__init__(core, parent)
         self.settings, self.conversations, self.window_ref = settings, conversations, window
-        customize = QPushButton(icons.icon("settings", T.TEXT_SECONDARY), " Customize")
+
+        # ----- the welcome -----
+        hero = QFrame()
+        hero.setObjectName("hero")
+        hl = QHBoxLayout(hero)
+        hl.setContentsMargins(30, 26, 30, 26)
+        hl.setSpacing(28)
+        self.sun = SolarGlyph(168)
+        hl.addWidget(self.sun, 0, Qt.AlignmentFlag.AlignVCenter)
+        col = QVBoxLayout()
+        col.setSpacing(8)
+        top = QHBoxLayout()
+        self.greet = label("", "h1", wrap=False)
+        self.greet.setStyleSheet(f"font-size: 24pt; font-family: {T.FONT_DISPLAY};")
+        top.addWidget(self.greet, 1)
+        customize = QPushButton(icons.icon("settings", T.TEXT_FAINT), " Customize")
         customize.setObjectName("ghost")
+        customize.setToolTip("Choose which parts of Home you see")
         menu = QMenu(customize)
         for key, name in SECTIONS:
             a = menu.addAction(name)
@@ -70,74 +109,75 @@ class HomePage(Page):
             a.setChecked(key not in settings.get("home_hidden"))
             a.toggled.connect(lambda on, k=key: self._toggle_section(k, on))
         customize.setMenu(menu)
-        self.actions.addWidget(customize)
-
-        # hero: the sun, a greeting, the real status, and a quick ask
-        hero = Card()
-        hero.setObjectName("hero")
-        hl = QHBoxLayout()
-        hl.setSpacing(22)
-        self.sun = SolarGlyph(112)
-        hl.addWidget(self.sun, 0, Qt.AlignmentFlag.AlignVCenter)
-        col = QVBoxLayout()
-        col.setSpacing(6)
-        self.greet = label("", "h1")
-        col.addWidget(self.greet)
+        top.addWidget(customize, 0, Qt.AlignmentFlag.AlignTop)
+        col.addLayout(top)
         self.status = label("", "sub")
         col.addWidget(self.status)
-        ask = QHBoxLayout()
+        box = QFrame()
+        box.setObjectName("composerBox")
+        bl = QHBoxLayout(box)
+        bl.setContentsMargins(14, 6, 6, 6)
         self.ask = QLineEdit()
-        self.ask.setPlaceholderText("Ask Prometheus… (opens the Companion)")
+        self.ask.setStyleSheet("QLineEdit { background: transparent; border: none; font-size: 11pt; padding: 6px 2px; }")
+        self.ask.setPlaceholderText("Ask Prometheus anything…")
         self.ask.setAccessibleName("Ask Prometheus")
         self.ask.returnPressed.connect(self._ask)
-        ask.addWidget(self.ask, 1)
+        bl.addWidget(self.ask, 1)
         go = QPushButton(icons.icon("send", T.ON_ACCENT), " Ask")
         go.setObjectName("primary")
         go.clicked.connect(self._ask)
-        ask.addWidget(go)
-        col.addLayout(ask)
-        quick = QHBoxLayout()
-        quick.setSpacing(6)
-        for text, ic, target in (("New conversation", "plus", "new"), ("Engineering", "engineering", "Engineering"), ("Reminder", "clock", "Reminders & tasks"), ("Workspace", "workspace", "Workspace"), ("Trust & safety", "shield", "Trust & safety")):
-            b = QPushButton(icons.icon(ic, T.TEXT_SECONDARY), f" {text}".replace("&", "&&"))
-            b.setObjectName("ghost")
-            b.clicked.connect(lambda _=False, t=target: self._quick(t))
-            quick.addWidget(b)
-        quick.addStretch(1)
-        col.addLayout(quick)
+        bl.addWidget(go)
+        col.addWidget(box)
+        chips = QHBoxLayout()
+        chips.setSpacing(6)
+        for text, prefix in STARTERS:
+            b = QPushButton(text)
+            b.setObjectName("chip")
+            b.setToolTip(f"Starts your message with “{prefix.strip()}…”")
+            b.clicked.connect(lambda _=False, p=prefix: (self.ask.setText(p), self.ask.setFocus()))
+            chips.addWidget(b)
+        chips.addStretch(1)
+        col.addLayout(chips)
         hl.addLayout(col, 1)
-        hero.body.addLayout(hl)
         self.content.addWidget(hero)
 
-        self.grid = QGridLayout()
-        self.grid.setSpacing(14)
-        self.content.addLayout(self.grid)
+        # ----- what matters, in two unequal columns -----
+        cols = QHBoxLayout()
+        cols.setSpacing(28)
+        left, right = QVBoxLayout(), QVBoxLayout()
+        left.setSpacing(22)
+        right.setSpacing(22)
+        self.blocks: Dict[str, QWidget] = {}
+        for key, name, where in (("continue", "Continue", left), ("today", "Today and next", left), ("attention", "Needs you", right), ("glance", "Prometheus at a glance", right)):
+            w = QWidget()
+            v = QVBoxLayout(w)
+            v.setContentsMargins(0, 0, 0, 0)
+            v.setSpacing(8)
+            v.addWidget(label(name.upper(), "eyebrow"))
+            inner = QVBoxLayout()
+            inner.setSpacing(6)
+            v.addLayout(inner)
+            w.inner = inner  # type: ignore[attr-defined]
+            where.addWidget(w)
+            self.blocks[key] = w
+        left.addStretch(1)
+        right.addStretch(1)
+        cols.addLayout(left, 3)
+        cols.addLayout(right, 2)
+        self.content.addLayout(cols)
         self.content.addStretch(1)
-        self.cards: Dict[str, Card] = {}
-        icon_for = {"conversations": "chat", "reminders": "clock", "task": "tasks", "providers": "plug", "engineering": "forge", "memory": "memory", "activity": "shield"}
-        for key, name in SECTIONS:
-            c = Card(name, icon_name=icon_for[key])
-            c.inner = QVBoxLayout()  # type: ignore[attr-defined]
-            c.inner.setSpacing(6)  # type: ignore[attr-defined]
-            c.body.addLayout(c.inner)  # type: ignore[attr-defined]
-            self.cards[key] = c
-        self._layout_cards()
+        self._apply_hidden()
 
     # ----- layout -----
     def _toggle_section(self, key: str, on: bool) -> None:
         hidden = [k for k in self.settings.get("home_hidden") if k != key] + ([] if on else [key])
         self.settings.set("home_hidden", hidden)
-        self._layout_cards()
+        self._apply_hidden()
 
-    def _layout_cards(self) -> None:
-        for c in self.cards.values():
-            self.grid.removeWidget(c)
-            c.setVisible(False)
+    def _apply_hidden(self) -> None:
         hidden = set(self.settings.get("home_hidden"))
-        shown = [k for k, _ in SECTIONS if k not in hidden]
-        for i, key in enumerate(shown):
-            self.grid.addWidget(self.cards[key], i // 2, i % 2)
-            self.cards[key].setVisible(True)
+        for k, w in self.blocks.items():
+            w.setVisible(k not in hidden)
 
     def set_reduced_motion(self, reduced: bool) -> None:
         self.sun.set_reduced_motion(reduced)
@@ -151,27 +191,19 @@ class HomePage(Page):
         self.window_ref.go("Companion")
         self.window_ref.companion.send(text)
 
-    def _quick(self, target: str) -> None:
-        if target == "new":
-            self.window_ref._new_conversation()
-        else:
-            self.window_ref.go(target)
-
     # ----- data -----
     def refresh(self) -> None:
         now = datetime.datetime.now()
         self.greet.setText(greeting(now))
         r = self.core.router
         if r.configured:
-            if r.last_used_provider:
-                self.status.setText(f"{now:%A %d %B} · Last answered by {r.last_used_provider} · {r.last_used_model}")
-            else:
-                self.status.setText(f"{now:%A %d %B} · Provider: {r.provider} · {r.default_model} (not used yet this session)")
+            who = f"{r.last_used_provider} · {r.last_used_model}" if r.last_used_provider else f"{r.provider} · {r.default_model} (not used yet this session)"
+            self.status.setText(f"{now:%A %d %B}. Ready, thinking with {who}.")
             self.sun.set_state("IDLE")
         else:
-            self.status.setText(f"{now:%A %d %B} · No model provider yet: add a key in Settings, or start Ollama.")
+            self.status.setText(f"{now:%A %d %B}. I can't think yet: no model provider is connected.")
             self.sun.set_state("OFFLINE")
-        run_bg(lambda: gather(self.core, self.conversations), self._fill, lambda m: self.status.setText(f"Could not load Home: {m.splitlines()[0]}"), owner=self)
+        run_bg(lambda: gather(self.core, self.conversations, self.core.paths()["data"]), self._fill, lambda m: self.status.setText(f"Could not load Home: {m.splitlines()[0]}"), owner=self)
 
     @staticmethod
     def _clear(lay) -> None:
@@ -184,106 +216,93 @@ class HomePage(Page):
             elif it.layout() is not None:
                 HomePage._clear(it.layout())
 
-    def _row(self, lay, title: str, detail: str = "", on_click=None, tone: str = "") -> None:
-        row = QHBoxLayout()
-        if on_click:
-            b = QPushButton(title)
-            b.setObjectName("link")
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
+    def _item(self, lay, icon_name: str, title: str, body: str, action: str = "", on_click=None, tone: str = "accent") -> None:
+        row = QFrame()
+        row.setObjectName("homeRow")
+        h = QHBoxLayout(row)
+        h.setContentsMargins(14, 10, 12, 10)
+        h.setSpacing(12)
+        ic = label()
+        ic.setPixmap(icons.pixmap(icon_name, T.TONES.get(tone, T.ACCENT), 18))
+        h.addWidget(ic, 0, Qt.AlignmentFlag.AlignTop)
+        v = QVBoxLayout()
+        v.setSpacing(2)
+        v.addWidget(label(title))
+        if body:
+            v.addWidget(label(body, "faint"))
+        h.addLayout(v, 1)
+        if action and on_click:
+            b = QPushButton(action)
+            b.setObjectName("ghost")
+            b.setAccessibleName(f"{action}: {title}")
             b.clicked.connect(on_click)
-            row.addWidget(b, 1)
-        else:
-            t = label(title)
-            if tone:
-                t.setStyleSheet(f"color: {T.TONES.get(tone, T.TEXT)};")
-            row.addWidget(t, 1)
-        if detail:
-            row.addWidget(label(detail, "faint", wrap=False))
-        lay.addLayout(row)
-
-    def _error(self, lay, data) -> bool:
-        if isinstance(data, dict) and "error" in data:
-            lay.addWidget(label(f"Unavailable: {data['error']}", "err"))
-            return True
-        return False
+            h.addWidget(b, 0, Qt.AlignmentFlag.AlignVCenter)
+        lay.addWidget(row)
 
     def _fill(self, d: Dict[str, Any]) -> None:
-        for c in self.cards.values():
-            self._clear(c.inner)  # type: ignore[attr-defined]
+        for w in self.blocks.values():
+            self._clear(w.inner)  # type: ignore[attr-defined]
+        now = datetime.datetime.now()
+        go = self.window_ref.go
 
-        lay = self.cards["conversations"].inner  # type: ignore[attr-defined]
-        convs = d.get("conversations")
-        if not self._error(lay, convs):
-            if not convs:
-                lay.addWidget(EmptyState("chat", "No conversations yet", "Ask something above to start one."))
-            for c in convs or []:
-                self._row(lay, c["title"], c["updated"][5:16].replace("T", " "), lambda _=False, cid=c["id"]: (self.window_ref.go("Companion"), self.window_ref.companion.open_conversation(cid)))
+        lay = self.blocks["attention"].inner  # type: ignore[attr-defined]
+        items = attention_items(d, self.core.router, now)
+        if not items:
+            calm = label("✓ All clear. Nothing is waiting for you.", "sub")
+            calm.setStyleSheet(f"color: {T.OK};")
+            lay.addWidget(calm)
+        for it in items:
+            self._item(lay, "alert" if it["tone"] in ("warn", "err") else "bell", it["title"], it["body"], "Open", lambda _=False, t=it["go"]: go(t), it["tone"])
 
-        lay = self.cards["reminders"].inner  # type: ignore[attr-defined]
-        rem = d.get("reminders")
-        if not self._error(lay, rem):
-            if not rem:
-                lay.addWidget(label("Nothing scheduled. Ask Prometheus to remind you, or add one in Reminders & tasks.", "faint"))
-            for j in rem or []:
-                self._row(lay, j.get("text", ""), str(j.get("next_fire", ""))[:16].replace("T", " ") + ("  ↻" if j.get("recurrence_seconds") else ""))
+        lay = self.blocks["continue"].inner  # type: ignore[attr-defined]
+        convs = d.get("conversations") if isinstance(d.get("conversations"), list) else []
+        task = d.get("task") if isinstance(d.get("task"), dict) else {}
+        missions = d.get("missions") if isinstance(d.get("missions"), list) else []
+        if convs:
+            c = convs[0]
+            self._item(lay, "chat", c["title"], c["preview"][:110] or f"{c['messages']} messages", "Resume", lambda _=False, cid=c["id"]: (go("Companion"), self.window_ref.companion.open_conversation(cid)))
+        if task.get("goal"):
+            steps = task.get("steps") or []
+            done = sum(1 for s in steps if str(s).startswith("[x] "))
+            status = str(task.get("status", "idle")).replace("_", " ")
+            self._item(lay, "tasks", task["goal"], f"{done} of {len(steps)} steps done · {status}" if steps else status, "Open", lambda _=False: go("Reminders & tasks"))
+        if missions:
+            from ...services.forge_missions import DISCIPLINES
 
-        lay = self.cards["task"].inner  # type: ignore[attr-defined]
-        task = d.get("task")
-        if not self._error(lay, task):
-            goal = (task or {}).get("goal")
-            if not goal:
-                lay.addWidget(label("No long-running task is set. Prometheus records one when you start multi-step work.", "faint"))
-            else:
-                lay.addWidget(label(goal))
-                steps = task.get("steps") or []
-                status = str(task.get("status") or "idle").replace("_", " ")
-                lay.addWidget(label(f"Status: {status} · {len(steps)} steps" if steps else f"Status: {status}", "faint"))
-                for st in steps[:4]:
-                    lay.addWidget(label(f"• {st}", "faint"))
+            m = missions[0]
+            self._item(lay, "forge", f"{DISCIPLINES.get(m['discipline'], {}).get('name', m['discipline'])} mission · {m['project']}", m["objective"][:110], "Open", lambda _=False: go("Forge"))
+        for c in convs[1:3]:
+            self._item(lay, "chat", c["title"], "", "Open", lambda _=False, cid=c["id"]: (go("Companion"), self.window_ref.companion.open_conversation(cid)), "neutral")
+        if not (convs or task.get("goal") or missions):
+            lay.addWidget(label("Nothing to continue yet. Ask something above, or start a Forge mission on a project in your workspace.", "faint"))
 
-        lay = self.cards["providers"].inner  # type: ignore[attr-defined]
-        router = d.get("router") or {}
-        if not self._error(lay, router):
-            active = router.get("active_providers") or []
-            cool = router.get("providers_on_cooldown") or {}
-            if not active:
-                lay.addWidget(label("No provider configured. Settings → Providers.", "warn"))
-            for name in active:
-                row = QHBoxLayout()
-                row.addWidget(label(name), 1)
-                secs = cool.get(name) if isinstance(cool, dict) else None
-                row.addWidget(pill(f"cooling down {int(secs)}s" if secs else ("in use" if name == router.get("last_used_provider") else "available"), "warn" if secs else "ok" if name == router.get("last_used_provider") else "neutral"))
-                lay.addLayout(row)
-            if "ollama" in active:
-                lay.addWidget(label("Ollama is listed when configured; it answers only if its server is running on this computer.", "faint"))
+        lay = self.blocks["today"].inner  # type: ignore[attr-defined]
+        rem = d.get("reminders") if isinstance(d.get("reminders"), list) else []
+        if not rem:
+            lay.addWidget(label("No reminders scheduled. Say “remind me in 2 hours to…” in a conversation, or add one in Reminders & tasks.", "faint"))
+        for j in rem:
+            try:
+                t = datetime.datetime.fromisoformat(str(j.get("next_fire")))
+                day = "Today" if t.date() == now.date() else "Tomorrow" if t.date() == (now + datetime.timedelta(days=1)).date() else f"{t:%a %d %b}"
+                when = f"{day} {t:%H:%M}"
+            except ValueError:
+                when = str(j.get("next_fire", ""))
+            row = QHBoxLayout()
+            tl = label(when, "mono", wrap=False)
+            tl.setMinimumWidth(130)
+            row.addWidget(tl)
+            row.addWidget(label(str(j.get("text", "")) + ("   ↻ repeats" if j.get("recurrence_seconds") else "")), 1)
+            lay.addLayout(row)
 
-        lay = self.cards["engineering"].inner  # type: ignore[attr-defined]
-        skills, patches = d.get("skills"), d.get("patches")
-        if not self._error(lay, skills):
-            enabled = [s for s in skills or [] if s.get("enabled", True)]
-            self._row(lay, f"{len(enabled)} learned skills", "Forge", lambda _=False: self.window_ref.go("Forge"))
-        if not self._error(lay, patches):
-            self._row(lay, f"{len(patches or [])} self-patches waiting for review", "Forge", lambda _=False: self.window_ref.go("Forge"), tone="warn" if patches else "")
-        self._row(lay, "17 engineering calculators", "Engineering", lambda _=False: self.window_ref.go("Engineering"))
-
-        lay = self.cards["memory"].inner  # type: ignore[attr-defined]
-        mem = d.get("memory")
-        if not self._error(lay, mem):
-            m = mem or {}
-            active = (m.get("facts_by_status") or {}).get("active", m.get("facts", 0))
-            self._row(lay, f"{active} active facts · {m.get('entities', 0)} entities · {m.get('relations', 0)} relations", "", lambda _=False: self.window_ref.go("Memory"))
-
-        lay = self.cards["activity"].inner  # type: ignore[attr-defined]
-        act = d.get("activity")
-        if not self._error(lay, act):
-            if not act:
-                lay.addWidget(label("No tool has run yet. Every tool call is recorded in the audit log.", "faint"))
-            for e in act or []:
-                outcome = str(e.get("outcome", ""))
-                tone = "ok" if outcome == "success" else "warn" if outcome in ("refused", "denied", "cancelled") else "err" if outcome == "error" else ""
-                self._row(lay, f"{e.get('tool', '')} · {outcome}", str(e.get("ts", ""))[11:16], tone=tone)
-            stats = d.get("stats")
-            if isinstance(stats, dict) and stats and "error" not in stats:
-                calls = sum(int(v.get("calls", 0)) for v in stats.values() if isinstance(v, dict))
-                fails = sum(int(v.get("failures", 0)) for v in stats.values() if isinstance(v, dict))
-                lay.addWidget(label(f"All time: {calls} tool calls, {fails} failed.", "faint"))
+        lay = self.blocks["glance"].inner  # type: ignore[attr-defined]
+        mem = d.get("memory") if isinstance(d.get("memory"), dict) else {}
+        active = (mem.get("facts_by_status") or {}).get("active", mem.get("facts", 0))
+        skills = d.get("skills") if isinstance(d.get("skills"), list) else []
+        stats = d.get("stats") if isinstance(d.get("stats"), dict) and "error" not in d.get("stats") else {}
+        calls = sum(int(v.get("calls", 0)) for v in stats.values())
+        for text, target in ((f"Remembers {active} things about you and your work →", "Memory"), (f"Knows {len(skills)} learned skill{'s' if len(skills) != 1 else ''} →", "Forge"), (f"Has used its tools {calls} times; every call is in the audit log →", "Trust & safety")):
+            b = QPushButton(text)
+            b.setObjectName("link")
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _=False, t=target: go(t))
+            lay.addWidget(b)

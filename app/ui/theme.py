@@ -141,6 +141,22 @@ QPushButton#ghost {{ background: transparent; border: 1px solid transparent; col
 QPushButton#ghost:hover {{ background: {SURFACE_ELEVATED}; color: {TEXT}; border-color: {BORDER}; }}
 QPushButton#ghost:checked {{ background: {ACCENT_SOFT}; color: {ACCENT}; border-color: {BORDER_WARM}; font-weight: 600; }}
 QPushButton:checked {{ background: {ACCENT_SOFT}; color: {ACCENT}; border-color: {ACCENT}; }}
+QPushButton#chip {{ background: transparent; border: 1px solid {BORDER_STRONG}; border-radius: 13px; padding: 4px 12px; color: {TEXT_SECONDARY}; }}
+QPushButton#chip:hover {{ border-color: {BORDER_WARM}; color: {HIGHLIGHT}; background: {ACCENT_FAINT}; }}
+QPushButton#chip:checked {{ border-color: {ACCENT}; color: {ACCENT}; background: {ACCENT_SOFT}; }}
+QFrame#plainCard {{ background: transparent; border: none; }}
+QFrame#homeRow {{ background: {SURFACE}; border: 1px solid transparent; border-radius: {RADIUS_M}px; }}
+QFrame#homeRow:hover {{ border-color: {BORDER_WARM}; }}
+QFrame#rail {{ background: {SURFACE}; border-right: 1px solid {BORDER}; }}
+QFrame#inspector {{ background: {SURFACE}; border-left: 1px solid {BORDER}; }}
+QFrame#presence {{ background: transparent; border-bottom: 1px solid {BORDER}; }}
+QFrame#viewport {{ background: #05060A; border: 1px solid {BORDER}; border-radius: {RADIUS_L}px; }}
+QListWidget#rows {{ background: transparent; border: none; }}
+QListWidget#rows::item {{ padding: 10px 12px; border-radius: {RADIUS_M}px; margin: 1px 0; border-bottom: 1px solid {BORDER}; }}
+QListWidget#rows::item:selected {{ background: {ACCENT_SOFT}; color: {TEXT}; border-bottom: 1px solid {BORDER_WARM}; }}
+QListWidget#rail {{ background: transparent; border: none; }}
+QListWidget#rail::item {{ padding: 8px 10px; border-radius: {RADIUS_S}px; color: {TEXT_SECONDARY}; }}
+QListWidget#rail::item:selected {{ background: {ACCENT_SOFT}; color: {ACCENT}; }}
 QPushButton#danger {{ border-color: {ERR}; color: {ERR}; background: transparent; }}
 QPushButton#danger:hover {{ background: rgba(255, 107, 94, 0.10); }}
 QPushButton#link {{ background: transparent; border: none; color: {ACCENT}; padding: 0; text-align: left; }}

@@ -18,6 +18,8 @@ from ..widgets import Card, Page, label, pill, run_bg
 
 class SettingsPage(Page):
     title = "Settings"
+    header = "none"
+    margins = (0, 0, 0, 0)
     subtitle = "Providers and models, workspace, desktop behaviour, voice, data and backups."
     restart_requested = pyqtSignal()
     behaviour_changed = pyqtSignal()
@@ -25,16 +27,56 @@ class SettingsPage(Page):
     def __init__(self, core, settings, creds, platform, paths, parent=None):
         super().__init__(core, parent)
         self.settings, self.creds, self.platform, self.paths = settings, creds, platform, paths
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        host = QWidget()
-        col = QVBoxLayout(host)
-        col.setSpacing(12)
-        scroll.setWidget(host)
-        self.content.addWidget(scroll, 1)
+        from PyQt6.QtCore import QSize, Qt
+        from PyQt6.QtWidgets import QFrame, QListWidget, QListWidgetItem, QSplitter, QStackedWidget
+
+        split = QSplitter()
+        split.setHandleWidth(1)
+        split.setChildrenCollapsible(False)
+        rail = QFrame()
+        rail.setObjectName("rail")
+        rail.setMinimumWidth(210)
+        rail.setMaximumWidth(260)
+        rl = QVBoxLayout(rail)
+        rl.setContentsMargins(16, 22, 12, 16)
+        rl.addWidget(label("Settings", "h1"))
+        rl.addWidget(label("Grouped by what you want to do. Changes save as you make them.", "faint"))
+        self.rail = QListWidget()
+        self.rail.setObjectName("rail")
+        self.rail.setIconSize(QSize(16, 16))
+        self.rail.setAccessibleName("Settings sections")
+        rl.addWidget(self.rail, 1)
+        split.addWidget(rail)
+        self.sections = QStackedWidget()
+        split.addWidget(self.sections)
+        split.setStretchFactor(1, 1)
+        split.setSizes([230, 900])
+        self.content.addWidget(split, 1)
+        self.rail.currentRowChanged.connect(self.sections.setCurrentIndex)
+
+        def add(name: str, icon_name: str, intro: str, card) -> None:
+            page = QScrollArea()
+            page.setWidgetResizable(True)
+            page.setFrameShape(QFrame.Shape.NoFrame)
+            host = QWidget()
+            v = QVBoxLayout(host)
+            v.setContentsMargins(32, 24, 32, 20)
+            v.setSpacing(10)
+            v.addWidget(label(name, "h1"))
+            v.addWidget(label(intro, "sub"))
+            card.setObjectName("plainCard")
+            v.addWidget(card)
+            v.addStretch(1)
+            page.setWidget(host)
+            self.sections.addWidget(page)
+            self.rail.addItem(QListWidgetItem(icons.icon(icon_name, T.TEXT_SECONDARY), name))
+            if self.rail.count() == 1:
+                self.rail.setCurrentRow(0)
+
+        col = None  # sections are added with add()
 
         # ---- providers ----
-        prov = Card("Providers and keys")
+        prov = Card("")
         store = f"Keys are stored in {platform.credential_backend()}" if creds.available else f"Secure key storage is unavailable: {creds.error}. Keys in your environment or a .env file still work; Prometheus will not write keys to a plain file."
         prov.body.addWidget(label(store, "faint" if creds.available else "warn"))
         grid = QGridLayout()
@@ -76,20 +118,20 @@ class SettingsPage(Page):
         prov.body.addLayout(self.health)
         self.health_msg = label("Test connections to check each provider and choose its model.", "faint")
         prov.body.addWidget(self.health_msg)
-        col.addWidget(prov)
+        add('Models & providers', 'plug', "Where Prometheus thinks. Keys are stored in your operating system's credential store; test a connection and choose each provider's model.", prov)
 
         # ---- workspace ----
-        ws = Card("Workspace")
+        ws = Card("")
         self.ws_lbl = label(f"{paths.workspace}  ({paths.workspace_reason})", "sub", selectable=True)
         ws.body.addWidget(self.ws_lbl)
         ws.body.addWidget(label("The file and shell tools can only touch this folder. A new choice applies the next time Prometheus starts.", "faint"))
         pick = QPushButton("Choose workspace folder…")
         pick.clicked.connect(self._pick_workspace)
         ws.body.addWidget(pick)
-        col.addWidget(ws)
+        add('Workspace', 'workspace', "The one folder Prometheus's file and shell tools may use.", ws)
 
         # ---- desktop behaviour ----
-        dk = Card("Desktop")
+        dk = Card("")
         caps = platform.capabilities()
         self.close_to_tray = QCheckBox("Keep running in the tray when the window is closed (Quit from the tray menu)")
         self.notify = QCheckBox("Show system notifications for due reminders")
@@ -107,19 +149,26 @@ class SettingsPage(Page):
         dk.body.addWidget(self.login_msg)
         for note in platform.notes():
             dk.body.addWidget(label(note, "faint"))
-        col.addWidget(dk)
+        add('Desktop', 'home', 'How Prometheus behaves on your desktop.', dk)
 
         # ---- autonomy ----
-        au = Card("Autonomy")
+        au = Card("")
         self.auto = QCheckBox("Auto-approve tools with real-world effects (not recommended)")
         self.auto.setChecked(settings.get("auto_approve"))
         self.auto.toggled.connect(self._auto)
         au.body.addWidget(self.auto)
         au.body.addWidget(label("With this off, every write, shell command, code run, patch or hardware action shows an approval card first. Denied tools in permissions.json stay denied either way.", "faint"))
-        col.addWidget(au)
+        ap = Card("")
+        self.nav_box = QCheckBox("Keep the navigation collapsed to icons (Ctrl+B toggles it any time)")
+        self.nav_box.setChecked(bool(settings.get("nav_collapsed")))
+        self.nav_box.toggled.connect(self._nav)
+        ap.body.addWidget(self.nav_box)
+        ap.body.addWidget(label("Reduce motion is under Desktop. Home sections are chosen with Customize on Home. Conversation and context panels are toggled in the Companion and remembered.", "faint"))
+        add('Appearance', 'sun', 'How Prometheus looks and how much it moves.', ap)
+        add('Privacy & autonomy', 'shield', 'How much Prometheus may do without asking you.', au)
 
         # ---- voice ----
-        vc = Card("Voice")
+        vc = Card("")
         import gui_orb as g
 
         status = ["Voice input (Whisper): " + ("ready" if g.VOICE_INPUT_AVAILABLE else "not installed"), "Speech output (edge-tts): " + ("ready" if g.VOICE_OUTPUT_AVAILABLE else "not available")]
@@ -127,10 +176,10 @@ class SettingsPage(Page):
         for why in g.VOICE_MISSING.values():
             vc.body.addWidget(label(why, "faint"))
         vc.body.addWidget(label("Whisper needs PyTorch (a large download), so it is optional. Speech output uses Microsoft's online edge-tts service: the text being spoken is sent to it. Recordings are transcribed in memory and never saved.", "faint"))
-        col.addWidget(vc)
+        add('Voice', 'mic', 'Speaking and listening, and where the audio goes.', vc)
 
         # ---- data ----
-        dt = Card("Data")
+        dt = Card("")
         dt.body.addWidget(label(f"Data folder: {paths.data_dir}  ({paths.data_reason})", "sub", selectable=True))
         for n in paths.notes:
             dt.body.addWidget(label(n, "faint"))
@@ -149,12 +198,11 @@ class SettingsPage(Page):
         dt.body.addWidget(self.import_lbl)
         if settings.get("pending_import"):
             self.import_lbl.setText(f"Import from {settings.get('pending_import')} will run the next time Prometheus starts.")
-        col.addWidget(dt)
+        add('Data & backups', 'export', 'Where Prometheus keeps its memory and history, and how to back it up or bring it from another computer.', dt)
 
-        ab = Card("About")
+        ab = Card("")
         ab.body.addWidget(label(f"{APP_NAME} Desktop {__version__} · Python {sys.version.split()[0]} · {platform.name}" + ("" if platform.validated else " (desktop integration not yet validated on a real machine)"), "faint", selectable=True))
-        col.addWidget(ab)
-        col.addStretch(1)
+        add('About', 'sun', 'Version and platform.', ab)
 
     # ----- providers -----
     def refresh(self) -> None:
@@ -254,8 +302,18 @@ class SettingsPage(Page):
 
     # ----- behaviour -----
     def _set(self, key: str, value) -> None:
+        from ..feedback import notify
+
         self.settings.set(key, value)
         self.behaviour_changed.emit()
+        notify(self, "Setting saved", "ok", {"close_to_tray": "Closing the window keeps Prometheus in the tray" if value else "Closing the window quits Prometheus", "show_notifications": "System notifications for reminders are on" if value else "System notifications are off", "reduced_motion": "Motion reduced: the sun holds still" if value else "Motion restored", "auto_approve": "Auto-approve is ON" if value else "Auto-approve is off: tools ask first"}.get(key, ""))
+
+    def _nav(self, on: bool) -> None:
+        win = self.window()
+        if hasattr(win, "nav"):
+            win.nav.set_collapsed(on, notify=True)
+        else:
+            self.settings.set("nav_collapsed", on)
 
     def _login(self, on: bool) -> None:
         if getattr(sys, "frozen", False):

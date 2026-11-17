@@ -29,6 +29,9 @@ DEFAULTS: Dict[str, Any] = {
     "last_section": "Home",
     #: Home sections the owner chose to hide (Customize on Home).
     "home_hidden": [],
+    #: Companion panels shown beside the conversation (toggled in the Companion, remembered).
+    "companion_history": True,
+    "companion_context": False,
     #: A folder to import data from at the next start (before the core loads its state).
     "pending_import": "",
 }

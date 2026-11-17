@@ -37,6 +37,14 @@ def title_from(text: str) -> str:
     return (cut or line[:48]) + "…"
 
 
+def plain(text: str) -> str:
+    """Text without Markdown punctuation, for one-line previews."""
+    t = re.sub(r"```.*?(```|$)", " ", text or "", flags=re.S)
+    t = re.sub(r"[`*_#>|]+", "", t)
+    t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
+    return " ".join(t.split())
+
+
 def visible(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """The user and assistant messages with text: what a person sees in the conversation."""
     return [m for m in messages if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str) and m["content"].strip()]
@@ -77,7 +85,7 @@ class ConversationStore:
             if q and q not in c.get("title", "").lower() and not any(q in m["content"].lower() for m in shown):
                 continue
             last = shown[-1]["content"] if shown else ""
-            out.append({"id": c["id"], "title": c.get("title") or "New conversation", "created": c.get("created", ""), "updated": c.get("updated", ""), "messages": len(shown), "preview": " ".join(last.split())[:120]})
+            out.append({"id": c["id"], "title": c.get("title") or "New conversation", "created": c.get("created", ""), "updated": c.get("updated", ""), "messages": len(shown), "preview": plain(last)[:120]})
         out.sort(key=lambda c: c["updated"], reverse=True)
         return out
 

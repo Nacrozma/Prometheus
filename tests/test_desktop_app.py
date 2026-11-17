@@ -408,6 +408,15 @@ SMOKE = textwrap.dedent(
         win.conversations.rename(first, "Renamed")
         out["renamed"] = win.conversations.get(first)["title"] == "Renamed"
         out["deleted"] = comp.delete_conversation(first, confirm=False) and win.conversations.get(first) is None
+        # feedback: an action's result becomes a toast and stays in the activity centre
+        win.notify("Saved", "ok", "detail")
+        out["toast"] = len(win.toasts.toasts) >= 1 and win.notifications.items[0]["title"] == "Saved"
+        win.toggle_activity()
+        out["activity"] = win.activity.isVisible() and win.activity.list.count() > 0
+        win.toggle_activity()
+        # navigation groups by intent, each section reachable and remembered
+        win.go("Obsidian")
+        out["last_section"] = win.settings.get("last_section") == "Obsidian" and win.nav.buttons["Obsidian"].isChecked()
         out["dangerous"] = win.core.is_dangerous("write_file") and win.core.is_dangerous("execute_shell")
         out["auto_default"] = win.settings.get("auto_approve")
         print("RESULT" + json.dumps(out))
@@ -440,6 +449,7 @@ class TestWindowSmoke(unittest.TestCase):
         self.assertTrue(out["denied_passed"])
         self.assertTrue(out["architect_refused"])
         self.assertTrue(out["new_conv"] and out["renamed"] and out["deleted"])
+        self.assertTrue(out["toast"] and out["activity"] and out["last_section"])
         self.assertTrue(out["dangerous"])
         self.assertFalse(out["auto_default"])
         self.assertEqual(r.returncode, 0, r.stderr[-2000:])

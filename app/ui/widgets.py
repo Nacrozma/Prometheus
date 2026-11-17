@@ -131,6 +131,10 @@ class Page(QWidget):
     subtitle = ""
     eyebrow = ""
     scroll = False
+    #: "full" (eyebrow, title, subtitle), "compact" (one quiet line: title and actions) or "none" (the
+    #: page composes its own top area). Screens differ on purpose; see RENAISSANCE_UX_SPECIFICATIONS.md.
+    header = "full"
+    margins = (32, 24, 32, 20)
 
     def __init__(self, core, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -140,21 +144,29 @@ class Page(QWidget):
         outer.setSpacing(0)
         inner = QWidget()
         lay = QVBoxLayout(inner)
-        lay.setContentsMargins(32, 24, 32, 20)
+        lay.setContentsMargins(*self.margins)
         lay.setSpacing(14)
         head = QHBoxLayout()
         col = QVBoxLayout()
         col.setSpacing(3)
-        if self.eyebrow:
-            col.addWidget(label(self.eyebrow.upper(), "eyebrow"))
-        col.addWidget(label(self.title, "h1"))
-        if self.subtitle:
-            col.addWidget(label(self.subtitle, "sub"))
-        head.addLayout(col, 1)
         self.actions = QHBoxLayout()
         self.actions.setSpacing(8)
+        if self.header == "full":
+            if self.eyebrow:
+                col.addWidget(label(self.eyebrow.upper(), "eyebrow"))
+            col.addWidget(label(self.title, "h1"))
+            if self.subtitle:
+                col.addWidget(label(self.subtitle, "sub"))
+        elif self.header == "compact":
+            t = label(self.title, "h2", wrap=False)
+            t.setStyleSheet("font-size: 13pt;")
+            col.addWidget(t)
+        head.addLayout(col, 1)
         head.addLayout(self.actions)
-        lay.addLayout(head)
+        if self.header != "none":
+            lay.addLayout(head)
+        else:
+            self._head = head  # pages that compose their own top area may add it where they like
         self.content = QVBoxLayout()
         self.content.setSpacing(14)
         lay.addLayout(self.content, 1)

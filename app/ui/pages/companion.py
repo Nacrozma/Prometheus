@@ -164,9 +164,28 @@ def _gl_available() -> bool:
         return False
 
 
+STARTERS = [
+    ("Think something through", "Help me think through "),
+    ("Calculate", "Calculate "),
+    ("Plan work", "Break this into steps: "),
+    ("Look at a project", "Look at the project in my workspace called "),
+]
+
+
+def list_items(text: str) -> list:
+    """Bulleted or numbered items in a reply (for 'use as task steps'); empty if there are fewer than 2."""
+    import re
+
+    items = [m.group(2).strip() for m in re.finditer(r"^\s*([-*•]|\d+[.)])\s+(.+)$", text or "", re.M)]
+    items = [re.sub(r"[*_`]", "", i)[:200] for i in items if i]
+    return items[:20] if len(items) >= 2 else []
+
+
 class CompanionPage(Page):
     title = "Companion"
     subtitle = ""
+    header = "none"
+    margins = (20, 14, 20, 12)
     state_changed = pyqtSignal(str)
     busy_changed = pyqtSignal(bool)
 
@@ -204,14 +223,21 @@ class CompanionPage(Page):
         split = QSplitter(Qt.Orientation.Horizontal)
         split.setChildrenCollapsible(False)
         split.setHandleWidth(1)
-        split.addWidget(self._history_panel())
-        split.addWidget(self._conversation_panel())
-        split.addWidget(self._presence_panel())
+        self.history_panel = self._history_panel()
+        conversation = self._conversation_panel()
+        self.context_panel = self._presence_panel()
+        split.addWidget(self.history_panel)
+        split.addWidget(conversation)
+        split.addWidget(self.context_panel)
         split.setStretchFactor(0, 0)
         split.setStretchFactor(1, 1)
         split.setStretchFactor(2, 0)
-        split.setSizes([240, 760, 280])
+        split.setSizes([250, 900, 280])
         self.content.addWidget(split, 1)
+        self.history_panel.setVisible(bool(settings.get("companion_history")))
+        self.context_panel.setVisible(bool(settings.get("companion_context")))
+        self.hist_btn.setChecked(self.history_panel.isVisible())
+        self.ctx_btn.setChecked(self.context_panel.isVisible())
 
         # Speech: the existing pipeline, used only where its packages are installed.
         self.tts = None
@@ -242,6 +268,7 @@ class CompanionPage(Page):
         self._render_timer.timeout.connect(self._render)
         self._render_history()
         self._reload_list()
+        self.set_state("IDLE")
         self.refresh()
 
     # ----- layout -----
@@ -280,30 +307,51 @@ class CompanionPage(Page):
         lay.setContentsMargins(6, 0, 6, 0)
         lay.setSpacing(8)
         head = QHBoxLayout()
+        head.setSpacing(10)
+        self.hist_btn = icon_button("chat", "Show or hide your conversations")
+        self.hist_btn.setCheckable(True)
+        self.hist_btn.toggled.connect(lambda on: self._toggle_panel("companion_history", self.history_panel, on))
+        head.addWidget(self.hist_btn)
+        self.presence = QHBoxLayout()
+        self.presence.setSpacing(10)
+        head.addLayout(self.presence)
+        tcol = QVBoxLayout()
+        tcol.setSpacing(0)
         self.conv_title = label("", "h2", wrap=False)
-        head.addWidget(self.conv_title, 1)
+        tcol.addWidget(self.conv_title)
+        self.state_line = label("", "faint", wrap=False)
+        tcol.addWidget(self.state_line)
+        head.addLayout(tcol, 1)
         self.mission_pill = label("", "pill", wrap=False)
         self.mission_pill.setVisible(False)
         head.addWidget(self.mission_pill)
         head.addWidget(icon_button("edit", "Rename this conversation", lambda: self.rename_conversation(self.conv["id"])))
         head.addWidget(icon_button("copy", "Copy the whole conversation", self._copy_all))
+        head.addWidget(icon_button("plus", "New conversation (Ctrl+N)", self.new_conversation))
+        self.ctx_btn = icon_button("reflection", "Show or hide context: provider, voice, what is sent")
+        self.ctx_btn.setCheckable(True)
+        self.ctx_btn.toggled.connect(lambda on: self._toggle_panel("companion_context", self.context_panel, on))
+        head.addWidget(self.ctx_btn)
         lay.addLayout(head)
         frame = QFrame()
-        frame.setObjectName("card")
-        fl = QVBoxLayout(frame)
-        fl.setContentsMargins(6, 6, 6, 6)
+        fl = QHBoxLayout(frame)
+        fl.setContentsMargins(0, 0, 0, 0)
         self.view = QTextBrowser()
         self.view.setObjectName("conversation")
         self.view.setOpenLinks(False)
         self.view.anchorClicked.connect(self._link)
         self.view.setAccessibleName("Conversation")
-        fl.addWidget(self.view)
+        self.view.setMaximumWidth(880)
+        fl.addStretch(1)
+        fl.addWidget(self.view, 20)
+        fl.addStretch(1)
         lay.addWidget(frame, 1)
         self.card_slot = QVBoxLayout()
         lay.addLayout(self.card_slot)
 
         box = QFrame()
         box.setObjectName("composerBox")
+        box.setMaximumWidth(880)
         bl = QVBoxLayout(box)
         bl.setContentsMargins(12, 8, 10, 8)
         bl.setSpacing(4)
@@ -334,7 +382,11 @@ class CompanionPage(Page):
         self.send_btn.clicked.connect(self.send)
         row.addWidget(self.send_btn)
         bl.addLayout(row)
-        lay.addWidget(box)
+        crow = QHBoxLayout()
+        crow.addStretch(1)
+        crow.addWidget(box, 20)
+        crow.addStretch(1)
+        lay.addLayout(crow)
         return w
 
     def _presence_panel(self) -> QWidget:
@@ -351,18 +403,19 @@ class CompanionPage(Page):
                 from ..solar import SolarAvatar
 
                 self.orb = SolarAvatar()
-                self.orb.setMinimumSize(230, 230)
-                lay.addWidget(self.orb, 0, Qt.AlignmentFlag.AlignHCenter)
+                self.orb.setFixedSize(64, 64)
+                self.presence.addWidget(self.orb)
             except Exception:
                 self.orb = None
         if self.orb is None:
             from ..sun import SolarGlyph
 
-            self.glyph = SolarGlyph(220)
-            lay.addWidget(self.glyph, 0, Qt.AlignmentFlag.AlignHCenter)
-            lay.addWidget(label("Painted sun: OpenGL 3.3 is not available here, so the shader sun is replaced by this lighter one.", "faint"))
+            self.glyph = SolarGlyph(64)
+            self.glyph.setFixedSize(64, 64)
+            self.glyph.setToolTip("Painted sun: OpenGL 3.3 is not available here.")
+            self.presence.addWidget(self.glyph)
+        lay.addWidget(label("CONTEXT", "eyebrow"))
         self.state_lbl = label("Idle", wrap=False)
-        self.state_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         lay.addWidget(self.state_lbl)
         self.route_lbl = label("", "faint")
         lay.addWidget(self.route_lbl)
@@ -372,6 +425,10 @@ class CompanionPage(Page):
         lay.addWidget(self.context_lbl)
         lay.addStretch(1)
         return w
+
+    def _toggle_panel(self, key: str, panel, on: bool) -> None:
+        panel.setVisible(on)
+        self.settings.set(key, bool(on))
 
     # ----- conversation list -----
     def _reload_list(self) -> None:
@@ -497,6 +554,9 @@ class CompanionPage(Page):
             self.glyph.set_state("WORKING" if state == "EXECUTING" else state)
         self.state_lbl.setText(text)
         self.state_lbl.setStyleSheet(f"color: {colour}; font-weight: 600;")
+        self.state_line.setText(f"● {text}")
+        self.state_line.setStyleSheet(f"color: {colour};")
+        self.state_line.setAccessibleName(f"Prometheus is {text.lower()}")
         self.state_changed.emit(state)
 
     def set_reduced_motion(self, reduced: bool) -> None:
@@ -533,6 +593,8 @@ class CompanionPage(Page):
 
     def _actions(self, idx: int, last: bool) -> str:
         links = f' &nbsp; <a href="copymsg:{idx}" style="color:{T.TEXT_FAINT}; font-size:8pt;">Copy</a>'
+        if list_items(self.raw.get(idx, "")):
+            links += f' &nbsp; <a href="steps:{idx}" style="color:{T.TEXT_FAINT}; font-size:8pt;">Use as task steps</a>'
         if last:
             links += f' &nbsp; <a href="regenerate:" style="color:{T.TEXT_FAINT}; font-size:8pt;">Regenerate</a>'
         return links
@@ -570,9 +632,20 @@ class CompanionPage(Page):
             else:
                 self.add("Prometheus", m["content"], T.ACCENT, markdown=True)
         if not shown:
-            self.add("Prometheus", "Ready. Ask me to research, calculate, plan, build or remember something.", T.ACCENT)
+            self._welcome()
         self._mark_last()
         self.refresh()
+
+    def _welcome(self) -> None:
+        """An empty conversation: an invitation and starters (they fill the box; nothing is sent)."""
+        chips = " &nbsp; ".join(f'<a href="starter:{i}" style="color:{T.HIGHLIGHT}; text-decoration:none;">{t}</a>' for i, (t, _) in enumerate(STARTERS))
+        self.entries.append(
+            f'<div style="margin:60px 0 0 0; text-align:center;"><span style="font-size:20pt; color:{T.ACCENT};">☀</span>'
+            f'<p style="font-size:15pt; color:{T.TEXT}; margin:8px 0 4px 0;">What shall we work on?</p>'
+            f'<p style="color:{T.TEXT_SECONDARY};">I can research, calculate, plan, build in your workspace and remember what matters.<br/>Anything with real-world effects asks you first.</p>'
+            f'<p style="margin-top:14px;">{chips}</p></div>'
+        )
+        self._render()
 
     def _mark_last(self) -> None:
         """Give the newest Prometheus reply a Regenerate link (only when it answers the last message)."""
@@ -595,12 +668,33 @@ class CompanionPage(Page):
                 self.state_lbl.setText("Message copied")
             except (KeyError, ValueError):
                 pass
+        elif href.startswith("starter:"):
+            try:
+                self.input.setText(STARTERS[int(href.split(":", 1)[1])][1])
+                self.input.setFocus()
+            except (IndexError, ValueError):
+                pass
+        elif href.startswith("steps:"):
+            self._use_as_steps(int(href.split(":", 1)[1]))
         elif href == "regenerate:":
             self.regenerate()
         elif href == "retry:":
             self.regenerate()
         elif href.startswith(("http://", "https://")):
             QDesktopServices.openUrl(url)
+
+    def _use_as_steps(self, idx: int) -> None:
+        """Make the list in a reply the current task's steps (through update_task_state, audited)."""
+        from ..feedback import notify
+
+        items = list_items(self.raw.get(idx, ""))
+        if not items:
+            return
+        res = self.core.dispatch("update_task_state", steps=items, status="in_progress")
+        if res.get("status") == "success":
+            notify(self, f"{len(items)} steps saved as the current task", "ok", "Open Reminders & tasks to tick them off.")
+        else:
+            notify(self, "The steps were not saved", "err", str(res.get("message") or res.get("reason") or res))
 
     def _copy_all(self) -> None:
         lines = [f"{'You' if m['role'] == 'user' else 'Prometheus'}: {m['content']}" for m in self.visible(self.messages)]
@@ -838,7 +932,7 @@ class CompanionPage(Page):
             self.messages = self.conv["messages"]
             self._reset_view()
         self.g._save_session(self.messages)
-        self.add("Prometheus", "New conversation. What shall we work on?", T.ACCENT)
+        self._welcome()
         self._reload_list()
         self.refresh()
         self.input.setFocus()
