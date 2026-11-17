@@ -39,6 +39,13 @@ statistics 20. Eyebrows (navigation group above each page title) in gold caps wi
 `danger`, `link`, checked state · `NavBar` (grouped, collapsible, tooltips) · `CommandPalette` ·
 notification bell · `ApprovalCard` · `Composer` (multiline) · `MemoryDialog` · `Onboarding`.
 
+## Experience components (experience-first pass)
+Rail (`QFrame#rail`, `QListWidget#rail`) for section-local navigation · inspector (`QFrame#inspector`) for
+the selected item · readable rows (`QListWidget#rows`) instead of tables · `homeRow` items with an icon,
+two lines and one action · chips (`QPushButton#chip`) for segmented choices · `viewport` for the arm ·
+toasts and the activity drawer (`app/ui/feedback.py`) · page header variants (`full`, `compact`, `none`) so
+screens compose their own top area. Reusable pieces stay generic; screens decide their composition.
+
 ## Icons
 33 original line icons (24 × 24, 1.75 stroke, round caps) rendered from SVG at any size and tinted per
 state. No icon font or third-party icon set is bundled.

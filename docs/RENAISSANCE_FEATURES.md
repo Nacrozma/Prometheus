@@ -1,5 +1,10 @@
 # Prometheus 2.0: features
 
+> The experience-first pass changed how each screen works; per-screen interaction models are in
+> `RENAISSANCE_UX_SPECIFICATIONS.md`. New in that pass and tested: Forge mission stages from recorded
+> events, Obsidian reader with backlinks, Engineering project intelligence (summary, tests found, code
+> search), planner with a step checklist, reply lists saved as task steps, toasts and the activity centre.
+
 Status words: **Implemented and tested** (automated tests or the window smoke test exercise it),
 **Implemented** (in the real app and in the screenshots, no automated assertion), **Not implemented**.
 Screenshots: `screenshots/renaissance/` (real window, Linux, Xvfb with software OpenGL, sample data made
