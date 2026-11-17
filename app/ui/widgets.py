@@ -6,7 +6,7 @@ import traceback
 from typing import Any, Callable, Optional
 
 from PyQt6.QtCore import QObject, QRunnable, Qt, QThreadPool, pyqtSignal
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 
 def label(text: str = "", name: str = "", wrap: bool = True, selectable: bool = False) -> QLabel:
@@ -22,42 +22,152 @@ def label(text: str = "", name: str = "", wrap: bool = True, selectable: bool = 
 
 
 class Card(QFrame):
-    def __init__(self, title: str = "", parent: Optional[QWidget] = None):
+    """A surface with an optional title row. `interactive=True` lights its border on hover."""
+
+    def __init__(self, title: str = "", parent: Optional[QWidget] = None, interactive: bool = False, icon_name: str = ""):
         super().__init__(parent)
-        self.setObjectName("card")
+        self.setObjectName("cardInteractive" if interactive else "card")
         self.body = QVBoxLayout(self)
-        self.body.setContentsMargins(16, 14, 16, 14)
-        self.body.setSpacing(8)
+        self.body.setContentsMargins(18, 16, 18, 16)
+        self.body.setSpacing(10)
+        self.title_row = QHBoxLayout()
+        self.title_row.setSpacing(8)
         if title:
-            t = label(title)
-            t.setStyleSheet("font-weight: 600; font-size: 11pt;")
-            self.body.addWidget(t)
+            if icon_name:
+                from . import icons, theme as T
+
+                ic = QLabel()
+                ic.setPixmap(icons.pixmap(icon_name, T.ACCENT, 16))
+                self.title_row.addWidget(ic)
+            t = label(title, "h2")
+            self.title_row.addWidget(t, 1)
+            self.body.addLayout(self.title_row)
+
+
+def pill(text: str, tone: str = "neutral") -> QLabel:
+    """A small status label. Tones: ok, warn, err, info, accent, neutral."""
+    from . import theme as T
+
+    lab = label(text, "pill", wrap=False)
+    lab.setStyleSheet(T.pill_style(tone))
+    lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    lab.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+    return lab
+
+
+def divider() -> QFrame:
+    f = QFrame()
+    f.setObjectName("divider")
+    return f
+
+
+def stat_tile(value: str, caption: str, tone: str = "") -> QFrame:
+    """A number with a caption, for summaries."""
+    from . import theme as T
+
+    card = Card()
+    card.body.setSpacing(2)
+    v = label(value, "stat", wrap=False)
+    if tone:
+        v.setStyleSheet(f"color: {T.TONES.get(tone, T.TEXT)};")
+    card.body.addWidget(v)
+    card.body.addWidget(label(caption, "faint"))
+    card.value_label = v  # type: ignore[attr-defined]
+    return card
+
+
+class EmptyState(QWidget):
+    """What to show when there is nothing yet: an icon, a sentence and an optional action."""
+
+    def __init__(self, icon_name: str, title: str, body: str = "", action_text: str = "", on_action: Optional[Callable[[], None]] = None, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        from PyQt6.QtWidgets import QPushButton
+
+        from . import icons, theme as T
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(24, 28, 24, 28)
+        lay.setSpacing(6)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ic = QLabel()
+        ic.setPixmap(icons.pixmap(icon_name, T.BRONZE, 28))
+        ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(ic)
+        t = label(title, "h2")
+        t.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(t)
+        if body:
+            b = label(body, "sub")
+            b.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            b.setMaximumWidth(460)
+            lay.addWidget(b, 0, Qt.AlignmentFlag.AlignCenter)
+        if action_text and on_action:
+            btn = QPushButton(action_text)
+            btn.clicked.connect(on_action)
+            lay.addWidget(btn, 0, Qt.AlignmentFlag.AlignCenter)
+
+
+def icon_button(icon_name: str, tip: str, on_click: Optional[Callable[[], None]] = None, color: str = "") -> "QToolButton":
+    from PyQt6.QtWidgets import QToolButton
+
+    from . import icons, theme as T
+
+    b = QToolButton()
+    b.setIcon(icons.icon(icon_name, color or T.TEXT_SECONDARY, active=T.ACCENT, disabled=T.TEXT_FAINT))
+    b.setIconSize(icons.ICON_SIZE)
+    b.setToolTip(tip)
+    b.setAccessibleName(tip)
+    b.setCursor(Qt.CursorShape.PointingHandCursor)
+    if on_click:
+        b.clicked.connect(lambda _=False: on_click())
+    return b
 
 
 class Page(QWidget):
-    """A navigable section: title, subtitle, then content. `refresh()` reloads its data."""
+    """A navigable section: eyebrow (its group), title, subtitle, actions, then content.
+    `refresh()` reloads its data. Set `scroll = True` for pages taller than the window."""
 
     title = ""
     subtitle = ""
+    eyebrow = ""
+    scroll = False
 
     def __init__(self, core, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.core = core
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(28, 22, 28, 18)
-        outer.setSpacing(12)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(32, 24, 32, 20)
+        lay.setSpacing(14)
         head = QHBoxLayout()
         col = QVBoxLayout()
+        col.setSpacing(3)
+        if self.eyebrow:
+            col.addWidget(label(self.eyebrow.upper(), "eyebrow"))
         col.addWidget(label(self.title, "h1"))
         if self.subtitle:
             col.addWidget(label(self.subtitle, "sub"))
         head.addLayout(col, 1)
         self.actions = QHBoxLayout()
+        self.actions.setSpacing(8)
         head.addLayout(self.actions)
-        outer.addLayout(head)
+        lay.addLayout(head)
         self.content = QVBoxLayout()
-        self.content.setSpacing(12)
-        outer.addLayout(self.content, 1)
+        self.content.setSpacing(14)
+        lay.addLayout(self.content, 1)
+        if self.scroll:
+            from PyQt6.QtWidgets import QScrollArea
+
+            sa = QScrollArea()
+            sa.setWidgetResizable(True)
+            sa.setFrameShape(QFrame.Shape.NoFrame)
+            sa.setWidget(inner)
+            outer.addWidget(sa)
+        else:
+            outer.addWidget(inner)
 
     def refresh(self) -> None:  # pages override
         pass

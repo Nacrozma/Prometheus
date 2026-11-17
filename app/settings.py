@@ -25,6 +25,10 @@ DEFAULTS: Dict[str, Any] = {
     "auto_approve": False,
     "global_shortcut": "",
     "window_geometry": [],
+    "nav_collapsed": False,
+    "last_section": "Home",
+    #: Home sections the owner chose to hide (Customize on Home).
+    "home_hidden": [],
     #: A folder to import data from at the next start (before the core loads its state).
     "pending_import": "",
 }

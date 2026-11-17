@@ -521,6 +521,21 @@ class MemoryGraph:
             self._save()
             return True
 
+    def confirm(self, fact_id: str) -> bool:
+        """The owner confirmed this fact is right (kept as provenance; the source is not rewritten)."""
+        with self._lock:
+            f = self.facts.get(fact_id)
+            if not f or f["status"] != "active":
+                return False
+            f["confirmed"], f["updated"] = True, self._iso()
+            self._save()
+            return True
+
+    def get_fact(self, fact_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            f = self.facts.get(fact_id)
+            return dict(f) if f else None
+
     def import_legacy_facts(self, facts: Iterable[str]) -> int:
         """One-time import of the old flat memory list. Idempotent."""
         added = 0

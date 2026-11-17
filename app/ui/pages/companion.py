@@ -1,37 +1,86 @@
-"""Companion: the conversation, with the orb beside it.
+"""Companion: conversations with Prometheus, with the living sun beside them.
 
 Reuses the HUD's real pieces instead of re-implementing them: `PrometheusWorker` (streaming, the
-tool loop, the conscience check, fallbacks), the safe Markdown renderer, session storage, the
-speech pipeline and the OpenGL orb. Tool approvals are shown inline as cards with the exact tool
-and arguments as plain text; the worker blocks until the operator answers.
+tool loop, the conscience check, fallbacks), the safe Markdown renderer, the speech pipeline and the
+OpenGL sun. Conversations are kept in `ConversationStore` (many conversations: search, rename,
+delete). Tool approvals are shown inline as cards with the exact tool and arguments as plain text;
+the worker blocks until the operator answers. Deny is the default.
 """
 
 from __future__ import annotations
 
 import json
 import time
-from typing import List, Optional
+from typing import Dict, List, Optional
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
-from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLineEdit, QPlainTextEdit, QPushButton, QTextBrowser, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QHBoxLayout,
+    QInputDialog,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMenu,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QSplitter,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
 
+from .. import icons
 from .. import theme as T
-from ..widgets import Page, label
+from ..widgets import Page, icon_button, label
 
-# Semantic states the orb shows, mapped onto the shader's four render modes (0 idle, 1 thinking,
-# 2 speaking, 3 adapting) plus a labelled colour. The mapping is the only thing that is "made up":
-# every state is set by a real event.
+# Semantic states, each set by a real event: (shader mode for older callers, text, colour).
 ORB_STATES = {
-    "IDLE": (0, "Idle", T.TEXT_DIM),
-    "LISTENING": (2, "Listening", T.INFO),
-    "THINKING": (1, "Thinking", T.GOLD),
-    "EXECUTING": (1, "Running a tool", T.AMBER),
-    "SPEAKING": (2, "Speaking", T.GOLD),
+    "IDLE": (0, "Idle", T.TEXT_SECONDARY),
+    "LISTENING": (2, "Listening", T.HIGHLIGHT),
+    "THINKING": (1, "Thinking", T.ACCENT),
+    "WORKING": (1, "Running a tool", T.SECONDARY_ACCENT),
+    "RESEARCHING": (1, "Researching", T.HIGHLIGHT),
+    "BUILDING": (1, "Building", T.SECONDARY_ACCENT),
+    "EXECUTING": (1, "Running a tool", T.SECONDARY_ACCENT),
+    "SPEAKING": (2, "Speaking", T.ACCENT),
     "SUCCESS": (0, "Done", T.OK),
     "WARNING": (0, "Needs you", T.WARN),
     "ERROR": (0, "Something went wrong", T.ERR),
-    "ADAPTING": (3, "Adapting", T.AMBER),
+    "ADAPTING": (3, "Adapting", T.SECONDARY_ACCENT),
+    "OFFLINE": (0, "No provider", T.TEXT_FAINT),
+}
+
+#: Which avatar state a running tool shows.
+BUILD_TOOLS = {"write_file", "edit_file", "run_code_forge", "synthesize_dynamic_tool", "apply_pending_patch", "sculpt_workspace", "propose_code_change", "run_skill"}
+RESEARCH_TOOLS = {"web_search", "recall_memory", "memory_graph_view", "read_file", "read_source_code", "synthetic_council", "usage_history"}
+
+
+def tool_state(tool: str) -> str:
+    return "BUILDING" if tool in BUILD_TOOLS else "RESEARCHING" if tool in RESEARCH_TOOLS else "WORKING"
+
+
+def calm_status(text: str) -> str:
+    """The worker's HUD-style status lines, said plainly."""
+    t = (text or "").strip()
+    if t.startswith("PROMETHEUS SYNTHESIZING"):
+        return "Thinking…"
+    if t.startswith("ADAPTING SYSTEM LOGIC:"):
+        return f"Running {t.split(':', 1)[1].strip()}…"
+    if t.startswith("CORE ERROR:"):
+        return "Error: " + t.split(":", 1)[1].strip()
+    if t.startswith("STOPPED BY OPERATOR"):
+        return "Stopped."
+    return t[:1] + t[1:].lower() if t.isupper() else t
+
+
+MD_THEME = {
+    "text": T.TEXT, "dim": T.TEXT_FAINT, "amber": T.ACCENT, "cyan": T.HIGHLIGHT,
+    "code_bg": "#0B0D13", "code_head": "#141722", "inline_bg": "#1B1F2B", "border": T.BORDER,
+    "kw": "#F2A65A", "str": "#C9D98B", "com": "#6B7080", "num": "#F7D98B", "fn": "#8CC4FF", "deco": "#F4B52C", "builtin": "#E8C9A0",
 }
 
 
@@ -44,16 +93,23 @@ class ApprovalCard(QFrame):
         super().__init__(parent)
         self.setObjectName("approval")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 12, 14, 12)
-        lay.addWidget(label(f"Prometheus wants to run a tool with real-world effects: {tool}", "warn"))
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(8)
+        head = QHBoxLayout()
+        ic = label()
+        ic.setPixmap(icons.pixmap("alert", T.SECONDARY_ACCENT, 18))
+        head.addWidget(ic)
+        head.addWidget(label(f"Prometheus wants to run a tool with real-world effects: {tool}", "warn"), 1)
+        lay.addLayout(head)
         try:
             pretty = json.dumps(json.loads(args_json), indent=2, ensure_ascii=False)
         except Exception:
             pretty = args_json
         box = QPlainTextEdit(pretty)
         box.setReadOnly(True)
-        box.setMaximumHeight(150)
+        box.setMaximumHeight(160)
         box.setAccessibleName("Tool arguments")
+        box.setStyleSheet(f"font-family: {T.FONT_MONO}; font-size: 9pt;")
         lay.addWidget(box)
         row = QHBoxLayout()
         row.addWidget(label("Nothing runs until you choose. The call is checked again by the safety policy and recorded in the audit log.", "faint"), 1)
@@ -68,90 +124,94 @@ class ApprovalCard(QFrame):
         lay.addLayout(row)
 
 
+class Composer(QPlainTextEdit):
+    """Multiline input: Enter sends, Shift+Enter starts a new line."""
+
+    submitted = pyqtSignal()
+
+    def keyPressEvent(self, e) -> None:
+        if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (e.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            self.submitted.emit()
+            return
+        super().keyPressEvent(e)
+
+    def text(self) -> str:  # QLineEdit-compatible helpers used by voice input and tests
+        return self.toPlainText()
+
+    def setText(self, t: str) -> None:
+        self.setPlainText(t)
+        c = self.textCursor()
+        c.movePosition(c.MoveOperation.End)
+        self.setTextCursor(c)
+
+
+def _gl_available() -> bool:
+    """True when an OpenGL 3.3 context can be created here (the shader sun needs one)."""
+    try:
+        from PyQt6.QtGui import QGuiApplication, QOffscreenSurface, QOpenGLContext
+
+        if QGuiApplication.platformName() in ("offscreen", "minimal"):
+            return False
+        ctx = QOpenGLContext()
+        if not ctx.create():
+            return False
+        surf = QOffscreenSurface()
+        surf.create()
+        ok = ctx.makeCurrent(surf) and ctx.format().majorVersion() * 10 + ctx.format().minorVersion() >= 33
+        ctx.doneCurrent()
+        return bool(ok)
+    except Exception:
+        return False
+
+
 class CompanionPage(Page):
     title = "Companion"
-    subtitle = "Talk to Prometheus. Tools with real-world effects always ask first."
+    subtitle = ""
     state_changed = pyqtSignal(str)
     busy_changed = pyqtSignal(bool)
 
-    def __init__(self, core, settings, parent=None):
+    def __init__(self, core, settings, conversations=None, parent=None):
         super().__init__(core, parent)
         import gui_orb as g
         import gui_markdown as md
         from gui_config import AppConfig
 
-        self.g, self.md = g, md
+        from ...services.conversations import ConversationStore, visible
+
+        self.g, self.md, self.visible = g, md, visible
         self.settings = settings
         self.config = AppConfig()
         try:
             g.apply_router_settings(self.config)
         except Exception:
             pass
-        self.messages: List[dict] = g._load_session()
+        self.store = conversations or ConversationStore(core.paths()["data"])
+        self.conv = self.store.open_current(g._load_session())
+        self.messages: List[dict] = self.conv["messages"]
         self.worker = None
         self.card: Optional[ApprovalCard] = None
         self.entries: List[str] = []
+        self.raw: Dict[int, str] = {}
         self.code: dict = {}
         self.streaming: Optional[int] = None
+        self._stream_html = ""
         self.seq = 0
         self.state = "IDLE"
         self.spoke = False
+        self.last_error = ""
+        self._prefix_cache = ("", 0)
 
-        row = QHBoxLayout()
-        row.setSpacing(16)
-        left = QVBoxLayout()
-        self.view = QTextBrowser()
-        self.view.setOpenLinks(False)
-        self.view.anchorClicked.connect(self._link)
-        self.view.setAccessibleName("Conversation")
-        left.addWidget(self.view, 1)
-        self.card_slot = QVBoxLayout()
-        left.addLayout(self.card_slot)
-        inp = QHBoxLayout()
-        self.input = QLineEdit()
-        self.input.setPlaceholderText("Ask Prometheus anything… (Enter to send, / for commands)")
-        self.input.setAccessibleName("Message")
-        self.input.returnPressed.connect(self.send)
-        self.mic = QPushButton("Talk")
-        self.mic.setAccessibleName("Voice input")
-        self.mic.setCheckable(True)
-        self.mic.toggled.connect(self._mic_toggled)
-        self.stop_btn = QPushButton("Stop")
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.clicked.connect(self.stop)
-        self.send_btn = QPushButton("Send")
-        self.send_btn.setObjectName("primary")
-        self.send_btn.clicked.connect(self.send)
-        for w in (self.input,):
-            inp.addWidget(w, 1)
-        for w in (self.mic, self.stop_btn, self.send_btn):
-            inp.addWidget(w)
-        left.addLayout(inp)
-        row.addLayout(left, 3)
-
-        right = QVBoxLayout()
-        right.setSpacing(8)
-        self.orb = None
-        try:
-            self.orb = g.SolarSunWidget()
-            self.orb.setMinimumSize(240, 240)
-            self.orb.setAccessibleName("Prometheus orb")
-            right.addWidget(self.orb, 0, Qt.AlignmentFlag.AlignHCenter)
-        except Exception as e:  # no OpenGL: the page still works
-            right.addWidget(label(f"The orb needs OpenGL 3.3, which is not available here ({type(e).__name__}).", "faint"))
-        self.state_lbl = label("Idle")
-        self.state_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        right.addWidget(self.state_lbl)
-        self.route_lbl = label("", "faint")
-        right.addWidget(self.route_lbl)
-        self.voice_lbl = label("", "faint")
-        right.addWidget(self.voice_lbl)
-        new = QPushButton("New conversation")
-        new.clicked.connect(self.new_conversation)
-        right.addWidget(new)
-        right.addStretch(1)
-        row.addLayout(right, 1)
-        self.content.addLayout(row, 1)
+        split = QSplitter(Qt.Orientation.Horizontal)
+        split.setChildrenCollapsible(False)
+        split.setHandleWidth(1)
+        split.addWidget(self._history_panel())
+        split.addWidget(self._conversation_panel())
+        split.addWidget(self._presence_panel())
+        split.setStretchFactor(0, 0)
+        split.setStretchFactor(1, 1)
+        split.setStretchFactor(2, 0)
+        split.setSizes([240, 760, 280])
+        self.content.addWidget(split, 1)
 
         # Speech: the existing pipeline, used only where its packages are installed.
         self.tts = None
@@ -168,88 +228,347 @@ class CompanionPage(Page):
             self.voice.audio_level_signal.connect(self._audio_level)
             self.voice.finished.connect(lambda: self.mic.setChecked(False))
         self.mic.setEnabled(self.voice is not None)
-        if self.voice is None:
-            self.mic.setToolTip("Voice input needs openai-whisper (pip install openai-whisper). See Settings → Voice.")
+        self.mic.setToolTip("Talk (speech is transcribed on this computer by Whisper; the text is put in the box for you to check)" if self.voice else "Voice input needs openai-whisper (pip install openai-whisper). See Settings → Voice.")
         self.voice_lbl.setText(self._voice_text())
 
         QShortcut(QKeySequence("Escape"), self, activated=self.stop)
         self._idle_timer = QTimer(self)
         self._idle_timer.setSingleShot(True)
         self._idle_timer.timeout.connect(lambda: self.set_state("IDLE"))
+        # streamed text is re-rendered at most ~20 times a second, not on every token
+        self._render_timer = QTimer(self)
+        self._render_timer.setSingleShot(True)
+        self._render_timer.setInterval(50)
+        self._render_timer.timeout.connect(self._render)
         self._render_history()
+        self._reload_list()
         self.refresh()
+
+    # ----- layout -----
+    def _history_panel(self) -> QWidget:
+        w = QWidget()
+        w.setMinimumWidth(200)
+        w.setMaximumWidth(360)
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 10, 0)
+        lay.setSpacing(8)
+        top = QHBoxLayout()
+        top.addWidget(label("Conversations", "h2"), 1)
+        top.addWidget(icon_button("plus", "New conversation (Ctrl+N)", self.new_conversation))
+        lay.addLayout(top)
+        self.conv_search = QLineEdit()
+        self.conv_search.setPlaceholderText("Search conversations")
+        self.conv_search.setAccessibleName("Search conversations")
+        self.conv_search.setClearButtonEnabled(True)
+        self.conv_search.textChanged.connect(lambda _: self._reload_list())
+        lay.addWidget(self.conv_search)
+        self.conv_list = QListWidget()
+        self.conv_list.setObjectName("plain")
+        self.conv_list.setAccessibleName("Conversations")
+        self.conv_list.setWordWrap(False)
+        self.conv_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.conv_list.itemActivated.connect(lambda it: self.open_conversation(it.data(Qt.ItemDataRole.UserRole)))
+        self.conv_list.itemClicked.connect(lambda it: self.open_conversation(it.data(Qt.ItemDataRole.UserRole)))
+        self.conv_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.conv_list.customContextMenuRequested.connect(self._conv_menu)
+        lay.addWidget(self.conv_list, 1)
+        return w
+
+    def _conversation_panel(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(6, 0, 6, 0)
+        lay.setSpacing(8)
+        head = QHBoxLayout()
+        self.conv_title = label("", "h2", wrap=False)
+        head.addWidget(self.conv_title, 1)
+        head.addWidget(icon_button("edit", "Rename this conversation", lambda: self.rename_conversation(self.conv["id"])))
+        head.addWidget(icon_button("copy", "Copy the whole conversation", self._copy_all))
+        lay.addLayout(head)
+        frame = QFrame()
+        frame.setObjectName("card")
+        fl = QVBoxLayout(frame)
+        fl.setContentsMargins(6, 6, 6, 6)
+        self.view = QTextBrowser()
+        self.view.setObjectName("conversation")
+        self.view.setOpenLinks(False)
+        self.view.anchorClicked.connect(self._link)
+        self.view.setAccessibleName("Conversation")
+        fl.addWidget(self.view)
+        lay.addWidget(frame, 1)
+        self.card_slot = QVBoxLayout()
+        lay.addLayout(self.card_slot)
+
+        box = QFrame()
+        box.setObjectName("composerBox")
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(12, 8, 10, 8)
+        bl.setSpacing(4)
+        self.input = Composer()
+        self.input.setObjectName("composer")
+        self.input.setPlaceholderText("Message Prometheus…  (Enter to send · Shift+Enter for a new line · / for commands)")
+        self.input.setAccessibleName("Message")
+        self.input.setFixedHeight(64)
+        self.input.submitted.connect(self.send)
+        bl.addWidget(self.input)
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        self.mic = QPushButton(icons.icon("mic", T.TEXT_SECONDARY, active=T.HIGHLIGHT, disabled=T.TEXT_FAINT), " Talk")
+        self.mic.setObjectName("ghost")
+        self.mic.setAccessibleName("Voice input")
+        self.mic.setCheckable(True)
+        self.mic.toggled.connect(self._mic_toggled)
+        row.addWidget(self.mic)
+        self.composer_route = label("", "faint", wrap=False)
+        row.addWidget(self.composer_route, 1)
+        self.stop_btn = QPushButton(icons.icon("stop", T.TEXT, disabled=T.TEXT_FAINT), " Stop")
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.setToolTip("Stop (Esc)")
+        self.stop_btn.clicked.connect(self.stop)
+        row.addWidget(self.stop_btn)
+        self.send_btn = QPushButton(icons.icon("send", T.ON_ACCENT), " Send")
+        self.send_btn.setObjectName("primary")
+        self.send_btn.clicked.connect(self.send)
+        row.addWidget(self.send_btn)
+        bl.addLayout(row)
+        lay.addWidget(box)
+        return w
+
+    def _presence_panel(self) -> QWidget:
+        w = QWidget()
+        w.setMinimumWidth(230)
+        w.setMaximumWidth(340)
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(10, 0, 0, 0)
+        lay.setSpacing(8)
+        self.orb = None
+        self.glyph = None
+        if _gl_available():
+            try:
+                from ..solar import SolarAvatar
+
+                self.orb = SolarAvatar()
+                self.orb.setMinimumSize(230, 230)
+                lay.addWidget(self.orb, 0, Qt.AlignmentFlag.AlignHCenter)
+            except Exception:
+                self.orb = None
+        if self.orb is None:
+            from ..sun import SolarGlyph
+
+            self.glyph = SolarGlyph(220)
+            lay.addWidget(self.glyph, 0, Qt.AlignmentFlag.AlignHCenter)
+            lay.addWidget(label("Painted sun: OpenGL 3.3 is not available here, so the shader sun is replaced by this lighter one.", "faint"))
+        self.state_lbl = label("Idle", wrap=False)
+        self.state_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        lay.addWidget(self.state_lbl)
+        self.route_lbl = label("", "faint")
+        lay.addWidget(self.route_lbl)
+        self.voice_lbl = label("", "faint")
+        lay.addWidget(self.voice_lbl)
+        self.context_lbl = label("", "faint")
+        lay.addWidget(self.context_lbl)
+        lay.addStretch(1)
+        return w
+
+    # ----- conversation list -----
+    def _reload_list(self) -> None:
+        self.conv_list.clear()
+        for c in self.store.list(self.conv_search.text()):
+            if not c["messages"] and c["id"] != self.conv["id"]:
+                continue  # empty conversations are not listed (except the open one)
+            it = QListWidgetItem(f"{c['title']}\n{c['updated'][5:16].replace('T', ' ')} · {c['messages']} messages")
+            it.setData(Qt.ItemDataRole.UserRole, c["id"])
+            it.setToolTip(c["preview"] or c["title"])
+            it.setSizeHint(QSize(0, 50))
+            self.conv_list.addItem(it)
+            if c["id"] == self.conv["id"]:
+                it.setSelected(True)
+                self.conv_list.setCurrentItem(it)
+        if not self.conv_list.count():
+            it = QListWidgetItem("No matches" if self.conv_search.text() else "No conversations yet")
+            it.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.conv_list.addItem(it)
+        self.conv_title.setText(self.conv.get("title") or "New conversation")
+
+    def _conv_menu(self, pos) -> None:
+        it = self.conv_list.itemAt(pos)
+        cid = it.data(Qt.ItemDataRole.UserRole) if it else None
+        if not cid:
+            return
+        m = QMenu(self)
+        m.addAction(icons.icon("chat", T.TEXT_SECONDARY), "Open", lambda: self.open_conversation(cid))
+        m.addAction(icons.icon("edit", T.TEXT_SECONDARY), "Rename…", lambda: self.rename_conversation(cid))
+        m.addSeparator()
+        m.addAction(icons.icon("trash", T.ERR), "Delete…", lambda: self.delete_conversation(cid))
+        m.exec(self.conv_list.mapToGlobal(pos))
+
+    def open_conversation(self, cid: str) -> None:
+        if not cid or cid == self.conv.get("id"):
+            return
+        if self.busy():
+            self.add("System", "Stop the current request before switching conversations.", T.WARN)
+            return
+        c = self.store.get(cid)
+        if c is None:
+            self.add("System", "That conversation no longer exists.", T.WARN)
+            self._reload_list()
+            return
+        self._save()
+        self.conv, self.messages = c, c["messages"]
+        self.store.set_current(cid)
+        self._reset_view()
+        self._render_history()
+        self._reload_list()
+
+    def rename_conversation(self, cid: str) -> None:
+        c = self.store.get(cid)
+        if c is None:
+            return
+        title, ok = QInputDialog.getText(self, "Rename conversation", "Title:", text=c.get("title", ""))
+        if ok and title.strip():
+            self.store.rename(cid, title)
+            if cid == self.conv["id"]:
+                self.conv = self.store.get(cid) or self.conv
+                self.messages = self.conv["messages"]
+            self._reload_list()
+
+    def delete_conversation(self, cid: str, confirm: bool = True) -> bool:
+        c = self.store.get(cid)
+        if c is None:
+            return False
+        if cid == self.conv["id"] and self.busy():
+            self.add("System", "Stop the current request before deleting this conversation.", T.WARN)
+            return False
+        if confirm:
+            ans = QMessageBox.question(self, "Delete conversation", f"Delete “{c.get('title', '')}”? Its messages are removed from this computer. This cannot be undone.", QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Cancel)
+            if ans != QMessageBox.StandardButton.Yes:
+                return False
+        self.store.delete(cid)
+        if cid == self.conv["id"]:
+            rest = self.store.list()
+            self.conv = self.store.get(rest[0]["id"]) if rest else self.store.create([])
+            self.store.set_current(self.conv["id"])
+            self.messages = self.conv["messages"]
+            self._reset_view()
+            self._render_history()
+        self._reload_list()
+        return True
 
     # ----- display -----
     def _voice_text(self) -> str:
-        parts = ["Voice input: " + ("ready" if self.voice else "not installed"), "Speech: " + ("ready" if self.tts else "not available")]
-        return " · ".join(parts)
+        speech = "Speech: " + ("on (edge-tts, sends the reply text to Microsoft's speech service)" if self.tts and self.config.get("speech_enabled", True) else "ready, muted" if self.tts else "not available")
+        return ("Voice input: on this computer (Whisper)" if self.voice else "Voice input: not installed") + "\n" + speech
 
     def refresh(self) -> None:
         r = self.core.router
         used = r.last_used_provider or r.provider
         model = r.last_used_model or r.default_model
-        self.route_lbl.setText(f"Provider: {used} · {model}" if used and used != "none" else "No provider configured: add a key in Settings → Providers.")
+        if r.configured and used and used != "none":
+            self.route_lbl.setText(f"Provider: {used} · {model}")
+            self.composer_route.setText(f"{used} · {model}")
+            if self.state == "OFFLINE":
+                self.set_state("IDLE")
+        else:
+            self.route_lbl.setText("No provider configured: add a key in Settings → Providers, or start Ollama.")
+            self.composer_route.setText("No provider")
+            if not self.busy():
+                self.set_state("OFFLINE")
+        shown = self.visible(self.messages)
+        self.context_lbl.setText(f"This conversation: {len(shown)} messages ({len(self.messages)} with tool results). The most recent {self.g.MAX_SESSION_MESSAGES} are kept and sent; memory facts relevant to each message are added by the core.")
 
     def set_state(self, state: str) -> None:
-        mode, text, colour = ORB_STATES.get(state, ORB_STATES["IDLE"])
+        _, text, colour = ORB_STATES.get(state, ORB_STATES["IDLE"])
         self.state = state
         if self.orb is not None:
-            self.orb.state = mode
-            self.orb.update()
+            self.orb.set_semantic("WORKING" if state == "EXECUTING" else state)
+        if self.glyph is not None:
+            self.glyph.set_state("WORKING" if state == "EXECUTING" else state)
         self.state_lbl.setText(text)
         self.state_lbl.setStyleSheet(f"color: {colour}; font-weight: 600;")
         self.state_changed.emit(state)
 
     def set_reduced_motion(self, reduced: bool) -> None:
-        """Reduced motion: a still orb that is redrawn when the state changes."""
-        if self.orb is None:
-            return
-        if reduced:
-            self.orb.timer.stop()
-            self.orb.update()
-        elif not self.orb.timer.isActive():
-            self.orb._last_tick = time.perf_counter()
-            self.orb.timer.start(16)
+        """Reduced motion: a still sun that is redrawn when the state changes."""
+        if self.orb is not None:
+            self.orb.set_reduced_motion(reduced)
+        if self.glyph is not None:
+            self.glyph.set_reduced_motion(reduced)
 
     def pause_animation(self, paused: bool) -> None:
-        """Stop drawing the orb while the window is hidden or minimised."""
-        if self.orb is None:
-            return
-        if paused:
-            self.orb.timer.stop()
-        elif not self.settings.get("reduced_motion"):
-            self.orb._last_tick = time.perf_counter()
-            self.orb.timer.start(16)
+        """Stop drawing the sun while the window is hidden or minimised."""
+        if self.orb is not None:
+            self.orb.set_paused(paused)
 
-    def _entry(self, who: str, body_html: str, colour: str) -> str:
+    def set_window_active(self, active: bool) -> None:
+        if self.orb is not None:
+            self.orb.set_window_active(active)
+
+    def _entry(self, who: str, body_html: str, colour: str, actions: str = "") -> str:
         stamp = time.strftime("%H:%M")
-        return f'<div style="margin-bottom:10px;"><span style="color:{T.TEXT_FAINT}; font-size:8pt;">{stamp}</span> <b style="color:{colour};">{who}</b><div style="margin:2px 0 0 2px;">{body_html}</div></div>'
+        if who == "You":
+            return (f'<table width="100%" cellspacing="0" cellpadding="0" style="margin:14px 0 4px 0;"><tr><td width="12%"></td>'
+                    f'<td bgcolor="{T.SURFACE_ELEVATED}" style="padding:10px 14px;"><span style="color:{T.TEXT_FAINT}; font-size:8pt;">You · {stamp}</span>'
+                    f'<div style="margin-top:3px;">{body_html}</div></td></tr></table>')
+        if who in ("Tool", "System", "Reminder"):
+            return f'<div style="margin:6px 0 6px 2px; color:{colour}; font-size:9pt;">{body_html}</div>'
+        return (f'<div style="margin:16px 0 4px 0;"><span style="color:{colour}; font-weight:600;">☀ {who}</span>'
+                f' <span style="color:{T.TEXT_FAINT}; font-size:8pt;">{stamp}</span>{actions}'
+                f'<div style="margin:4px 0 0 0;">{body_html}</div></div>')
 
     def _md(self, text: str) -> str:
         self.seq += 1
-        return self.md.render_markdown(text, self.g.MD_THEME, self.code, id_prefix=f"m{self.seq}")
+        return self.md.render_markdown(text, MD_THEME, self.code, id_prefix=f"m{self.seq}")
+
+    def _actions(self, idx: int, last: bool) -> str:
+        links = f' &nbsp; <a href="copymsg:{idx}" style="color:{T.TEXT_FAINT}; font-size:8pt;">Copy</a>'
+        if last:
+            links += f' &nbsp; <a href="regenerate:" style="color:{T.TEXT_FAINT}; font-size:8pt;">Regenerate</a>'
+        return links
 
     def add(self, who: str, text: str, colour: str = T.TEXT, markdown: bool = False) -> None:
         body = self._md(text) if markdown else self.md.esc(text).replace("\n", "<br/>")
-        self.entries.append(self._entry(who, body, colour))
+        if who == "Tool":
+            body = f'<span style="font-family:Consolas,monospace;">⚙ {body}</span>'
+        idx = len(self.entries)
+        if who == "Prometheus":
+            self.raw[idx] = text
+        self.entries.append(self._entry(who, body, colour, self._actions(idx, False) if who == "Prometheus" else ""))
         self._render()
 
     def _render(self) -> None:
         bar = self.view.verticalScrollBar()
         at_end = bar.value() >= bar.maximum() - 30
-        self.view.setHtml("".join(self.entries[-300:]))
+        visible_entries = self.entries[-300:]
+        self.view.setHtml("".join(visible_entries))
         if at_end:
             bar.setValue(bar.maximum())
 
+    def _reset_view(self) -> None:
+        self.entries.clear()
+        self.raw.clear()
+        self.code.clear()
+        self.streaming = None
+        self.last_error = ""
+
     def _render_history(self) -> None:
-        shown = [m for m in self.messages if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str) and m.get("content").strip()]
-        for m in shown[-40:]:
+        shown = self.visible(self.messages)
+        for m in shown[-60:]:
             if m["role"] == "user":
                 self.add("You", m["content"], T.TEXT)
             else:
-                self.add("Prometheus", m["content"], T.GOLD, markdown=True)
+                self.add("Prometheus", m["content"], T.ACCENT, markdown=True)
         if not shown:
-            self.add("Prometheus", "Ready. Ask me to research, calculate, plan, build or remember something.", T.GOLD)
+            self.add("Prometheus", "Ready. Ask me to research, calculate, plan, build or remember something.", T.ACCENT)
+        self._mark_last()
+        self.refresh()
+
+    def _mark_last(self) -> None:
+        """Give the newest Prometheus reply a Regenerate link (only when it answers the last message)."""
+        last = max((i for i in self.raw), default=None)
+        if last is None or not self.visible(self.messages) or self.visible(self.messages)[-1]["role"] != "assistant":
+            return
+        self.entries[last] = self._entry("Prometheus", self._md(self.raw[last]), T.ACCENT, self._actions(last, True))
+        self._render()
 
     def _link(self, url) -> None:
         href = url.toString()
@@ -258,8 +577,23 @@ class CompanionPage(Page):
             if code is not None:
                 QApplication.clipboard().setText(code)
                 self.state_lbl.setText("Code copied")
+        elif href.startswith("copymsg:"):
+            try:
+                QApplication.clipboard().setText(self.raw[int(href.split(":", 1)[1])])
+                self.state_lbl.setText("Message copied")
+            except (KeyError, ValueError):
+                pass
+        elif href == "regenerate:":
+            self.regenerate()
+        elif href == "retry:":
+            self.regenerate()
         elif href.startswith(("http://", "https://")):
             QDesktopServices.openUrl(url)
+
+    def _copy_all(self) -> None:
+        lines = [f"{'You' if m['role'] == 'user' else 'Prometheus'}: {m['content']}" for m in self.visible(self.messages)]
+        QApplication.clipboard().setText("\n\n".join(lines))
+        self.state_lbl.setText("Conversation copied")
 
     # ----- a turn -----
     def busy(self) -> bool:
@@ -277,13 +611,34 @@ class CompanionPage(Page):
             self.add("You", text)
             self._slash(text)
             return
+        if not self.core.router.configured:
+            self.add("System", "No model provider is configured, so nothing was sent. Add a key in Settings → Providers, or start Ollama.", T.WARN)
+            self.set_state("OFFLINE")
+            return
         self.input.clear()
         self.add("You", text)
         self.messages.append({"role": "user", "content": text})
+        self._save()
+        self._start()
+
+    def regenerate(self) -> None:
+        """Answer the last message again: the reply (and its tool steps) after it are replaced."""
+        if self.busy():
+            return
+        last_user = max((i for i, m in enumerate(self.messages) if m.get("role") == "user"), default=None)
+        if last_user is None:
+            return
+        del self.messages[last_user + 1:]
+        self._reset_view()
+        self._render_history()
+        self._start()
+
+    def _start(self) -> None:
         self.spoke = False
+        self.last_error = ""
         w = self.g.PrometheusWorker(self.core.router, self.messages, auto_approve=self.settings.get("auto_approve"), fallback_models=self.config.get("fallback_models"))
-        w.state_changed.connect(lambda s: self.set_state("THINKING" if s == "THINKING" else s))
-        w.status_updated.connect(lambda t, c: self.state_lbl.setText(t))
+        w.state_changed.connect(self._worker_state)
+        w.status_updated.connect(self._status)
         w.tool_executed.connect(self._tool_done)
         w.text_delta.connect(self._delta)
         w.response_received.connect(self._response)
@@ -297,18 +652,46 @@ class CompanionPage(Page):
         self.set_state("THINKING")
         w.start()
 
+    def _worker_state(self, s: str) -> None:
+        if s == "THINKING":
+            self.set_state("THINKING")
+        elif s == "ADAPTING":
+            self.set_state("WORKING")  # the worker's tool phase; refined per tool in _status
+        elif s == "IDLE" and self.last_error:
+            self.set_state("ERROR")
+
+    def _status(self, text: str, _colour: str = "") -> None:
+        t = (text or "").strip()
+        if t.startswith("ADAPTING SYSTEM LOGIC:"):
+            self.set_state(tool_state(t.split(":", 1)[1].strip()))
+        if t.startswith("CORE ERROR:"):
+            self.last_error = t.split(":", 1)[1].strip()
+            self.add("System", f"Something went wrong: {self.last_error}", T.ERR)
+            self.entries[-1] = self.entries[-1].replace("</div>", f' &nbsp;<a href="retry:" style="color:{T.ACCENT};">Retry</a></div>', 1)
+            self._render()
+            self.set_state("ERROR")
+        elif t.startswith(("RESPONSE HIT THE TOKEN LIMIT", "TOOL LOOP LIMIT")):
+            self.add("System", calm_status(t), T.WARN)
+        self.state_lbl.setText(calm_status(t)[:60] if not t.startswith("CORE ERROR") else "Something went wrong")
+
     def _delta(self, raw: str) -> None:
-        entry = self._entry("Prometheus", self._md(raw), T.GOLD)
+        entry = self._entry("Prometheus", self._md(raw), T.ACCENT)
         if self.streaming is None:
             self.entries.append(entry)
             self.streaming = len(self.entries) - 1
         else:
             self.entries[self.streaming] = entry
-        self._render()
+        if not self._render_timer.isActive():
+            self._render_timer.start()
 
     def _response(self, text: str) -> None:
-        self._delta(text)
+        idx = self.streaming if self.streaming is not None else len(self.entries)
+        if self.streaming is None:
+            self.entries.append("")
+        self.raw[idx] = text
+        self.entries[idx] = self._entry("Prometheus", self._md(text), T.ACCENT, self._actions(idx, False))
         self.streaming = None
+        self._render()
         if self.tts and not self.spoke and text.strip():
             self.tts.speak(self.md.clean_for_speech(text))
             self.set_state("SPEAKING")
@@ -320,13 +703,16 @@ class CompanionPage(Page):
             self.set_state("SPEAKING")
 
     def _tool_done(self, tool: str, args: str, result: str) -> None:
-        self.set_state("EXECUTING")
         try:
             status = json.loads(result).get("status", "")
         except Exception:
             status = ""
-        colour = T.OK if status == "success" else T.WARN if status in ("refused", "denied", "cancelled") else T.ERR if status == "error" else T.TEXT_DIM
-        self.add("Tool", f"{tool} → {status or 'done'}", colour)
+        # a tool's own text goes on its own line; the streamed reply continues below it
+        if self.streaming is not None:
+            self.streaming = None
+        colour = T.OK if status == "success" else T.WARN if status in ("refused", "denied", "cancelled") else T.ERR if status in ("error", "execution_error") else T.TEXT_SECONDARY
+        word = {"success": "done", "refused": "refused", "denied": "denied", "cancelled": "cancelled", "error": "failed", "execution_error": "failed"}.get(status, status or "done")
+        self.add("Tool", f"{tool} — {word}", colour)
 
     def _confirm(self, tool: str, args_json: str) -> None:
         self.set_state("WARNING")
@@ -341,7 +727,7 @@ class CompanionPage(Page):
         if self.worker is not None:
             self.worker.provide_confirmation(approved)
         self.add("System", f"You {'approved' if approved else 'denied'} {tool}.", T.OK if approved else T.ERR)
-        self.set_state("EXECUTING" if approved else "THINKING")
+        self.set_state(tool_state(tool) if approved else "THINKING")
 
     def _clear_card(self) -> None:
         if self.card is not None:
@@ -353,7 +739,7 @@ class CompanionPage(Page):
         if self.tts:
             try:
                 self.tts.set_muted(True)
-                self.tts.set_muted(False)
+                self.tts.set_muted(not self.config.get("speech_enabled", True))
             except Exception:
                 pass
         if self.busy():
@@ -362,34 +748,61 @@ class CompanionPage(Page):
             self.worker.request_stop()
             self.add("System", "Stopping.", T.WARN)
 
+    def _save(self) -> None:
+        self.g.trim_messages(self.messages, self.g.MAX_SESSION_MESSAGES)
+        self.store.save(self.conv)
+        self.g._save_session(self.messages)  # the HUD continues from the same conversation
+
     def _finished(self) -> None:
+        self._render_timer.stop()
+        self.streaming = None
+        self._render()
         self.stop_btn.setEnabled(False)
         self.send_btn.setEnabled(True)
         self._clear_card()
-        self.g.trim_messages(self.messages, self.g.MAX_SESSION_MESSAGES)
-        self.g._save_session(self.messages)
+        self._save()
+        self._mark_last()
+        self._reload_list()
         self.refresh()
         self.busy_changed.emit(False)
-        if self.state not in ("SPEAKING", "ERROR"):
+        if self.state not in ("SPEAKING", "ERROR", "OFFLINE"):
             self.set_state("SUCCESS")
-        self._idle_timer.start(2500 if not (self.tts and self.tts.is_busy) else 6000)
+        if self.state != "ERROR":
+            self._idle_timer.start(2500 if not (self.tts and self.tts.is_busy) else 6000)
 
     def new_conversation(self) -> None:
         if self.busy():
             self.add("System", "Stop the current request before starting a new conversation.", T.WARN)
             return
-        self.messages.clear()
+        self._save()
+        if not self.visible(self.messages):
+            # the open one is still empty: reuse it rather than piling up empty conversations
+            self._reset_view()
+        else:
+            self.conv = self.store.create([])
+            self.messages = self.conv["messages"]
+            self._reset_view()
         self.g._save_session(self.messages)
-        self.entries.clear()
-        self.code.clear()
-        self.add("Prometheus", "New conversation. What shall we work on?", T.GOLD)
+        self.add("Prometheus", "New conversation. What shall we work on?", T.ACCENT)
+        self._reload_list()
+        self.refresh()
+        self.input.setFocus()
 
     def _slash(self, cmd: str) -> None:
         name = cmd.split()[0].lower()
         if name in ("/new", "/clear"):
             self.new_conversation()
         elif name == "/help":
-            self.add("System", "/new — start a new conversation · Esc — stop · Other sections are in the sidebar (Ctrl+K to jump).", T.TEXT_DIM)
+            self.add("System", "/new — start a new conversation · /rename — rename this one · Esc — stop · Ctrl+K — search everything · Shift+Enter — new line", T.TEXT_SECONDARY)
+        elif name == "/rename":
+            title = cmd[len(name):].strip()
+            if title:
+                self.store.rename(self.conv["id"], title)
+                self.conv = self.store.get(self.conv["id"]) or self.conv
+                self.messages = self.conv["messages"]
+                self._reload_list()
+            else:
+                self.rename_conversation(self.conv["id"])
         else:
             self.add("System", f"Unknown command {name}. Try /help.", T.WARN)
 
@@ -416,6 +829,8 @@ class CompanionPage(Page):
     def _audio_level(self, level: float) -> None:
         if self.orb is not None:
             self.orb.set_audio_level(level)
+        if self.glyph is not None:
+            self.glyph.set_audio_level(level)
 
     def shutdown(self) -> None:
         if self.busy():
@@ -424,4 +839,4 @@ class CompanionPage(Page):
         if self.voice is not None:
             self.voice.stop_recording()
             self.voice.wait(1500)
-        self.g._save_session(self.messages)
+        self._save()

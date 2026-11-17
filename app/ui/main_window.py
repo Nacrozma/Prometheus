@@ -1,13 +1,16 @@
-"""The main window: sidebar navigation, the pages, a status bar, the command palette and the tray."""
+"""The main window: grouped navigation (collapsible), a top bar with universal search and
+notifications, the pages, a status bar, the command palette and the tray."""
 
 from __future__ import annotations
 
-from typing import Dict, List
+import time
+from typing import Callable, Dict, List, Optional, Tuple
 
 from PyQt6.QtCore import QEvent, QSize, Qt, QTimer
 from PyQt6.QtGui import QAction, QCloseEvent, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -16,19 +19,24 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMenu,
+    QPushButton,
     QStackedWidget,
     QStatusBar,
     QSystemTrayIcon,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from .. import APP_NAME
+from ..services.conversations import ConversationStore
+from . import icons
 from . import theme as T
 from .pages.arm import ArmPage
 from .pages.companion import CompanionPage
 from .pages.engineering import EngineeringPage
 from .pages.forge import ForgePage
+from .pages.home import HomePage
 from .pages.memory import MemoryPage
 from .pages.obsidian import ObsidianPage
 from .pages.reflection import ReflectionPage
@@ -36,51 +44,220 @@ from .pages.settings import SettingsPage
 from .pages.tasks import TasksPage
 from .pages.trust import TrustPage
 from .pages.workspace import WorkspacePage
-from .widgets import label
+from .widgets import label, run_bg
 
 #: How often due reminders are checked (the core's scheduler marks them due; we deliver them).
 REMINDER_POLL_MS = 15_000
 
+#: The sections, in groups. Names are stable identifiers (settings, tests and the palette use them).
+NAV: List[Tuple[str, List[Tuple[str, str]]]] = [
+    ("Overview", [("Home", "home")]),
+    ("Converse", [("Companion", "chat"), ("Memory", "memory")]),
+    ("Build", [("Engineering", "engineering"), ("Forge", "forge"), ("Workspace", "workspace")]),
+    ("Organise", [("Reminders & tasks", "tasks"), ("Obsidian", "obsidian")]),
+    ("Lab", [("Robot arm (simulation)", "robot"), ("Reflection", "reflection")]),
+    ("System", [("Trust & safety", "shield"), ("Settings", "settings")]),
+]
+SECTION_ICON = {name: ic for _, items in NAV for name, ic in items}
+SECTION_GROUP = {name: g for g, items in NAV for name, _ in items}
+KIND_ICON = {"section": "chevron-right", "command": "bolt", "conversation": "chat", "memory": "memory", "reminder": "clock", "file": "file", "activity": "shield"}
+KIND_LABEL = {"section": "Go to", "command": "Command", "conversation": "Conversation", "memory": "Memory", "reminder": "Reminder", "file": "File", "activity": "Activity"}
+
+
+class Notifications:
+    """What happened while you were elsewhere: reminders, failures, results. Kept for this session."""
+
+    def __init__(self):
+        self.items: List[Dict[str, str]] = []
+        self.unread = 0
+        self.listeners: List[Callable[[], None]] = []
+
+    def add(self, title: str, body: str = "", tone: str = "info") -> None:
+        self.items.insert(0, {"title": title, "body": body, "tone": tone, "time": time.strftime("%H:%M")})
+        del self.items[100:]
+        self.unread += 1
+        for fn in self.listeners:
+            fn()
+
+    def read_all(self) -> None:
+        self.unread = 0
+        for fn in self.listeners:
+            fn()
+
 
 class CommandPalette(QDialog):
-    """Ctrl+K: type to jump to a section or run a command."""
+    """Ctrl+K: go to a section, run a command, or search conversations, memory, reminders, files and
+    activity. Every entry runs real application code."""
 
-    def __init__(self, entries: List[tuple], parent=None):
+    def __init__(self, entries: List[tuple], search_fn: Optional[Callable[[str], list]] = None, open_result: Optional[Callable[[dict], None]] = None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Go to…")
+        self.setWindowTitle("Search and commands")
         self.setModal(True)
-        self.resize(460, 360)
-        self.entries = entries  # (label, callable)
+        self.resize(620, 460)
+        self.entries = entries  # (label, callable, kind)
+        self.search_fn, self.open_result = search_fn, open_result
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 14, 14, 14)
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Type a section or command…")
+        self.search.setPlaceholderText("Search conversations, memory, files, reminders… or type a command")
         self.search.setAccessibleName("Command search")
         self.list = QListWidget()
+        self.list.setObjectName("plain")
+        self.list.setIconSize(QSize(16, 16))
+        self.hint = label("Enter to open · Esc to close", "faint")
         lay.addWidget(self.search)
         lay.addWidget(self.list, 1)
+        lay.addWidget(self.hint)
+        self._found: list = []
+        self._debounce = QTimer(self)
+        self._debounce.setSingleShot(True)
+        self._debounce.setInterval(180)
+        self._debounce.timeout.connect(self._run_search)
         self.search.textChanged.connect(self._filter)
         self.search.returnPressed.connect(self._run_current)
         self.list.itemActivated.connect(lambda _: self._run_current())
         self._filter("")
 
+    def keyPressEvent(self, e) -> None:
+        if e.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up) and self.search.hasFocus():
+            row = self.list.currentRow() + (1 if e.key() == Qt.Key.Key_Down else -1)
+            self.list.setCurrentRow(max(0, min(self.list.count() - 1, row)))
+            return
+        super().keyPressEvent(e)
+
+    def _add(self, kind: str, title: str, detail: str, data) -> None:
+        item = QListWidgetItem(icons.icon(KIND_ICON.get(kind, "bolt"), T.TEXT_SECONDARY), f"{title}" + (f"   —   {detail}" if detail else ""))
+        item.setData(Qt.ItemDataRole.UserRole, data)
+        item.setToolTip(KIND_LABEL.get(kind, kind))
+        self.list.addItem(item)
+
     def _filter(self, text: str) -> None:
         self.list.clear()
         t = text.lower().strip()
-        for name, fn in self.entries:
+        for name, fn, kind in self.entries:
             if not t or t in name.lower():
-                item = QListWidgetItem(name)
-                item.setData(Qt.ItemDataRole.UserRole, fn)
-                self.list.addItem(item)
+                self._add(kind, name, "", ("run", fn))
+        for r in self._found if t else []:
+            self._add(r["kind"], r["title"], f"{KIND_LABEL.get(r['kind'], r['kind'])} · {r['detail']}" if r.get("detail") else KIND_LABEL.get(r["kind"], ""), ("open", r))
         if self.list.count():
             self.list.setCurrentRow(0)
+        if self.search_fn and len(t) >= 2:
+            self._debounce.start()
+        elif not t:
+            self._found = []
+
+    def _run_search(self) -> None:
+        q = self.search.text()
+        self.hint.setText("Searching…")
+
+        def done(results):
+            if self.search.text() != q:
+                return
+            self._found = results or []
+            self.hint.setText(f"{len(self._found)} results in your data · Enter to open · Esc to close" if self._found else "No matches in conversations, memory, reminders, files or activity")
+            self.search.blockSignals(True)
+            self._filter_keep(q)
+            self.search.blockSignals(False)
+
+        run_bg(lambda: self.search_fn(q), done, lambda m: self.hint.setText(f"Search failed: {m.splitlines()[0]}"), owner=self)
+
+    def _filter_keep(self, q: str) -> None:
+        row = self.list.currentRow()
+        self.list.clear()
+        t = q.lower().strip()
+        for name, fn, kind in self.entries:
+            if t in name.lower():
+                self._add(kind, name, "", ("run", fn))
+        for r in self._found:
+            self._add(r["kind"], r["title"], f"{KIND_LABEL.get(r['kind'], r['kind'])} · {r['detail']}" if r.get("detail") else KIND_LABEL.get(r["kind"], ""), ("open", r))
+        if self.list.count():
+            self.list.setCurrentRow(max(0, min(row, self.list.count() - 1)))
 
     def _run_current(self) -> None:
         item = self.list.currentItem()
         if item is None:
             return
-        fn = item.data(Qt.ItemDataRole.UserRole)
+        how, data = item.data(Qt.ItemDataRole.UserRole)
         self.accept()
-        fn()
+        if how == "run":
+            data()
+        elif self.open_result:
+            self.open_result(data)
+
+
+class NavBar(QWidget):
+    """Grouped, collapsible navigation. Each section is a checkable button with an icon and a tooltip."""
+
+    def __init__(self, names: List[str], on_select: Callable[[str], None], collapsed: bool, on_collapse: Callable[[bool], None]):
+        super().__init__()
+        self.setObjectName("sidebar")
+        self.on_select, self.on_collapse = on_select, on_collapse
+        self.buttons: Dict[str, QToolButton] = {}
+        self.group_labels: List[QLabel] = []
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 16, 10, 10)
+        lay.setSpacing(2)
+        top = QHBoxLayout()
+        self.mark = QLabel()
+        self.mark.setPixmap(icons.pixmap("sun", T.ACCENT, 22))
+        self.brand = QLabel(APP_NAME.upper())
+        self.brand.setObjectName("brand")
+        top.addWidget(self.mark)
+        top.addWidget(self.brand, 1)
+        lay.addLayout(top)
+        lay.addSpacing(10)
+        self.group = QButtonGroup(self)
+        self.group.setExclusive(True)
+        for gname, items in NAV:
+            gl = label(gname.upper(), "navGroup", wrap=False)
+            self.group_labels.append(gl)
+            lay.addWidget(gl)
+            for name, ic in items:
+                if name not in names:
+                    continue
+                b = QToolButton()
+                b.setObjectName("navItem")
+                b.setText(name.replace("&", "&&"))  # '&' would otherwise become a keyboard mnemonic
+                b.setIcon(icons.icon(ic, T.TEXT_SECONDARY, active=T.ACCENT))
+                b.setIconSize(QSize(18, 18))
+                b.setCheckable(True)
+                b.setToolTip(name)
+                b.setAccessibleName(name)
+                b.setCursor(Qt.CursorShape.PointingHandCursor)
+                b.setSizePolicy(b.sizePolicy().horizontalPolicy().Expanding, b.sizePolicy().verticalPolicy())
+                b.clicked.connect(lambda _=False, n=name: self.on_select(n))
+                self.group.addButton(b)
+                self.buttons[name] = b
+                lay.addWidget(b)
+        lay.addStretch(1)
+        self.hint = label("Ctrl+K search · Esc stop", "faint", wrap=False)
+        lay.addWidget(self.hint)
+        self.toggle = QToolButton()
+        self.toggle.setObjectName("collapse")
+        self.toggle.setAccessibleName("Collapse navigation")
+        self.toggle.clicked.connect(lambda: self.set_collapsed(not self.collapsed, notify=True))
+        lay.addWidget(self.toggle, 0, Qt.AlignmentFlag.AlignLeft)
+        self.collapsed = False
+        self.set_collapsed(collapsed)
+
+    def set_collapsed(self, collapsed: bool, notify: bool = False) -> None:
+        self.collapsed = collapsed
+        style = Qt.ToolButtonStyle.ToolButtonIconOnly if collapsed else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        for b in self.buttons.values():
+            b.setToolButtonStyle(style)
+        for w in (self.brand, self.hint, *self.group_labels):
+            w.setVisible(not collapsed)
+        self.setFixedWidth(64 if collapsed else 232)
+        self.toggle.setIcon(icons.icon("chevron-right" if collapsed else "chevron-left", T.TEXT_FAINT))
+        self.toggle.setToolTip("Expand navigation" if collapsed else "Collapse navigation")
+        self.toggle.setAccessibleName(self.toggle.toolTip())
+        if notify:
+            self.on_collapse(collapsed)
+
+    def select(self, name: str) -> None:
+        b = self.buttons.get(name)
+        if b is not None and not b.isChecked():
+            b.setChecked(True)
 
 
 class MainWindow(QMainWindow):
@@ -88,13 +265,19 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.core, self.settings, self.creds, self.platform, self.paths = core, settings, creds, platform, paths
         self._quitting = False
+        self.notifications = Notifications()
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(icon)
         self.setMinimumSize(QSize(1040, 680))
-        self.resize(1280, 820)
+        self.resize(1360, 860)
 
-        self.companion = CompanionPage(core, settings)
+        self.conversations = ConversationStore(paths.data_dir)
+        # each page shows its navigation group as an eyebrow above the title
+        for name, cls in (("Home", HomePage), ("Companion", CompanionPage), ("Memory", MemoryPage), ("Engineering", EngineeringPage), ("Forge", ForgePage), ("Workspace", WorkspacePage), ("Reminders & tasks", TasksPage), ("Obsidian", ObsidianPage), ("Robot arm (simulation)", ArmPage), ("Reflection", ReflectionPage), ("Trust & safety", TrustPage), ("Settings", SettingsPage)):
+            cls.eyebrow = SECTION_GROUP[name]
+        self.companion = CompanionPage(core, settings, self.conversations)
         self.pages: Dict[str, QWidget] = {
+            "Home": HomePage(core, settings, self.conversations, self),
             "Companion": self.companion,
             "Memory": MemoryPage(core),
             "Engineering": EngineeringPage(core),
@@ -110,35 +293,27 @@ class MainWindow(QMainWindow):
         self.settings_page: SettingsPage = self.pages["Settings"]  # type: ignore[assignment]
 
         central = QWidget()
+        central.setObjectName("root")
         row = QHBoxLayout(central)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
-        side = QWidget()
-        side.setObjectName("sidebar")
-        side.setFixedWidth(220)
-        sv = QVBoxLayout(side)
-        sv.setContentsMargins(12, 18, 12, 12)
-        brand = QLabel(APP_NAME.upper())
-        brand.setObjectName("brand")
-        sv.addWidget(brand)
-        sv.addWidget(label("Desktop", "faint"))
-        self.nav = QListWidget()
-        self.nav.setObjectName("nav")
-        self.nav.setAccessibleName("Sections")
-        for name in self.pages:
-            self.nav.addItem(name)
-        sv.addWidget(self.nav, 1)
-        sv.addWidget(label("Ctrl+K: go to · Esc: stop", "faint"))
-        row.addWidget(side)
+        self.nav = NavBar(list(self.pages), self.go, bool(settings.get("nav_collapsed")), lambda c: settings.set("nav_collapsed", c))
+        row.addWidget(self.nav)
 
+        main = QWidget()
+        main.setObjectName("workspace")
+        mv = QVBoxLayout(main)
+        mv.setContentsMargins(0, 0, 0, 0)
+        mv.setSpacing(0)
+        mv.addWidget(self._topbar())
         self.stack = QStackedWidget()
         for page in self.pages.values():
             self.stack.addWidget(page)
-        row.addWidget(self.stack, 1)
+        mv.addWidget(self.stack, 1)
+        row.addWidget(main, 1)
         self.setCentralWidget(central)
-        self.nav.currentRowChanged.connect(self._show)
 
-        # status bar: provider, orb state, background activity
+        # status bar: provider, background activity, orb state
         sb = QStatusBar()
         self.setStatusBar(sb)
         self.sb_provider = QLabel()
@@ -161,6 +336,9 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+N"), self, activated=self._new_conversation)
         QShortcut(QKeySequence("Ctrl+,"), self, activated=lambda: self.go("Settings"))
         QShortcut(QKeySequence("Ctrl+Q"), self, activated=self.quit)
+        QShortcut(QKeySequence("Ctrl+B"), self, activated=lambda: self.nav.set_collapsed(not self.nav.collapsed, notify=True))
+        for i, name in enumerate(list(self.pages)[:9]):
+            QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self, activated=lambda n=name: self.go(n))
 
         # tray
         self.tray = None
@@ -190,37 +368,127 @@ class MainWindow(QMainWindow):
         geo = settings.get("window_geometry")
         if isinstance(geo, list) and len(geo) == 4 and all(isinstance(v, int) for v in geo) and geo[2] >= 800 and geo[3] >= 500:
             self.setGeometry(*geo)
-        self.nav.setCurrentRow(0)
+        start = settings.get("last_section") if settings.get("last_section") in self.pages else "Home"
+        self.go(start)
+
+    # ----- top bar -----
+    def _topbar(self) -> QWidget:
+        bar = QWidget()
+        bar.setObjectName("topbar")
+        bar.setFixedHeight(56)
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(24, 10, 18, 10)
+        lay.setSpacing(10)
+        self.crumb = label("", "faint", wrap=False)
+        lay.addWidget(self.crumb)
+        lay.addStretch(1)
+        search = QPushButton(icons.icon("search", T.TEXT_FAINT), "  Search everything…        Ctrl+K")
+        search.setObjectName("searchField")
+        search.setAccessibleName("Search everything")
+        search.setCursor(Qt.CursorShape.PointingHandCursor)
+        search.clicked.connect(self.open_palette)
+        lay.addWidget(search)
+        self.route_pill = label("", "pill", wrap=False)
+        lay.addWidget(self.route_pill)
+        self.auto_pill = label("AUTO-APPROVE ON", "pill", wrap=False)
+        self.auto_pill.setStyleSheet(T.pill_style("err"))
+        self.auto_pill.setToolTip("Tools with real-world effects run without asking. Turn it off in Settings.")
+        lay.addWidget(self.auto_pill)
+        self.bell = QToolButton()
+        self.bell.setIconSize(QSize(18, 18))
+        self.bell.setAccessibleName("Notifications")
+        self.bell.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.bell_menu = QMenu(self.bell)
+        self.bell_menu.aboutToShow.connect(self._fill_bell)
+        self.bell.setMenu(self.bell_menu)
+        lay.addWidget(self.bell)
+        self.notifications.listeners.append(self._bell_badge)
+        self._bell_badge()
+        return bar
+
+    def _bell_badge(self) -> None:
+        n = self.notifications.unread
+        self.bell.setIcon(icons.icon("bell", T.ACCENT if n else T.TEXT_SECONDARY))
+        self.bell.setText(str(n) if n else "")
+        self.bell.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon if n else Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.bell.setToolTip(f"{n} new notifications" if n else "Notifications")
+
+    def _fill_bell(self) -> None:
+        m = self.bell_menu
+        m.clear()
+        if not self.notifications.items:
+            a = m.addAction("Nothing yet. Reminders, failures and finished work appear here.")
+            a.setEnabled(False)
+        for it in self.notifications.items[:20]:
+            a = m.addAction(icons.icon({"ok": "check", "warn": "alert", "err": "alert"}.get(it["tone"], "bell"), T.TONES.get(it["tone"], T.TEXT_SECONDARY)), f"{it['time']}  {it['title']}" + (f" — {it['body'][:80]}" if it["body"] else ""))
+            a.setEnabled(True)
+        if self.notifications.items:
+            m.addSeparator()
+            m.addAction("Clear notifications", lambda: (self.notifications.items.clear(), self.notifications.read_all()))
+        QTimer.singleShot(0, self.notifications.read_all)
 
     # ----- navigation -----
-    def _show(self, row: int) -> None:
-        if row < 0:
+    def go(self, name: str) -> None:
+        if name not in self.pages:
             return
-        self.stack.setCurrentIndex(row)
-        page = self.stack.currentWidget()
+        page = self.pages[name]
+        self.stack.setCurrentWidget(page)
+        self.nav.select(name)
+        self.crumb.setText(f"{SECTION_GROUP.get(name, '')}  /  {name}")
+        self.settings.set("last_section", name)
         try:
             page.refresh()
         except Exception as e:
-            self.statusBar().showMessage(f"Could not refresh {page.title}: {e}", 8000)
+            self.statusBar().showMessage(f"Could not refresh {getattr(page, 'title', name)}: {e}", 8000)
+            self.notifications.add(f"Could not refresh {name}", str(e), "err")
 
-    def go(self, name: str) -> None:
-        names = list(self.pages)
-        if name in names:
-            self.nav.setCurrentRow(names.index(name))
+    def current_section(self) -> str:
+        w = self.stack.currentWidget()
+        return next((n for n, p in self.pages.items() if p is w), "")
 
     def open_palette(self) -> None:
-        entries = [(f"Go to {n}", (lambda n=n: self.go(n))) for n in self.pages]
-        entries += [("New conversation", self._new_conversation), ("Stop current request", self.companion.stop), ("Reconnect providers", self._reconnect), ("Quit Prometheus", self.quit)]
-        CommandPalette(entries, self).exec()
+        entries = [(f"Go to {n}", (lambda n=n: self.go(n)), "section") for n in self.pages]
+        entries += [
+            ("New conversation", self._new_conversation, "command"),
+            ("Stop current request", self.companion.stop, "command"),
+            ("Reconnect providers", self._reconnect, "command"),
+            ("Toggle navigation", lambda: self.nav.set_collapsed(not self.nav.collapsed, notify=True), "command"),
+            ("Quit Prometheus", self.quit, "command"),
+        ]
+        from ..services import search
+
+        ws = self.core.paths().get("workspace", "")
+        CommandPalette(entries, lambda q: search.search(self.core, self.conversations, q, ws), self.open_result, self).exec()
+
+    def open_result(self, r: dict) -> None:
+        kind = r.get("kind")
+        if kind == "conversation":
+            self.go("Companion")
+            self.companion.open_conversation(r["target"])
+        elif kind == "memory":
+            self.go("Memory")
+            page = self.pages["Memory"]
+            if hasattr(page, "show_query"):
+                page.show_query(r["title"][:60])
+        elif kind == "reminder":
+            self.go("Reminders & tasks")
+        elif kind == "file":
+            self.go("Workspace")
+            page = self.pages["Workspace"]
+            if hasattr(page, "reveal"):
+                page.reveal(r["target"])
+        elif kind == "activity":
+            self.go("Trust & safety")
 
     def _new_conversation(self) -> None:
         self.go("Companion")
         self.companion.new_conversation()
 
     def _reconnect(self) -> None:
-        self.core.reload_router()
+        ok = self.core.reload_router()
         self._update_provider()
         self.companion.refresh()
+        self.notifications.add("Providers reconnected" if ok else "No provider could be configured", "", "ok" if ok else "warn")
 
     # ----- status -----
     def _state(self, state: str) -> None:
@@ -234,17 +502,28 @@ class MainWindow(QMainWindow):
 
     def _update_provider(self) -> None:
         r = self.core.router
+        auto = bool(self.settings.get("auto_approve"))
+        self.auto_pill.setVisible(auto)
         if not r.configured:
             self.sb_provider.setText(f"No provider: {r.error}")
+            self.route_pill.setText("No provider")
+            self.route_pill.setStyleSheet(T.pill_style("warn"))
+            self.route_pill.setToolTip("Add a key in Settings → Providers, or start Ollama.")
             return
         used = r.last_used_provider or r.provider
         model = r.last_used_model or r.default_model
-        auto = "  ·  AUTO-APPROVE ON" if self.settings.get("auto_approve") else ""
-        self.sb_provider.setText(f"{used} · {model}{auto}")
+        self.sb_provider.setText(f"{used} · {model}" + ("  ·  AUTO-APPROVE ON" if auto else ""))
+        self.route_pill.setText(f"{used} · {model}")
+        self.route_pill.setStyleSheet(T.pill_style("ok" if r.last_used_provider else "neutral"))
+        self.route_pill.setToolTip("Last provider and model used" if r.last_used_provider else "Configured; not used yet in this session")
 
     # ----- behaviour -----
     def _apply_behaviour(self) -> None:
-        self.companion.set_reduced_motion(bool(self.settings.get("reduced_motion")))
+        reduced = bool(self.settings.get("reduced_motion"))
+        self.companion.set_reduced_motion(reduced)
+        home = self.pages.get("Home")
+        if hasattr(home, "set_reduced_motion"):
+            home.set_reduced_motion(reduced)
         self._update_provider()
 
     def _restart_needed(self) -> None:
@@ -260,6 +539,7 @@ class MainWindow(QMainWindow):
         for job in due:
             text = str(job.get("text") or job.get("task") or "Reminder")
             self.companion.add("Reminder", text, T.AMBER)
+            self.notifications.add("Reminder", text, "accent")
             if self.tray is not None and self.settings.get("show_notifications"):
                 self.tray.showMessage(f"{APP_NAME} reminder", text, QSystemTrayIcon.MessageIcon.Information, 10_000)
 
@@ -272,6 +552,8 @@ class MainWindow(QMainWindow):
     def changeEvent(self, e: QEvent) -> None:
         if e.type() == QEvent.Type.WindowStateChange:
             self.companion.pause_animation(self.isMinimized())
+        elif e.type() == QEvent.Type.ActivationChange:
+            self.companion.set_window_active(self.isActiveWindow())
         super().changeEvent(e)
 
     def hideEvent(self, e) -> None:
