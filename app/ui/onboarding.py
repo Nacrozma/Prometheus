@@ -14,7 +14,7 @@ from .. import APP_NAME
 from ..credentials import KNOWN_KEYS, CredentialError
 from . import theme as T
 from .sun import SolarGlyph
-from .widgets import label, run_bg
+from .widgets import display_path, label, run_bg
 
 
 class Onboarding(QDialog):
@@ -88,7 +88,7 @@ class Onboarding(QDialog):
         save.setEnabled(self.creds.available)
         row.addWidget(save)
         v.addLayout(row)
-        v.addWidget(label("Keys go to your operating system's credential store, never to a settings file." if self.creds.available else f"Secure key storage is unavailable ({self.creds.error}); put keys in a .env file in the data folder instead.", "faint"))
+        v.addWidget(label("Keys go to your operating system's credential store, never to a settings file." if self.creds.available else "Secure key storage is not available on this system, so keys cannot be saved here. Settings → Models & providers explains why and how to enable it; keys you put in a .env file yourself still work.", "faint"))
         v.addWidget(label("Or use Ollama: install it from ollama.com, run “ollama serve” and pull a model (for example “ollama pull llama3.2”). I use it automatically.", "faint"))
         trow = QHBoxLayout()
         self.test_btn = QPushButton("Test the connection")
@@ -102,9 +102,9 @@ class Onboarding(QDialog):
 
     def _workspace(self) -> QWidget:
         w, v = self._page("Where I may work", "My file and shell tools only touch one folder: the workspace. Everything outside it is refused.")
-        v.addWidget(label(f"Workspace now: {self.paths.workspace}", "accent"))
+        v.addWidget(label(f"Workspace now: {display_path(self.paths.workspace)}", "accent"))
         v.addWidget(label("You can choose another folder in Settings → Workspace at any time (it applies after a restart). My own memory, conversations and logs stay in the data folder:", "faint"))
-        v.addWidget(label(self.paths.data_dir, "mono"))
+        v.addWidget(label(display_path(self.paths.data_dir), "mono"))
         v.addWidget(label("Press Ctrl+K anywhere to search conversations, memory, files and reminders, or to jump to a section.", "sub"))
         v.addStretch(1)
         return w

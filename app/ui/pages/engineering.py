@@ -176,11 +176,18 @@ class EngineeringPage(Page):
         self.out.setAccessibleName("Result")
         self.out.setHtml(f"<p style='color:{T.TEXT_FAINT};'>Fill in the inputs and press Calculate. The result appears here, with its formula.</p>")
         sl.addWidget(self.out, 2)
+        arow = QHBoxLayout()
+        self.copy_btn = QPushButton(icons.icon("copy", T.TEXT_SECONDARY), " Copy result")
+        self.copy_btn.setObjectName("ghost")
+        self.copy_btn.setEnabled(False)
+        self.copy_btn.clicked.connect(self._copy)
+        arow.addWidget(self.copy_btn)
         self.explain = QPushButton(icons.icon("chat", T.TEXT_SECONDARY), " Ask Prometheus to check this")
         self.explain.setObjectName("ghost")
         self.explain.setEnabled(False)
         self.explain.clicked.connect(self._ask)
-        sl.addWidget(self.explain)
+        arow.addWidget(self.explain)
+        sl.addLayout(arow)
         sl.addWidget(label("THIS SESSION", "eyebrow"))
         self.history = QListWidget()
         self.history.setObjectName("rail")
@@ -265,11 +272,25 @@ class EngineeringPage(Page):
         self.last = (name, params, res)
         ok = res.get("status") == "success"
         self.explain.setEnabled(ok)
+        self.copy_btn.setEnabled(ok)
         if ok:
             k, v, u = next(_items(res), ("", "", ""))
             self.history.insertItem(0, f"{name.replace('_', ' ')}: {k.replace('_', ' ')} = {_fmt(v)} {u}")
         else:
             notify(self, "Could not calculate", "err", str(res.get("message") or res.get("error") or "")[:160])
+
+    def _copy(self) -> None:
+        from PyQt6.QtWidgets import QApplication
+
+        if not self.last:
+            return
+        name, params, res = self.last
+        lines = [f"{name.replace('_', ' ')}"] + [f"{k.replace('_', ' ')} = {_fmt(v)} {u}".rstrip() for k, v, u in _items(res)]
+        if res.get("formula"):
+            lines.append(f"formula: {res['formula']}")
+        lines.append(f"inputs: {json.dumps(params)}")
+        QApplication.clipboard().setText("\n".join(lines))
+        notify(self, "Result copied", "ok")
 
     def _ask(self) -> None:
         if not self.last:

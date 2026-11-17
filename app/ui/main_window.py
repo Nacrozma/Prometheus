@@ -94,7 +94,7 @@ class CommandPalette(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Search and commands")
         self.setModal(True)
-        self.resize(620, 460)
+        self.resize(680, 520)
         self.entries = entries  # (label, callable, kind)
         self.search_fn, self.open_result = search_fn, open_result
         lay = QVBoxLayout(self)
@@ -121,64 +121,103 @@ class CommandPalette(QDialog):
 
     def keyPressEvent(self, e) -> None:
         if e.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up) and self.search.hasFocus():
-            row = self.list.currentRow() + (1 if e.key() == Qt.Key.Key_Down else -1)
-            self.list.setCurrentRow(max(0, min(self.list.count() - 1, row)))
+            step = 1 if e.key() == Qt.Key.Key_Down else -1
+            row = self.list.currentRow() + step
+            while 0 <= row < self.list.count() and not (self.list.item(row).flags() & Qt.ItemFlag.ItemIsEnabled):
+                row += step
+            if 0 <= row < self.list.count():
+                self.list.setCurrentRow(row)
             return
         super().keyPressEvent(e)
 
-    def _add(self, kind: str, title: str, detail: str, data) -> None:
-        item = QListWidgetItem(icons.icon(KIND_ICON.get(kind, "bolt"), T.TEXT_SECONDARY), f"{title}" + (f"   —   {detail}" if detail else ""))
+    def _add(self, kind: str, title: str, detail: str, data, q: str = "") -> None:
+        import html as _h
+
+        def mark(text: str) -> str:
+            t = _h.escape(text)
+            if q and len(q) >= 2:
+                i = text.lower().find(q.lower())
+                if i >= 0:
+                    t = _h.escape(text[:i]) + f'<b style="color:{T.HIGHLIGHT};">' + _h.escape(text[i:i + len(q)]) + "</b>" + _h.escape(text[i + len(q):])
+            return t
+
+        item = QListWidgetItem(icons.icon(KIND_ICON.get(kind, "bolt"), T.TEXT_SECONDARY), "")
         item.setData(Qt.ItemDataRole.UserRole, data)
-        item.setToolTip(KIND_LABEL.get(kind, kind))
+        item.setToolTip(f"{title} — {detail}" if detail else title)
+        item.setSizeHint(QSize(0, 50 if detail else 32))
         self.list.addItem(item)
+        lab = QLabel(f'<span style="color:{T.TEXT};">{mark(title)}</span>' + (f'<br/><span style="color:{T.TEXT_FAINT}; font-size:8pt;">{mark(detail)}</span>' if detail else ""))
+        lab.setTextFormat(Qt.TextFormat.RichText)
+        lab.setContentsMargins(26, 2, 6, 2)
+        lab.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.list.setItemWidget(item, lab)
+
+    def _header(self, text: str) -> None:
+        h = QListWidgetItem(text.upper())
+        h.setFlags(Qt.ItemFlag.NoItemFlags)
+        f = h.font()
+        f.setPointSizeF(8)
+        f.setBold(True)
+        h.setFont(f)
+        h.setForeground(__import__("PyQt6.QtGui", fromlist=["QColor"]).QColor(T.ACCENT))
+        self.list.addItem(h)
+
+    def _render(self, q: str) -> None:
+        row = self.list.currentRow()
+        self.list.clear()
+        t = q.lower().strip()
+        sections = [e for e in self.entries if e[2] == "section" and (not t or t in e[0].lower())]
+        commands = [e for e in self.entries if e[2] == "command" and (not t or t in e[0].lower())]
+        if sections:
+            self._header("Go to")
+            for name, fn, kind in sections:
+                self._add(kind, name, "", ("run", fn), t)
+        if commands:
+            self._header("Commands")
+            for name, fn, kind in commands:
+                self._add(kind, name, "", ("run", fn), t)
+        if t:
+            for kind in ("conversation", "memory", "reminder", "file", "activity"):
+                found = [r for r in self._found if r["kind"] == kind]
+                if found:
+                    self._header({"conversation": "Conversations", "memory": "Memory", "reminder": "Reminders", "file": "Workspace files", "activity": "Activity"}[kind])
+                    for r in found:
+                        self._add(r["kind"], r["title"], r.get("detail", ""), ("open", r), t)
+        selectable = [i for i in range(self.list.count()) if self.list.item(i).flags() & Qt.ItemFlag.ItemIsEnabled]
+        if selectable:
+            self.list.setCurrentRow(row if row in selectable else selectable[0])
 
     def _filter(self, text: str) -> None:
-        self.list.clear()
-        t = text.lower().strip()
-        for name, fn, kind in self.entries:
-            if not t or t in name.lower():
-                self._add(kind, name, "", ("run", fn))
-        for r in self._found if t else []:
-            self._add(r["kind"], r["title"], f"{KIND_LABEL.get(r['kind'], r['kind'])} · {r['detail']}" if r.get("detail") else KIND_LABEL.get(r["kind"], ""), ("open", r))
-        if self.list.count():
-            self.list.setCurrentRow(0)
-        if self.search_fn and len(t) >= 2:
-            self._debounce.start()
-        elif not t:
+        if not text.strip():
             self._found = []
+        self._render(text)
+        if self.search_fn and len(text.strip()) >= 2:
+            self._debounce.start()
+        else:
+            self.hint.setText("Type to search conversations, memory, reminders, workspace files and activity · Enter opens · Esc closes")
 
     def _run_search(self) -> None:
         q = self.search.text()
-        self.hint.setText("Searching…")
+        self.hint.setText("Searching your data…")
 
         def done(results):
             if self.search.text() != q:
                 return
             self._found = results or []
-            self.hint.setText(f"{len(self._found)} results in your data · Enter to open · Esc to close" if self._found else "No matches in conversations, memory, reminders, files or activity")
-            self.search.blockSignals(True)
-            self._filter_keep(q)
-            self.search.blockSignals(False)
+            n = len(self._found)
+            self.hint.setText(f"{n} result{'s' if n != 1 else ''} in your data · Enter opens · Esc closes" if n else "Nothing in conversations, memory, reminders, workspace files or activity matches. Try fewer or different words.")
+            self._render(q)
 
         run_bg(lambda: self.search_fn(q), done, lambda m: self.hint.setText(f"Search failed: {m.splitlines()[0]}"), owner=self)
-
-    def _filter_keep(self, q: str) -> None:
-        row = self.list.currentRow()
-        self.list.clear()
-        t = q.lower().strip()
-        for name, fn, kind in self.entries:
-            if t in name.lower():
-                self._add(kind, name, "", ("run", fn))
-        for r in self._found:
-            self._add(r["kind"], r["title"], f"{KIND_LABEL.get(r['kind'], r['kind'])} · {r['detail']}" if r.get("detail") else KIND_LABEL.get(r["kind"], ""), ("open", r))
-        if self.list.count():
-            self.list.setCurrentRow(max(0, min(row, self.list.count() - 1)))
 
     def _run_current(self) -> None:
         item = self.list.currentItem()
         if item is None:
             return
-        how, data = item.data(Qt.ItemDataRole.UserRole)
+        payload = item.data(Qt.ItemDataRole.UserRole)
+        if not payload:
+            return
+        how, data = payload
         self.accept()
         if how == "run":
             data()

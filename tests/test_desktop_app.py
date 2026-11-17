@@ -417,6 +417,19 @@ SMOKE = textwrap.dedent(
         # navigation groups by intent, each section reachable and remembered
         win.go("Obsidian")
         out["last_section"] = win.settings.get("last_section") == "Obsidian" and win.nav.buttons["Obsidian"].isChecked()
+        # the launch overlay never blocks the window: it closes itself, and skipping finishes it
+        from app.ui.launch import LaunchOverlay
+        ov = LaunchOverlay(win, False)
+        ov.start()
+        ov.finish()
+        out["launch_ok"] = ov._finished
+        # every avatar state has a distinct sign and renders
+        from app.ui.sun import SolarGlyph
+        g = SolarGlyph(80)
+        for st in ("IDLE", "THINKING", "RESEARCHING", "WORKING", "BUILDING", "ADAPTING", "LISTENING", "SPEAKING", "PAUSED", "OFFLINE", "ERROR"):
+            g.set_state(st)
+            g.grab()
+        out["states_ok"] = True
         out["dangerous"] = win.core.is_dangerous("write_file") and win.core.is_dangerous("execute_shell")
         out["auto_default"] = win.settings.get("auto_approve")
         print("RESULT" + json.dumps(out))
@@ -450,6 +463,7 @@ class TestWindowSmoke(unittest.TestCase):
         self.assertTrue(out["architect_refused"])
         self.assertTrue(out["new_conv"] and out["renamed"] and out["deleted"])
         self.assertTrue(out["toast"] and out["activity"] and out["last_section"])
+        self.assertTrue(out["launch_ok"] and out["states_ok"])
         self.assertTrue(out["dangerous"])
         self.assertFalse(out["auto_default"])
         self.assertEqual(r.returncode, 0, r.stderr[-2000:])

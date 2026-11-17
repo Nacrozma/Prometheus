@@ -9,6 +9,15 @@ from PyQt6.QtCore import QObject, QRunnable, Qt, QThreadPool, pyqtSignal
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 
+def display_path(path: str) -> str:
+    """A path as people read it: the home folder shown as ~ (the full path stays selectable elsewhere)."""
+    import os
+
+    home = os.path.expanduser("~")
+    p = str(path or "")
+    return "~" + p[len(home):] if home and home != "/" and (p == home or p.startswith(home + os.sep)) else p
+
+
 def label(text: str = "", name: str = "", wrap: bool = True, selectable: bool = False) -> QLabel:
     lab = QLabel(text)
     if name:

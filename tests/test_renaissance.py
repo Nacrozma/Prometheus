@@ -394,3 +394,75 @@ class TestExperienceServices(unittest.TestCase):
         jobs = [{"id": "a", "status": "scheduled", "next_fire": "2026-11-17T18:00:00"}, {"id": "b", "status": "scheduled", "next_fire": "2026-11-17T09:00:00", "recurrence_seconds": 3600}, {"id": "c", "status": "scheduled", "next_fire": "2026-11-20T09:00:00"}, {"id": "d", "status": "delivered", "next_fire": "x"}]
         g = classify(jobs, now)
         self.assertEqual({k: [j["id"] for j in v] for k, v in g.items()}, {"today": ["a"], "upcoming": ["c"], "overdue": ["b"], "repeating": ["b"], "done": ["d"], "cancelled": []})
+
+
+class TestSecondBirth(unittest.TestCase):
+    def test_approval_describes_real_effects_and_diffs(self):
+        from app.services.approval import describe
+
+        tmp = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(tmp, "a.py"), "w") as f:
+                f.write("x = 1\ny = 2\n")
+            d = describe("edit_file", {"path": "a.py", "old_string": "y = 2", "new_string": "y = 3"}, tmp)
+            self.assertIn("-y = 2", d["diff"])
+            self.assertIn("+y = 3", d["diff"])
+            self.assertIn("found 1 time", d["what"])
+            self.assertIn("undo journal", d["reversible"])
+            d = describe("edit_file", {"path": "a.py", "old_string": "zzz", "new_string": "q"}, tmp)
+            self.assertIn("will refuse", d["what"], "a passage that is not in the file is called out")
+            d = describe("write_file", {"path": "new.md", "content": "a\nb\n"}, tmp)
+            self.assertEqual((d["title"], d["preview"]), ("Create new.md", "a\nb\n"))
+            d = describe("write_file", {"path": "a.py", "content": "x = 9\n"}, tmp)
+            self.assertTrue(d["title"].startswith("Replace") and any(l.startswith("-y = 2") for l in d["diff"]))
+            d = describe("write_file", {"path": "../escape.txt", "content": "x"}, tmp)
+            self.assertIn("outside the workspace", d["what"])
+            d = describe("execute_shell", {"command": "ls"}, tmp)
+            self.assertEqual(d["preview"], "ls")
+            self.assertIn("Not reversible", d["reversible"])
+            self.assertTrue(describe("unknown_tool", {}, tmp)["if_denied"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_memory_graph_only_from_stored_entities_and_layout_is_bounded(self):
+        from app.services.memory_ops import graph_data, layout
+
+        snap = {
+            "entities": {"e1": {"name": "Rocket", "type": "project", "importance": 0.9}, "e2": {"name": "Lena", "type": "person", "importance": 0.5}, "e3": {"name": "Kai", "type": "person", "importance": 0.4}, "e4": {"name": "Unused", "type": "topic", "importance": 0.9}},
+            "facts": {"f1": {"status": "active", "entities": ["e1", "e2"]}, "f2": {"status": "active", "entities": ["e1", "e3"]}, "f3": {"status": "archived", "entities": ["e3", "e2"]}},
+            "relations": [{"source": "e2", "relation": "owns", "target": "e1"}],
+        }
+        g = graph_data(snap)
+        self.assertEqual({n["name"] for n in g["nodes"]}, {"Rocket", "Lena", "Kai"}, "entities in no active fact or relation are left out")
+        labels = {(e["a"], e["b"]): e["label"] for e in g["edges"]}
+        self.assertEqual(labels[("e1", "e2")], "owns", "a stored relation wins over 'mentioned together'")
+        self.assertEqual(labels[("e1", "e3")], "mentioned together")
+        self.assertNotIn(("e2", "e3"), labels, "archived facts do not link")
+        pos = layout(g["nodes"], g["edges"])
+        self.assertEqual(pos, layout(g["nodes"], g["edges"]), "deterministic")
+        self.assertTrue(all(-1 <= x <= 1 and -1 <= y <= 1 for x, y in pos.values()))
+
+    def test_credential_explanation_and_display_paths(self):
+        from app.credentials import explain_unavailable
+
+        for plat, word in (("windows", "Credential Manager"), ("macos", "Keychain"), ("linux", "Secret Service")):
+            info = explain_unavailable(plat, "")
+            self.assertIn(word, info["why"])
+            self.assertIn("will not write keys to a plain file", info["meanwhile"])
+        try:
+            from app.ui.widgets import display_path
+        except Exception as e:
+            self.skipTest(str(e))
+        home = os.path.expanduser("~")
+        self.assertEqual(display_path(os.path.join(home, "Documents")), "~" + os.sep + "Documents")
+        self.assertEqual(display_path("/opt/x"), "/opt/x")
+
+    def test_launch_wordmark_timing(self):
+        try:
+            from app.ui.launch import WORDMARK_FROM, wordmark_alpha
+        except Exception as e:
+            self.skipTest(str(e))
+        self.assertEqual(wordmark_alpha(0.5), 0.0)
+        self.assertEqual(wordmark_alpha(WORDMARK_FROM), 0.0)
+        self.assertEqual(wordmark_alpha(1.0), 1.0)
+        self.assertTrue(0 < wordmark_alpha(0.9) < 1)

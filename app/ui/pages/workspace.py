@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import QApplication, QComboBox, QFrame, QHBoxLayout, QLineE
 from .. import icons
 from .. import theme as T
 from ..feedback import notify
-from ..widgets import Page, label, run_bg
+from ..widgets import Page, display_path, label, run_bg
 
 MAX_PREVIEW = 200_000
 TEXT_EXT = {".txt", ".md", ".py", ".json", ".csv", ".toml", ".yaml", ".yml", ".ini", ".cfg", ".js", ".ts", ".tsx", ".jsx", ".html", ".css", ".rs", ".c", ".h", ".cpp", ".hpp", ".java", ".go", ".log", ".xml", ".sql", ".sh", ".bat", ".ps1", ".ino", ".lua", ".rb", ".kt", ".swift"}
@@ -106,7 +106,7 @@ class WorkspacePage(Page):
         ol.addWidget(label("OVERVIEW", "eyebrow"))
         self.ov_title = label("Your workspace", "h1")
         ol.addWidget(self.ov_title)
-        self.ov_path = label(self.root, "mono", selectable=True)
+        self.ov_path = label(display_path(self.root), "mono", selectable=True)
         ol.addWidget(self.ov_path)
         ol.addWidget(label("PROJECTS", "eyebrow"))
         self.projects = QListWidget()

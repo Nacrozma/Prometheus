@@ -242,6 +242,11 @@ class ForgePage(Page):
         right.addWidget(self.m_files_title)
         self.m_files = label("", "sub")
         right.addWidget(self.m_files)
+        right.addWidget(label("CHANGES PROPOSED", "eyebrow"))
+        self.m_diff = QTextBrowser()
+        self.m_diff.setAccessibleName("Changes proposed in this mission")
+        self.m_diff.setMinimumHeight(160)
+        right.addWidget(self.m_diff)
         right.addWidget(label("RUNS AND CHECKS", "eyebrow"))
         self.m_runs = label("", "sub")
         right.addWidget(self.m_runs)
@@ -302,6 +307,22 @@ class ForgePage(Page):
         else:
             self.m_files.setText("\n".join(f"• {f['path']}  ({f['status']})" for f in p["files"]) or "None yet.")
         self.m_runs.setText("\n".join(f"• {c['tool']}: {c['status']}" for c in p["runs"]) or "None.")
+        import gui_markdown as md
+
+        from ...services.approval import unified
+
+        blocks = []
+        for c in p["calls"]:
+            a = c["args"]
+            if c["tool"] == "edit_file" and ("old_string" in a or "new_string" in a):
+                lines = unified(str(a.get("old_string", "")), str(a.get("new_string", "")), str(a.get("path", "")))
+            elif c["tool"] == "write_file" and a.get("content"):
+                lines = [f"+++ {a.get('path', '')} (written)"] + ["+" + ln for ln in str(a["content"]).splitlines()[:60]]
+            else:
+                continue
+            rows = "".join(f'<span style="color:{T.OK if ln.startswith("+") and not ln.startswith("+++") else T.ERR if ln.startswith("-") and not ln.startswith("---") else T.TEXT_SECONDARY};">{md.esc(ln)}</span>\n' for ln in lines)
+            blocks.append(f'<p style="color:{T.TEXT_FAINT}; margin:6px 0 2px 0;">{md.esc(c["tool"])} · {md.esc(c["status"])}</p><pre style="font-family:monospace; font-size:8pt; margin:0;">{rows}</pre>')
+        self.m_diff.setHtml("".join(blocks) or f"<p style='color:{T.TEXT_FAINT};'>No file changes were proposed in this mission.</p>")
         self.m_bound.setText(d["boundary"])
         self.stack.setCurrentIndex(1)
 

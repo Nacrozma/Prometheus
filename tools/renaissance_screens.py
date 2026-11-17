@@ -20,8 +20,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "docs", "screenshots", "renaissance"))
 ONLY = set(sys.argv[2].split(",")) if len(sys.argv) > 2 else set()
 tmp = tempfile.mkdtemp(prefix="prometheus-shots-")
-os.environ["PROMETHEUS_HOME"] = os.path.join(tmp, "home")
-os.environ["PROMETHEUS_WORKSPACE"] = os.path.join(tmp, "workspace")
+os.environ["HOME"] = tmp  # paths then read like a real home folder (~/...)
+os.environ["PROMETHEUS_HOME"] = os.path.join(tmp, ".prometheus")
+os.environ["PROMETHEUS_WORKSPACE"] = os.path.join(tmp, "Documents", "Prometheus Workspace")
 for k in ("OPENROUTER_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "MISTRAL_API_KEY", "ANTHROPIC_API_KEY"):
     os.environ.pop(k, None)
 os.makedirs(os.environ["PROMETHEUS_WORKSPACE"], exist_ok=True)
@@ -48,6 +49,13 @@ def seed(win) -> None:
     core = win.core
     for fact, kind in (("The owner prefers SI units in engineering answers.", "preference"), ("Rocket-sim uses a two-stage model with Isp 311 s for stage one.", "fact"), ("Decided to keep Forge skills disabled until their tests pass.", "decision"), ("Always run the test suite before proposing a patch.", "lesson")):
         core.dispatch("update_memory", fact=fact, kind=kind, importance=0.7)
+    for fact, ents, rels in (
+        ("Rocket-sim's drag model is owned by Lena and reviewed with Kai.", [{"name": "Rocket-sim", "type": "project"}, {"name": "Lena", "type": "person"}, {"name": "Kai", "type": "person"}], [{"source": "Lena", "relation": "owns", "target": "Rocket-sim"}]),
+        ("Rocket-sim uses NumPy and Matplotlib for its trajectory plots.", [{"name": "Rocket-sim", "type": "project"}, {"name": "NumPy", "type": "tool"}, {"name": "Matplotlib", "type": "tool"}], [{"source": "Rocket-sim", "relation": "uses", "target": "NumPy"}]),
+        ("Kai prefers results in SI units with three significant figures.", [{"name": "Kai", "type": "person"}, {"name": "SI units", "type": "topic"}], []),
+        ("Orbital mechanics notes live in the Obsidian vault under Rocket sim.", [{"name": "Orbital mechanics", "type": "topic"}, {"name": "Obsidian", "type": "tool"}, {"name": "Rocket-sim", "type": "project"}], [{"source": "Orbital mechanics", "relation": "documented in", "target": "Obsidian"}]),
+    ):
+        core.dispatch("update_memory", fact=fact, entities=ents, relations=rels, kind="fact", importance=0.8)
     core.dispatch("schedule_task", when="2h", text="Review the rocket-sim trajectory notes")
     core.dispatch("schedule_task", when="24h", text="Daily: check pending Forge patches", recurring=True)
     store = win.conversations
@@ -125,6 +133,7 @@ def run_main(win) -> None:
         ("11-trust", lambda: win.go("Trust & safety")),
         ("12-settings", lambda: win.go("Settings")),
         ("13-nav-collapsed", lambda: (win.go("Home"), win.nav.set_collapsed(True))),
+        ("12b-settings-data", lambda: (win.go("Settings"), win.pages["Settings"].rail.setCurrentRow(6))),
         ("17-forge-mission", lambda: (win.nav.set_collapsed(False), win.go("Forge"), win.pages["Forge"].show_mission(__import__("app.services.forge_missions", fromlist=["MissionLog"]).MissionLog(win.core.paths()["data"]).list()[0]))),
         ("18-activity-centre", lambda: (win.go("Home"), win.notify("Reminder added", "ok", "Review the rocket-sim trajectory notes — in 2 h"), win.toggle_activity())),
         ("19-toast", lambda: (win.activity.hide(), win.go("Memory"), win.notify("Memory corrected", "ok", "The old version is kept as history and no longer used."))),
@@ -132,6 +141,7 @@ def run_main(win) -> None:
         ("21-small-workspace", lambda: win.go("Workspace")),
         ("22-small-home", lambda: win.go("Home")),
         ("23-large-memory", lambda: (win.resize(1600, 980), win.go("Memory"))),
+        ("24-memory-map", lambda: (win.resize(1440, 900), win.go("Memory"), win.pages["Memory"].mode.button(1).setChecked(True), win.pages["Memory"]._mode(1))),
     ]
 
     def step(i=0):

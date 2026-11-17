@@ -166,3 +166,77 @@ def _ops_counts(self) -> Dict[str, int]:
 
 MemoryOps.history = _ops_history  # type: ignore[attr-defined]
 MemoryOps.counts = _ops_counts  # type: ignore[attr-defined]
+
+
+def graph_data(snapshot: Dict[str, Any], limit: int = 60) -> Dict[str, Any]:
+    """Entities (most important first) and their links: typed relations, plus 'mentioned together'
+    when two entities appear in the same active fact. Nothing is inferred beyond the stored graph."""
+    ents = snapshot.get("entities", {})
+    facts = [f for f in snapshot.get("facts", {}).values() if f.get("status") == "active"]
+    used: Dict[str, int] = {}
+    for f in facts:
+        for e in f.get("entities", []):
+            used[e] = used.get(e, 0) + 1
+    ranked = sorted((e for e in ents if e in used or any(r.get("source") == e or r.get("target") == e for r in snapshot.get("relations", []))), key=lambda e: (-(ents[e].get("importance") or 0), -used.get(e, 0)))[:limit]
+    keep = set(ranked)
+    nodes = [{"id": e, "name": ents[e].get("name", e), "type": ents[e].get("type", "other"), "facts": used.get(e, 0), "importance": float(ents[e].get("importance") or 0)} for e in ranked]
+    edges: Dict[tuple, str] = {}
+    for r in snapshot.get("relations", []):
+        a, b = r.get("source"), r.get("target")
+        if a in keep and b in keep and a != b:
+            edges[tuple(sorted((a, b)))] = str(r.get("relation", "related"))
+    for f in facts:
+        es = [e for e in f.get("entities", []) if e in keep]
+        for i in range(len(es)):
+            for j in range(i + 1, len(es)):
+                edges.setdefault(tuple(sorted((es[i], es[j]))), "mentioned together")
+    return {"nodes": nodes, "edges": [{"a": a, "b": b, "label": lab} for (a, b), lab in edges.items()]}
+
+
+def layout(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]], iterations: int = 220) -> Dict[str, tuple]:
+    """Deterministic force-directed positions in [-1, 1] (Fruchterman-Reingold)."""
+    import math
+
+    n = len(nodes)
+    if not n:
+        return {}
+    pos = {nd["id"]: (math.cos(i * 2.399) * (0.3 + 0.7 * i / n), math.sin(i * 2.399) * (0.3 + 0.7 * i / n)) for i, nd in enumerate(nodes)}
+    k = math.sqrt(4.0 / n)
+    temp = 0.2
+    for _ in range(iterations):
+        disp = {v: [0.0, 0.0] for v in pos}
+        ids = list(pos)
+        for i, a in enumerate(ids):
+            for b in ids[i + 1:]:
+                dx, dy = pos[a][0] - pos[b][0], pos[a][1] - pos[b][1]
+                d = max(1e-3, math.hypot(dx, dy))
+                f = k * k / d
+                disp[a][0] += dx / d * f
+                disp[a][1] += dy / d * f
+                disp[b][0] -= dx / d * f
+                disp[b][1] -= dy / d * f
+        for e in edges:
+            a, b = e["a"], e["b"]
+            dx, dy = pos[a][0] - pos[b][0], pos[a][1] - pos[b][1]
+            d = max(1e-3, math.hypot(dx, dy))
+            f = d * d / k
+            disp[a][0] -= dx / d * f
+            disp[a][1] -= dy / d * f
+            disp[b][0] += dx / d * f
+            disp[b][1] += dy / d * f
+        for v, (dx, dy) in disp.items():
+            d = max(1e-3, math.hypot(dx, dy))
+            x = pos[v][0] + dx / d * min(d, temp) - pos[v][0] * 0.01
+            y = pos[v][1] + dy / d * min(d, temp) - pos[v][1] * 0.01
+            pos[v] = (max(-1.0, min(1.0, x)), max(-1.0, min(1.0, y)))
+        temp *= 0.985
+    return pos
+
+
+def _ops_graph(self) -> Dict[str, Any]:
+    g = graph_data(self.g.export_snapshot())
+    g["pos"] = layout(g["nodes"], g["edges"])
+    return g
+
+
+MemoryOps.graph = _ops_graph  # type: ignore[attr-defined]

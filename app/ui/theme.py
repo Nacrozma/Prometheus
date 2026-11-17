@@ -147,6 +147,7 @@ QPushButton:checked {{ background: {ACCENT_SOFT}; color: {ACCENT}; border-color:
 QPushButton#chip {{ background: transparent; border: 1px solid {BORDER_STRONG}; border-radius: 13px; padding: 4px 12px; color: {TEXT_SECONDARY}; }}
 QPushButton#chip:hover {{ border-color: {BORDER_WARM}; color: {HIGHLIGHT}; background: {ACCENT_FAINT}; }}
 QPushButton#chip:checked {{ border-color: {ACCENT}; color: {ACCENT}; background: {ACCENT_SOFT}; }}
+QFrame#notice {{ background: rgba(246, 180, 75, 0.06); border: 1px solid rgba(246, 180, 75, 0.35); border-radius: {RADIUS_M}px; }}
 QFrame#plainCard {{ background: transparent; border: none; }}
 QFrame#homeRow {{ background: {SURFACE}; border: 1px solid transparent; border-radius: {RADIUS_M}px; }}
 QFrame#homeRow:hover {{ border-color: {BORDER_WARM}; }}

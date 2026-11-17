@@ -138,9 +138,23 @@ class MemoryPage(Page):
         ll = QVBoxLayout(lib)
         ll.setContentsMargins(22, 22, 22, 16)
         ll.setSpacing(10)
+        trow = QHBoxLayout()
         self.view_title = label("All memories", "h2")
         self.view_title.setStyleSheet("font-size: 14pt;")
-        ll.addWidget(self.view_title)
+        trow.addWidget(self.view_title, 1)
+        from PyQt6.QtWidgets import QButtonGroup
+
+        self.mode = QButtonGroup(self)
+        for i, (name, ic) in enumerate((("Library", "file"), ("Map", "memory"))):
+            b = QPushButton(icons.icon(ic, T.TEXT_SECONDARY, active=T.ACCENT), f" {name}")
+            b.setObjectName("chip")
+            b.setCheckable(True)
+            b.setChecked(i == 0)
+            b.setToolTip("Read and change memories" if i == 0 else "See how people, projects and topics connect")
+            self.mode.addButton(b, i)
+            trow.addWidget(b)
+        self.mode.idClicked.connect(self._mode)
+        ll.addLayout(trow)
         self.view_hint = label("", "faint")
         ll.addWidget(self.view_hint)
         self.query = QLineEdit()
@@ -155,7 +169,16 @@ class MemoryPage(Page):
         self.list.setWordWrap(True)
         self.list.setAccessibleName("Memories")
         self.list.currentRowChanged.connect(self._selected)
-        ll.addWidget(self.list, 1)
+        from PyQt6.QtWidgets import QStackedWidget
+
+        from ..memory_map import MemoryMap
+
+        self.views = QStackedWidget()
+        self.views.addWidget(self.list)
+        self.map = MemoryMap()
+        self.map.picked.connect(self._from_map)
+        self.views.addWidget(self.map)
+        ll.addWidget(self.views, 1)
         split.addWidget(lib)
 
         # inspector
@@ -187,6 +210,16 @@ class MemoryPage(Page):
         split.setStretchFactor(1, 1)
         split.setSizes([230, 700, 320])
         self.content.addWidget(split, 1)
+
+    def _mode(self, i: int) -> None:
+        self.views.setCurrentIndex(i)
+        if i == 1:
+            run_bg(self.ops.graph, self.map.set_data, lambda m: notify(self, "Could not draw the map", "err", m.splitlines()[0]), owner=self)
+
+    def _from_map(self, name: str) -> None:
+        self.mode.button(0).setChecked(True)
+        self.views.setCurrentIndex(0)
+        self.show_query(name)
 
     # ----- data -----
     def show_query(self, text: str) -> None:

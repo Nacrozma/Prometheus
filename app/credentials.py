@@ -120,3 +120,24 @@ class CredentialStore:
                 source = "not set"
             out[name] = {"label": label, "source": source, "hint": mask(env) if env else ""}
         return out
+
+
+def explain_unavailable(platform_name: str, error: str) -> dict:
+    """Why secure key storage is unavailable on this system, and the safe ways forward.
+    Prometheus never falls back to writing keys into a plain file by itself."""
+    p = (platform_name or "").lower()
+    if p.startswith("win"):
+        why = "Windows Credential Manager could not be opened."
+        fix = "Sign in to Windows normally (not as a restricted service account) and restart Prometheus."
+    elif p.startswith("mac") or p == "darwin":
+        why = "The macOS Keychain could not be opened."
+        fix = "Unlock your login keychain and restart Prometheus."
+    else:
+        why = "No Secret Service is running on this desktop (GNOME Keyring or KWallet provides one)."
+        fix = "Install and start a keyring (for example gnome-keyring or KWallet), sign in again, then restart Prometheus."
+    return {
+        "title": "Secure key storage is not available here",
+        "why": why + (f" ({error})" if error else ""),
+        "fix": fix,
+        "meanwhile": "Keys you set yourself as environment variables, or in a .env file you create in the data folder, still work. Prometheus will not write keys to a plain file on its own.",
+    }

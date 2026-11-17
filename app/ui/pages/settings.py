@@ -13,7 +13,7 @@ from ... import APP_NAME, __version__
 from ...credentials import KNOWN_KEYS, CredentialError
 from .. import theme as T
 from .. import icons
-from ..widgets import Card, Page, label, pill, run_bg
+from ..widgets import Card, Page, display_path, label, pill, run_bg
 
 
 class SettingsPage(Page):
@@ -77,8 +77,19 @@ class SettingsPage(Page):
 
         # ---- providers ----
         prov = Card("")
-        store = f"Keys are stored in {platform.credential_backend()}" if creds.available else f"Secure key storage is unavailable: {creds.error}. Keys in your environment or a .env file still work; Prometheus will not write keys to a plain file."
-        prov.body.addWidget(label(store, "faint" if creds.available else "warn"))
+        if creds.available:
+            prov.body.addWidget(label(f"✓ Keys are stored in {platform.credential_backend()}; they are never shown again after saving.", "ok"))
+        else:
+            from ...credentials import explain_unavailable
+
+            info = explain_unavailable(platform.name, creds.error)
+            box = Card()
+            box.setObjectName("notice")
+            box.body.addWidget(label("⚠ " + info["title"], "warn"))
+            box.body.addWidget(label("Why: " + info["why"], "sub"))
+            box.body.addWidget(label("To fix it: " + info["fix"], "sub"))
+            box.body.addWidget(label("Meanwhile: " + info["meanwhile"], "faint"))
+            prov.body.addWidget(box)
         grid = QGridLayout()
         self.key_rows = {}
         for r, (name, title) in enumerate(KNOWN_KEYS.items()):
@@ -122,7 +133,7 @@ class SettingsPage(Page):
 
         # ---- workspace ----
         ws = Card("")
-        self.ws_lbl = label(f"{paths.workspace}  ({paths.workspace_reason})", "sub", selectable=True)
+        self.ws_lbl = label(f"{display_path(paths.workspace)}  ({paths.workspace_reason})", "sub", selectable=True)
         ws.body.addWidget(self.ws_lbl)
         ws.body.addWidget(label("The file and shell tools can only touch this folder. A new choice applies the next time Prometheus starts.", "faint"))
         pick = QPushButton("Choose workspace folder…")
@@ -184,7 +195,7 @@ class SettingsPage(Page):
 
         # ---- data ----
         dt = Card("")
-        dt.body.addWidget(label(f"Data folder: {paths.data_dir}  ({paths.data_reason})", "sub", selectable=True))
+        dt.body.addWidget(label(f"Data folder: {display_path(paths.data_dir)}  ({paths.data_reason})", "sub", selectable=True))
         for n in paths.notes:
             dt.body.addWidget(label(n, "faint"))
         open_btn = QPushButton("Open data folder")

@@ -143,6 +143,20 @@ class ArmPage(Page):
         self.ik_msg = label("", "faint")
         rl.addWidget(self.ik_msg)
         rl.addStretch(1)
+        from PyQt6.QtWidgets import QPlainTextEdit
+
+        self.tech_btn = QPushButton("Show technical output")
+        self.tech_btn.setObjectName("link")
+        self.tech_btn.setCheckable(True)
+        self.tech = QPlainTextEdit()
+        self.tech.setReadOnly(True)
+        self.tech.setVisible(False)
+        self.tech.setMaximumHeight(200)
+        self.tech.setAccessibleName("Technical output (JSON)")
+        self.tech.setStyleSheet(f"font-family: {T.FONT_MONO}; font-size: 8pt;")
+        self.tech_btn.toggled.connect(lambda on: (self.tech.setVisible(on), self.tech_btn.setText("Hide technical output" if on else "Show technical output")))
+        rl.addWidget(self.tech_btn)
+        rl.addWidget(self.tech)
         split.addWidget(right)
         split.setStretchFactor(1, 1)
         split.setSizes([300, 760, 300])
@@ -172,6 +186,10 @@ class ArmPage(Page):
         except Exception as e:
             self.torque.setText(f"Torque not available: {e}")
         self.verdict.setText("This pose is reachable in simulation." if not problems else "This pose breaks a limit or collides; a real arm must not be driven here.")
+        import json as _json
+
+        pts = self.sim.forward(q)
+        self.tech.setPlainText(_json.dumps({"joints_deg": dict(zip(("yaw", "shoulder", "elbow", "wrist"), q)), "points_m": {k: [round(v, 4) for v in p] for k, p in pts.items()}, "limit_issues": lim, "collisions": col, "simulation_only": True, **({"last_plan": self.last_plan} if getattr(self, "last_plan", None) else {})}, indent=2))
 
     def _forward(self) -> None:
         self._show(self._q())
@@ -193,6 +211,7 @@ class ArmPage(Page):
             self.ik_msg.setStyleSheet(f"color: {T.WARN};")
             notify(self, "That point cannot be reached", "warn", self.ik_msg.text())
             return
+        self.last_plan = {k: v for k, v in res.items() if k != "svg"}
         joints = res.get("joints_deg") or {}
         q = [joints[n] for n in ("yaw", "shoulder", "elbow", "wrist") if n in joints] if isinstance(joints, dict) else list(joints)
         if q:
