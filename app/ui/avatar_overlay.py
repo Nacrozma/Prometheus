@@ -9,6 +9,8 @@ at small sizes and for colour-blind viewers, and the state is also given in word
 * WORKING      a rotating dashed ring
 * BUILDING     a segmented ring of six blocks turning, warmer
 * ADAPTING     two arcs turning in opposite directions
+* PLANNING     a wide orbit on which plan nodes settle one by one (ORBIT, while a plan is built)
+* EXECUTING    a ring of step marks, filled from the real share of completed workflow steps
 * LISTENING    rings moving inward, their strength from the real microphone level
 * SPEAKING     radial strokes moving outward, their length from the real playback level
 * PAUSED       a still, closed ring with two short gaps (waiting for your approval)
@@ -88,6 +90,28 @@ def draw(p: QPainter, w: float, h: float, state: str, t: float, level: float = 0
             r2 = R * (1.0 - 0.08 * k)
             p.setPen(_pen(COBALT, 0.65, 2.0 * s))
             p.drawArc(QRectF(cx - r2, cy - r2, 2 * r2, 2 * r2), int(a0 * 16), int(110 * 16))
+    elif state == "PLANNING":
+        p.setPen(_pen(CHAMPAGNE, 0.3, 1.0 * s, Qt.PenStyle.DashLine))
+        r2 = R * 1.08
+        p.drawEllipse(QRectF(cx - r2, cy - r2, 2 * r2, 2 * r2))
+        n = 5
+        shown = int(t * 1.2) % (n + 2)
+        p.setPen(Qt.PenStyle.NoPen)
+        for i in range(min(shown, n)):
+            a = -math.pi / 2 + i * math.tau / n + t * 0.15
+            p.setBrush(CHAMPAGNE if i < shown - 1 else GOLD)
+            p.drawEllipse(QPointF(cx + math.cos(a) * r2, cy + math.sin(a) * r2), 3.2 * s, 3.2 * s)
+    elif state == "EXECUTING":
+        # `level` carries the real completed share of the workflow (0..1); marks are drawn, not animated
+        n = 12
+        done = int(round(max(0.0, min(1.0, level)) * n))
+        for i in range(n):
+            a0 = 90 - i * 30
+            p.setPen(_pen(GOLD if i < done else GREY, 0.85 if i < done else 0.35, 3.0 * s))
+            p.drawArc(rect, int((a0 - 4) * 16), int(-20 * 16))
+        head = (t * 60.0) % 360.0
+        p.setPen(_pen(AMBER, 0.5, 1.2 * s))
+        p.drawArc(QRectF(cx - R * 1.12, cy - R * 1.12, R * 2.24, R * 2.24), int(-head * 16), int(-24 * 16))
     elif state == "LISTENING":
         lvl = max(0.15, min(1.0, level))
         for i in range(3):

@@ -36,6 +36,15 @@ DEFAULTS: Dict[str, Any] = {
     "companion_context": False,
     #: A folder to import data from at the next start (before the core loads its state).
     "pending_import": "",
+    #: ORBIT: continuous conversation (listen again after each reply) or push-to-talk.
+    "orbit_continuous": True,
+    #: ORBIT: seconds of quiet that end your turn, and how quiet speech may be (0..1).
+    "orbit_silence": 1.2,
+    "orbit_sensitivity": 0.5,
+    #: ORBIT: autonomy for new sessions (approval_first, balanced, advanced).
+    "orbit_autonomy": "approval_first",
+    #: ORBIT: the last session, reopened when you return.
+    "orbit_session": "",
 }
 
 TYPES = {k: type(v) for k, v in DEFAULTS.items()}

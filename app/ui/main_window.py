@@ -39,6 +39,7 @@ from .pages.forge import ForgePage
 from .pages.home import HomePage
 from .pages.memory import MemoryPage
 from .pages.obsidian import ObsidianPage
+from .pages.orbit import OrbitPage
 from .pages.reflection import ReflectionPage
 from .pages.settings import SettingsPage
 from .pages.tasks import TasksPage
@@ -52,7 +53,7 @@ REMINDER_POLL_MS = 15_000
 #: The sections, in groups. Names are stable identifiers (settings, tests and the palette use them).
 NAV: List[Tuple[str, List[Tuple[str, str]]]] = [
     ("Overview", [("Home", "home")]),
-    ("Conversation", [("Companion", "chat")]),
+    ("Conversation", [("Companion", "chat"), ("ORBIT", "orbit")]),
     ("Knowledge", [("Memory", "memory"), ("Obsidian", "obsidian")]),
     ("Creation", [("Engineering", "engineering"), ("Forge", "forge"), ("Workspace", "workspace")]),
     ("Organisation", [("Reminders & tasks", "tasks")]),
@@ -315,12 +316,14 @@ class MainWindow(QMainWindow):
 
         self.conversations = ConversationStore(paths.data_dir)
         # each page shows its navigation group as an eyebrow above the title
-        for name, cls in (("Home", HomePage), ("Companion", CompanionPage), ("Memory", MemoryPage), ("Engineering", EngineeringPage), ("Forge", ForgePage), ("Workspace", WorkspacePage), ("Reminders & tasks", TasksPage), ("Obsidian", ObsidianPage), ("Robot arm (simulation)", ArmPage), ("Reflection", ReflectionPage), ("Trust & safety", TrustPage), ("Settings", SettingsPage)):
+        for name, cls in (("Home", HomePage), ("Companion", CompanionPage), ("ORBIT", OrbitPage), ("Memory", MemoryPage), ("Engineering", EngineeringPage), ("Forge", ForgePage), ("Workspace", WorkspacePage), ("Reminders & tasks", TasksPage), ("Obsidian", ObsidianPage), ("Robot arm (simulation)", ArmPage), ("Reflection", ReflectionPage), ("Trust & safety", TrustPage), ("Settings", SettingsPage)):
             cls.eyebrow = SECTION_GROUP[name]
         self.companion = CompanionPage(core, settings, self.conversations)
+        self.orbit = OrbitPage(core, settings, self.conversations, notify=lambda text, detail="", tone="ok": self.notify(text, tone, detail, "ORBIT"))
         self.pages: Dict[str, QWidget] = {
             "Home": HomePage(core, settings, self.conversations, self),
             "Companion": self.companion,
+            "ORBIT": self.orbit,
             "Memory": MemoryPage(core),
             "Obsidian": ObsidianPage(core, self.companion),
             "Engineering": EngineeringPage(core),
@@ -347,7 +350,8 @@ class MainWindow(QMainWindow):
         mv = QVBoxLayout(main)
         mv.setContentsMargins(0, 0, 0, 0)
         mv.setSpacing(0)
-        mv.addWidget(self._topbar())
+        self.topbar = self._topbar()
+        mv.addWidget(self.topbar)
         self.stack = QStackedWidget()
         for page in self.pages.values():
             self.stack.addWidget(page)
@@ -383,6 +387,9 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+N"), self, activated=self._new_conversation)
         QShortcut(QKeySequence("Ctrl+,"), self, activated=lambda: self.go("Settings"))
         QShortcut(QKeySequence("Ctrl+Q"), self, activated=self.quit)
+        QShortcut(QKeySequence("Ctrl+Shift+O"), self, activated=lambda: self.go("ORBIT"))
+        QShortcut(QKeySequence("Ctrl+Shift+Space"), self, activated=self._orbit_talk)
+        self.orbit.immersive_changed.connect(self._immersive)
         QShortcut(QKeySequence("Ctrl+B"), self, activated=lambda: self.nav.set_collapsed(not self.nav.collapsed, notify=True))
         for i, name in enumerate(list(self.pages)[:9]):
             QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self, activated=lambda n=name: self.go(n))
@@ -517,6 +524,8 @@ class MainWindow(QMainWindow):
     def go(self, name: str) -> None:
         if name not in self.pages:
             return
+        if name != "ORBIT" and getattr(self, "orbit", None) is not None and self.orbit.immersive:
+            self.orbit.set_immersive(False)
         page = self.pages[name]
         self.stack.setCurrentWidget(page)
         self.nav.select(name)
@@ -536,6 +545,10 @@ class MainWindow(QMainWindow):
         entries = [(f"Go to {n}", (lambda n=n: self.go(n)), "section") for n in self.pages]
         entries += [
             ("New conversation", self._new_conversation, "command"),
+            ("Open ORBIT", lambda: self.go("ORBIT"), "command"),
+            ("Talk in ORBIT", self._orbit_talk, "command"),
+            ("Plan this conversation in ORBIT", self.plan_in_orbit, "command"),
+            ("New ORBIT session", lambda: (self.go("ORBIT"), self.orbit.new_session()), "command"),
             ("Stop current request", self.companion.stop, "command"),
             ("Reconnect providers", self._reconnect, "command"),
             ("Toggle navigation", lambda: self.nav.set_collapsed(not self.nav.collapsed, notify=True), "command"),
@@ -565,6 +578,28 @@ class MainWindow(QMainWindow):
                 page.reveal(r["target"])
         elif kind == "activity":
             self.go("Trust & safety")
+
+    # ----- ORBIT -----
+    def _orbit_talk(self) -> None:
+        self.go("ORBIT")
+        self.orbit.talk_shortcut()
+
+    def plan_in_orbit(self, objective: str = "") -> None:
+        """Contextual entry: start an ORBIT session from what you were doing (the open conversation's
+        last message, a Forge objective, a workspace folder). Only text you already wrote is carried over."""
+        if not objective:
+            msgs = [m for m in self.companion.messages if m.get("role") == "user" and isinstance(m.get("content"), str)]
+            objective = msgs[-1]["content"].strip() if msgs else ""
+        self.go("ORBIT")
+        self.orbit.new_session(objective[:600], {"from": self.current_section()})
+
+    def _immersive(self, on: bool) -> None:
+        """Immersive ORBIT: only the stage and its panels; Esc or Exit immersive brings the window back."""
+        self.nav.setVisible(not on)
+        self.topbar.setVisible(not on)
+        self.statusBar().setVisible(not on)
+        if on and self.current_section() != "ORBIT":
+            self.go("ORBIT")
 
     def _new_conversation(self) -> None:
         self.go("Companion")
@@ -607,6 +642,7 @@ class MainWindow(QMainWindow):
     def _apply_behaviour(self) -> None:
         reduced = bool(self.settings.get("reduced_motion"))
         self.companion.set_reduced_motion(reduced)
+        self.orbit.set_reduced_motion(reduced)
         home = self.pages.get("Home")
         if hasattr(home, "set_reduced_motion"):
             home.set_reduced_motion(reduced)
@@ -672,5 +708,6 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self.companion.shutdown()
+        self.orbit.shutdown()
         if self.tray is not None:
             self.tray.hide()

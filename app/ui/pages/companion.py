@@ -53,6 +53,8 @@ ORB_STATES = {
     "PAUSED": (0, "Waiting for your approval", T.HIGHLIGHT),
     "ERROR": (0, "Something went wrong", T.ERR),
     "ADAPTING": (3, "Adapting", T.SECONDARY_ACCENT),
+    "PLANNING": (1, "Planning", T.HIGHLIGHT),
+    "RUNNING": (1, "Running the workflow", T.SECONDARY_ACCENT),
     "OFFLINE": (0, "No provider", T.TEXT_FAINT),
 }
 
@@ -319,7 +321,7 @@ class CompanionPage(Page):
         self.mic.setToolTip("Talk (speech is transcribed on this computer by Whisper; the text is put in the box for you to check)" if self.voice else "Voice input needs openai-whisper (pip install openai-whisper). See Settings → Voice.")
         self.voice_lbl.setText(self._voice_text())
 
-        QShortcut(QKeySequence("Escape"), self, activated=self.stop)
+        QShortcut(QKeySequence("Escape"), self, activated=self.stop, context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._idle_timer = QTimer(self)
         self._idle_timer.setSingleShot(True)
         self._idle_timer.timeout.connect(lambda: self.set_state("IDLE"))
@@ -1005,7 +1007,11 @@ class CompanionPage(Page):
         if name in ("/new", "/clear"):
             self.new_conversation()
         elif name == "/help":
-            self.add("System", "/new — start a new conversation · /rename — rename this one · Esc — stop · Ctrl+K — search everything · Shift+Enter — new line", T.TEXT_SECONDARY)
+            self.add("System", "/new — start a new conversation · /orbit — plan this in ORBIT · /rename — rename this one · Esc — stop · Ctrl+K — search everything · Shift+Enter — new line", T.TEXT_SECONDARY)
+        elif name == "/orbit":
+            win = self.window()
+            if hasattr(win, "plan_in_orbit"):
+                win.plan_in_orbit(cmd[len(name):].strip())
         elif name == "/rename":
             title = cmd[len(name):].strip()
             if title:

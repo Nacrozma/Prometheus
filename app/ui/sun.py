@@ -24,6 +24,8 @@ PALETTES = {
     "SPEAKING": ("#FFA53A", "#F7D98B", 0.5),
     "LISTENING": ("#E79A3A", "#F7D98B", 0.4),
     "ADAPTING": ("#FF6A1A", "#F4B52C", 0.9),
+    "PLANNING": ("#FF9A2E", "#F7D98B", 0.5),
+    "EXECUTING": ("#FF8A24", "#FFB347", 0.75),
     "WARNING": ("#C98A3A", "#F7D98B", 0.15),
     "PAUSED": ("#C98A3A", "#F7D98B", 0.15),
     "ERROR": ("#C2412E", "#FF6B5E", 0.2),
@@ -39,6 +41,7 @@ class SolarGlyph(QWidget):
         self.resize(size, size)
         self.state = "IDLE"
         self.audio = 0.0
+        self.progress = 0.0  # EXECUTING: completed share of the ORBIT workflow
         self._t0 = time.perf_counter()
         self._reduced = False
         self._animated = animated
@@ -148,5 +151,5 @@ class SolarGlyph(QWidget):
         p.drawEllipse(QRectF(c.x() - R, c.y() - R, 2 * R, 2 * R))
         from . import avatar_overlay
 
-        avatar_overlay.draw(p, w, h, self.state, t, self.audio)
+        avatar_overlay.draw(p, w, h, self.state, t, self.progress if self.state == "EXECUTING" else self.audio)
         p.end()

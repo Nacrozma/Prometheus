@@ -430,6 +430,50 @@ SMOKE = textwrap.dedent(
             g.set_state(st)
             g.grab()
         out["states_ok"] = True
+        for st in ("PLANNING", "EXECUTING"):
+            g.set_state(st)
+            g.grab()
+        # ORBIT: plan edits make versions; approval and workflow gates; tool approvals still gate; immersive
+        orb = win.orbit
+        win.go("ORBIT")
+        orb.apply_edit("add_task", title="Research options")
+        orb.apply_edit("add_task", title="Write the summary")
+        orb.apply_edit("add_dep", before="Research options", after="Write the summary")
+        out["orbit_versions"] = orb.session["active_version"] == 3 and len(orb.plan()["deps"]) == 1
+        orb.undo()
+        out["orbit_undo"] = len(orb.plan()["deps"]) == 0 and orb.session["active_version"] == 4
+        out["orbit_build_needs_approval"] = not orb.wf_buttons["build"].isEnabled()
+        orb.approve_plan()
+        orb.build_workflow()
+        wf = orb.session["workflow"]
+        out["orbit_workflow"] = [n["status"] for n in wf["nodes"]] == ["ready", "ready"]
+        orb.start_workflow()
+        out["orbit_go_ahead"] = wf["nodes"][0]["status"] == "awaiting_approval"  # approval-first: nothing runs unasked
+        node = wf["nodes"][0]
+        orb.worker_kind = node["id"]
+        O_ = __import__("app.services.orbit", fromlist=["x"])
+        O_.transition(wf, node["id"], "running")
+        node["operation"] = "forge:architect"
+        orb.worker = W()
+        orb._confirm("write_file", json.dumps({{"path": "x.txt", "content": "x"}}))
+        out["orbit_architect_refused"] = orb.card is None and orb.worker.answer is False
+        node["operation"] = "assistant"
+        orb.worker = W()
+        orb._confirm("write_file", json.dumps({{"path": "x.txt", "content": "x"}}))
+        out["orbit_card"] = orb.card is not None and node["status"] == "awaiting_approval"
+        orb.card.answered.emit(False)
+        out["orbit_denied"] = orb.worker.answer is False and node["status"] == "running"
+        orb.worker, orb.worker_kind = None, ""
+        orb.set_immersive(True)
+        out["orbit_immersive"] = not win.nav.isVisible() and not win.topbar.isVisible()
+        win.go("Home")
+        out["orbit_immersive_exit"] = win.nav.isVisible() and not orb.immersive
+        win.go("ORBIT")
+        orb.toggle_view()
+        out["orbit_outline"] = orb.views.currentWidget() is orb.outline and orb.outline.topLevelItemCount() >= 1
+        orb.toggle_view()
+        reopened = orb.store.get(orb.session["id"])
+        out["orbit_recovered"] = reopened is not None and reopened["workflow"]["nodes"][0]["status"] == "paused"
         out["dangerous"] = win.core.is_dangerous("write_file") and win.core.is_dangerous("execute_shell")
         out["auto_default"] = win.settings.get("auto_approve")
         print("RESULT" + json.dumps(out))
@@ -456,7 +500,7 @@ class TestWindowSmoke(unittest.TestCase):
         self.assertIsNotNone(line, f"no result; exit {r.returncode}\n{r.stdout[-2000:]}\n{r.stderr[-3000:]}")
         out = json.loads(line[6:])
         # the 11 original sections are all still there, plus Home (Renaissance)
-        self.assertEqual(set(out["pages"]), {"Home", "Companion", "Memory", "Engineering", "Forge", "Workspace", "Reminders & tasks", "Obsidian", "Robot arm (simulation)", "Reflection", "Trust & safety", "Settings"})
+        self.assertEqual(set(out["pages"]), {"Home", "Companion", "ORBIT", "Memory", "Engineering", "Forge", "Workspace", "Reminders & tasks", "Obsidian", "Robot arm (simulation)", "Reflection", "Trust & safety", "Settings"})
         self.assertEqual(out["errors"], [])
         self.assertTrue(out["card"])
         self.assertTrue(out["denied_passed"])
@@ -464,6 +508,8 @@ class TestWindowSmoke(unittest.TestCase):
         self.assertTrue(out["new_conv"] and out["renamed"] and out["deleted"])
         self.assertTrue(out["toast"] and out["activity"] and out["last_section"])
         self.assertTrue(out["launch_ok"] and out["states_ok"])
+        for k in ("orbit_versions", "orbit_undo", "orbit_build_needs_approval", "orbit_workflow", "orbit_go_ahead", "orbit_architect_refused", "orbit_card", "orbit_denied", "orbit_immersive", "orbit_immersive_exit", "orbit_outline", "orbit_recovered"):
+            self.assertTrue(out[k], k)
         self.assertTrue(out["dangerous"])
         self.assertFalse(out["auto_default"])
         self.assertEqual(r.returncode, 0, r.stderr[-2000:])

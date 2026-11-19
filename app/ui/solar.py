@@ -32,6 +32,8 @@ STATES = {
     "RESEARCHING": (1, 1.0, (0.97, 1.03, 1.1), 1.0),
     "BUILDING": (1, 1.35, (1.12, 0.92, 0.78), 1.0),
     "ADAPTING": (3, 1.4, (1.0, 1.0, 1.0), 1.0),
+    "PLANNING": (1, 0.95, (1.03, 1.02, 0.96), 1.0),
+    "EXECUTING": (1, 1.25, (1.06, 0.96, 0.86), 1.0),
     "SPEAKING": (2, 1.45, (1.04, 1.0, 0.95), 1.0),
     "LISTENING": (2, 0.85, (0.92, 1.0, 1.1), 0.95),
     "PAUSED": (0, 0.55, (0.95, 0.95, 0.95), 0.85),
@@ -39,7 +41,7 @@ STATES = {
     "ERROR": (0, 0.5, (1.18, 0.72, 0.62), 0.8),
     "OFFLINE": (0, 0.3, (0.62, 0.62, 0.68), 0.45),
 }
-ACTIVE = {"THINKING", "WORKING", "RESEARCHING", "BUILDING", "ADAPTING"}
+ACTIVE = {"THINKING", "WORKING", "RESEARCHING", "BUILDING", "ADAPTING", "PLANNING", "EXECUTING"}
 AUDIO = {"SPEAKING", "LISTENING"}
 
 _TINT_DECL = "uniform float u_birth_scale; // 0 during the star-birth intro, ramps to 1\nuniform vec3 u_tint;\nuniform float u_dim;"
@@ -68,6 +70,10 @@ class SolarAvatar(g.SolarSunWidget):
         self._paused = False
         self._active_window = True
         self._has_tint = False
+        self.progress = 0.0  # EXECUTING: the real completed share of the ORBIT workflow
+        #: The sun's size inside the widget (1 = the HUD's size). ORBIT draws a smaller disc in a larger
+        #: widget so the corona fades out inside the widget instead of being cut off at its edges.
+        self.disc_scale = 1.0
         self.setAccessibleName("Prometheus, the solar avatar")
         self._sign = _StateSign(self)
         self._sign.setGeometry(self.rect())
@@ -94,6 +100,8 @@ class SolarAvatar(g.SolarSunWidget):
         if self.semantic not in AUDIO:
             self.audio_level *= 0.85  # a level that stopped arriving fades instead of sticking
         super().advance_frame()
+        if not self.birth.active and self.disc_scale != 1.0:
+            self._birth_scale = self.disc_scale
         if self._sign is not None:
             self._sign.update()
 
@@ -170,5 +178,8 @@ class _StateSign(QWidget):
         if a.birth.active:
             return
         p = QPainter(self)
-        avatar_overlay.draw(p, self.width(), self.height(), a.semantic, 0.0 if a._reduced else a.time, float(a.audio_level))
+        k = max(0.3, min(1.0, a.disc_scale))  # a smaller disc (ORBIT's stage) keeps its sign close to it
+        w, h = self.width() * k, self.height() * k
+        p.translate((self.width() - w) / 2, (self.height() - h) / 2)
+        avatar_overlay.draw(p, w, h, a.semantic, 0.0 if a._reduced else a.time, float(a.progress if a.semantic == "EXECUTING" else a.audio_level))
         p.end()

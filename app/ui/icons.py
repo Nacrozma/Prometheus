@@ -12,6 +12,7 @@ from PyQt6.QtSvg import QSvgRenderer
 _PATHS = {
     # sun: Prometheus's mark
     "sun": '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/>',
+    "orbit": '<circle cx="12" cy="12" r="3.2"/><ellipse cx="12" cy="12" rx="9.5" ry="4.2" transform="rotate(-25 12 12)"/><circle cx="19.6" cy="8.6" r="1.2"/>',
     "home": '<path d="M3.5 10.5 12 3.8l8.5 6.7"/><path d="M5.5 9v10.5h13V9"/><path d="M10 19.5v-5.2h4v5.2"/>',
     "chat": '<path d="M4 5.5h16v10.5H9.5L5.2 19.6V16H4z"/><path d="M8 9.5h8M8 12.5h5"/>',
     "memory": '<circle cx="6.5" cy="7" r="2.3"/><circle cx="17.5" cy="6.5" r="2.3"/><circle cx="12" cy="17" r="2.6"/><path d="M8.5 8.3 10.8 14.8M15.6 8.1 13.3 14.6M8.8 7 15.2 6.6"/>',
