@@ -198,13 +198,14 @@ class SettingsPage(Page):
         vc.body.addWidget(setup_btn)
         self._voice_status_text = lambda: " · ".join([  # noqa: E731
             "Voice input: " + ("ready (whisper.cpp, " + str(local_stt.status(paths.data_dir)["model"]).capitalize() + " model)" if local_stt.status(paths.data_dir)["ready"] else "ready (Python Whisper)" if g.VOICE_INPUT_AVAILABLE else "not set up"),
-            "Speech output (edge-tts): " + ("ready" if g.VOICE_OUTPUT_AVAILABLE else "not available"),
         ])
         self.voice_status.setText(self._voice_status_text())
         for k, why in g.VOICE_MISSING.items():
             if k != "speech_input":
                 vc.body.addWidget(label(why, "faint"))
-        vc.body.addWidget(label("Voice input runs on this computer: recordings are transcribed in memory and never saved or sent. Speech output uses Microsoft's online edge-tts service: the text being spoken is sent to it.", "faint"))
+        vc.body.addWidget(label("Voice input runs on this computer: recordings are transcribed in memory and never saved or sent.", "faint"))
+        self.speech_slot = QVBoxLayout()
+        vc.body.addLayout(self.speech_slot)
         add('Voice', 'mic', 'Speaking and listening, and where the audio goes.', vc)
 
         # ---- data ----
@@ -411,3 +412,10 @@ class SettingsPage(Page):
         dlg = VoiceSetupDialog(self.paths.data_dir, self)
         dlg.ready.connect(lambda: (self.voice_status.setText(self._voice_status_text()), self.voice_changed.emit()))
         dlg.exec()
+
+    def attach_speech(self, speech) -> None:
+        """Spoken replies controls, bound to the app's one speech service."""
+        from ..voice_settings import SpokenReplies
+
+        self.spoken = SpokenReplies(speech, self.settings, self.paths.data_dir)
+        self.speech_slot.addWidget(self.spoken)

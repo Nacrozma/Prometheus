@@ -412,7 +412,7 @@ class OrbitPage(Page):
     immersive_changed = pyqtSignal(bool)
     state_changed = pyqtSignal(str)
 
-    def __init__(self, core, settings, conversations, notify=None, parent=None):
+    def __init__(self, core, settings, conversations, notify=None, parent=None, speech=None):
         super().__init__(core, parent)
         import gui_markdown as md
         import gui_orb as g
@@ -438,14 +438,16 @@ class OrbitPage(Page):
         self.state = "IDLE"
         self._build()
 
-        # voice: the existing pipelines, used only where installed
-        self.tts = None
-        if g.VOICE_OUTPUT_AVAILABLE:
-            try:
-                self.tts = g.TTSManager(voice=self.config.get("voice"), audio_callback=self._play_level, rate_percent=self.config.get("speech_rate", 0))
-                self.tts.set_muted(not self.config.get("speech_enabled", True))
-            except Exception:
-                self.tts = None
+        # voice: the one shared speech service (the same preferences as the Companion)
+        if speech is None:
+            from ..speech_bridge import SpeechBridge
+
+            speech = SpeechBridge(core.paths()["data"], settings, parent=self)
+        self.tts = speech
+        self._speech_mine = False
+        self.tts.level.connect(lambda lv: self._speech_mine and self._play_level(lv))
+        self.tts.speaking.connect(self._speech_state)
+        self.tts.error.connect(self._speech_error)
         self.voice = None
         self.refresh_voice()
         # after Prometheus finishes speaking, listen again (continuous conversation)
@@ -1545,7 +1547,7 @@ class OrbitPage(Page):
         from ..voice_setup import voice_input_text
 
         parts = [voice_input_text(self.voice)]
-        parts.append("Speech: edge-tts (reply text goes to Microsoft's speech service)" if self.tts and self.config.get("speech_enabled", True) else "Speech: muted" if self.tts else "Speech: not available")
+        parts.append(self.tts.describe())
         return " · ".join(parts)
 
     def voice_options(self) -> None:
@@ -1655,10 +1657,8 @@ class OrbitPage(Page):
             if self.state in ("THINKING", "PLANNING"):
                 self.set_state("IDLE")
             return
-        if self.tts and self.config.get("speech_enabled", True):
-            self.tts.speak(self.md.clean_for_speech(text))
-            if self.state not in ("RUNNING", "WARNING"):
-                self.set_state("SPEAKING")
+        if self.tts.enabled and self.tts.speak(text):
+            self._speech_mine = True  # SPEAKING is shown when audio really starts (_speech_state)
             self._speech_watch.start()
         else:
             if self.state in ("THINKING", "PLANNING", "SPEAKING"):
@@ -1670,9 +1670,12 @@ class OrbitPage(Page):
         return not self._running() and self.card is None
 
     def _watch_speech(self) -> None:
-        if self.tts is not None and self.tts.is_busy:
+        if self.tts.is_busy:
             return
         self._speech_watch.stop()
+        if not self._speech_mine:
+            return  # stopped or failed: _speech_error / stop_speaking already decided what happens next
+        self._speech_mine = False
         if self.state == "SPEAKING":
             self.set_state("IDLE")
         if self.continuous and self.voice is not None and self._spoke_back_ok() and self._was_conversing():
@@ -1681,13 +1684,33 @@ class OrbitPage(Page):
     def _was_conversing(self) -> bool:
         return getattr(self, "_conversing", True)
 
+    def _speech_state(self, playing: bool) -> None:
+        """The sun speaks only while audio really plays."""
+        if not self._speech_mine:
+            return
+        if playing:
+            if self.state not in ("RUNNING", "WARNING"):
+                self.set_state("SPEAKING")
+        elif self.state == "SPEAKING":
+            self.set_state("IDLE")
+
+    def _speech_error(self, msg: str) -> None:
+        if not self._speech_mine:
+            return
+        self._speech_mine = False
+        self._line("ORBIT", f"Not spoken: {msg}", T.WARN)
+        self._flush()
+        self._speech_watch.stop()
+        if self.state == "SPEAKING":
+            self.set_state("IDLE")
+        # continuous conversation goes on without speech: listen again as if the reply had been spoken
+        if self.continuous and self.voice is not None and self._spoke_back_ok() and self._was_conversing():
+            QTimer.singleShot(400, self.listen)
+
     def stop_speaking(self) -> None:
-        if self.tts:
-            try:
-                self.tts.set_muted(True)
-                self.tts.set_muted(not self.config.get("speech_enabled", True))
-            except Exception:
-                pass
+        if self._speech_mine or self.tts.is_busy:
+            self.tts.stop()
+        self._speech_mine = False
         self._speech_watch.stop()
         if self.state == "SPEAKING":
             self.set_state("IDLE")
@@ -1714,13 +1737,13 @@ class OrbitPage(Page):
 
     def _space(self) -> None:
         """Space on the canvas: stop Prometheus speaking, otherwise start or finish talking."""
-        if self.tts is not None and self.tts.is_busy:
+        if self.tts.is_busy:
             self.stop_speaking()
         else:
             self.talk_shortcut()
 
     def _escape(self) -> None:
-        if self.tts is not None and self.tts.is_busy:
+        if self.tts.is_busy:
             self.stop_speaking()
         elif self.listening:
             self._stop_listening()

@@ -153,6 +153,16 @@ def main(argv=None) -> int:
     except OSError:
         pass
 
+    # spoken replies: decide the engine once (an upgrade keeps 2.2.0's Microsoft voice; a fresh install is local)
+    try:
+        from gui_config import AppConfig
+        from .services.speech import resolve_preferences
+
+        legacy = AppConfig()
+        resolve_preferences(settings, {k: legacy.get(k) for k in ("voice", "speech_enabled", "speech_rate")}, upgraded=bool(settings.get("first_run_done")))
+    except Exception as e:  # never block start-up on this; the Voice settings show the state
+        print(f"[speech] preferences not resolved: {type(e).__name__}: {e}")
+
     creds = CredentialStore()
     load_keys(paths.data_dir, creds, bootstrap.SOURCE_DIR if not bootstrap.frozen() else "")
 

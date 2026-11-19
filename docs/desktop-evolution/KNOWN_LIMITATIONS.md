@@ -9,7 +9,7 @@ Stated plainly so nothing is mistaken for validated.
   signed out and in with "Start when I sign in", or used it on a high-DPI or multi-monitor setup.
 * **The orb on a real GPU** (CPU use, colours) is unmeasured; screenshots use software OpenGL.
 * **macOS and Linux desktop sessions**: adapters exist, nothing validated (see CROSS_PLATFORM_ROADMAP).
-* **Voice in the packaged app**: speech output (edge-tts, needs internet) is bundled but not tested
+* **Voice in the packaged app**: speech output (local sherpa-onnx after setup, or Microsoft edge-tts online) is generated and checked on Windows CI, but not heard on a real speaker; previously
   on Windows audio hardware. Voice input is set up from Settings → Voice
   (whisper.cpp + a model, downloaded and checksum-verified on first use); the download, checksum and one
   transcription are checked on Windows CI, but not with a real microphone.

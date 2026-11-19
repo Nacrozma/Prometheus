@@ -33,7 +33,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  APP_VERSION: "2.2.0"
+  APP_VERSION: "2.3.0"
 
 jobs:
   tests-windows:
@@ -52,6 +52,8 @@ jobs:
         run: python -m pytest tests -q -p no:cacheprovider
       - name: Voice input setup, for real (download whisper.cpp + Tiny model, verify SHA-256, transcribe a tone)
         run: python -m app.services.local_stt --ci-check "$env:RUNNER_TEMP\stt"
+      - name: Local speech, for real (download sherpa-onnx + Alba voice, verify SHA-256, generate speech, try playback)
+        run: python -m app.services.speech --ci-check "$env:RUNNER_TEMP\tts"
 
   build-and-verify:
     runs-on: windows-latest
@@ -184,14 +186,14 @@ jobs:
         run: |
           sha=$(cut -d' ' -f1 release/SHA256SUMS.txt)
           cat > notes.md <<NOTES
-          # Prometheus Desktop ${APP_VERSION} — voice input set up from inside Prometheus
+          # Prometheus Desktop ${APP_VERSION} — Prometheus speaks on its own terms
 
           Windows 10/11, 64-bit. **Unsigned installer**: Windows SmartScreen will warn about an unknown publisher.
           Check the SHA-256 before running it, then choose *More info → Run anyway*.
 
           SHA-256 of \`Prometheus-Setup-${APP_VERSION}-x64-unsigned.exe\`: \`${sha}\`
 
-          What is new: [docs/RELEASE_NOTES_2.2.0.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/RELEASE_NOTES_2.2.0.md) ·
+          What is new: [docs/RELEASE_NOTES_2.3.0.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/RELEASE_NOTES_2.3.0.md) ·
           How to install: [WINDOWS_INSTALLATION.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/desktop-evolution/WINDOWS_INSTALLATION.md) ·
           Known limitations: [KNOWN_LIMITATIONS.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/desktop-evolution/KNOWN_LIMITATIONS.md)
 

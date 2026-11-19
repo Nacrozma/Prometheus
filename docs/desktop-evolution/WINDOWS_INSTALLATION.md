@@ -44,7 +44,16 @@ export to Obsidian, an approval card shows the exact action: **Deny** is the def
 Ctrl+K jumps anywhere.
 
 ## Voice
-Speech output works if your PC has internet (Microsoft edge-tts; the spoken text is sent to it).
+Spoken replies (from 2.3.0): Settings → Voice → Spoken replies. Choose **On this computer** (press
+*Set up local voice…*, pick a voice, about 27 MB engine + 65 MB per voice; speech is generated on your PC,
+no internet needed afterwards, no reply text leaves it) or **Microsoft online voice** (the reply text is sent
+to Microsoft; needs internet). Pick a voice and speed, press *Test voice*. If the chosen engine cannot speak,
+replies stay as text: Prometheus never switches to the other engine by itself. In 2.2.0 and earlier, speech
+always used Microsoft's online service.
+
+Troubleshooting spoken replies: "not set up" → run *Set up local voice…*; "could not generate speech" →
+*Repair or add voices…*; "could not be reached" (Microsoft) → check the internet or switch to the local voice;
+"speaker could not be used" → check the Windows sound output device.
 Voice input: open **Settings → Voice → Set up voice input**, pick a model (Base is recommended, 142 MB)
 and press *Download and set up*. Prometheus downloads the whisper.cpp engine (4 MB, github.com) and the
 model (huggingface.co), checks both against their published SHA-256, and from then on turns speech into

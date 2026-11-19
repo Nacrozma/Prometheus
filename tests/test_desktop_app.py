@@ -474,6 +474,9 @@ SMOKE = textwrap.dedent(
         orb.toggle_view()
         reopened = orb.store.get(orb.session["id"])
         out["orbit_recovered"] = reopened is not None and reopened["workflow"]["nodes"][0]["status"] == "paused"
+        # one speech service for the whole app; its controls live in Settings → Voice
+        out["speech_shared"] = win.companion.tts is win.speech and win.orbit.tts is win.speech and win.settings_page.spoken.speech is win.speech
+        out["speech_engine_decided"] = win.settings.get("speech_engine") in ("local", "microsoft")
         out["dangerous"] = win.core.is_dangerous("write_file") and win.core.is_dangerous("execute_shell")
         out["auto_default"] = win.settings.get("auto_approve")
         print("RESULT" + json.dumps(out))
@@ -508,7 +511,7 @@ class TestWindowSmoke(unittest.TestCase):
         self.assertTrue(out["new_conv"] and out["renamed"] and out["deleted"])
         self.assertTrue(out["toast"] and out["activity"] and out["last_section"])
         self.assertTrue(out["launch_ok"] and out["states_ok"])
-        for k in ("orbit_versions", "orbit_undo", "orbit_build_needs_approval", "orbit_workflow", "orbit_go_ahead", "orbit_architect_refused", "orbit_card", "orbit_denied", "orbit_immersive", "orbit_immersive_exit", "orbit_outline", "orbit_recovered"):
+        for k in ("orbit_versions", "orbit_undo", "orbit_build_needs_approval", "orbit_workflow", "orbit_go_ahead", "orbit_architect_refused", "orbit_card", "orbit_denied", "orbit_immersive", "orbit_immersive_exit", "orbit_outline", "orbit_recovered", "speech_shared", "speech_engine_decided"):
             self.assertTrue(out[k], k)
         self.assertTrue(out["dangerous"])
         self.assertFalse(out["auto_default"])

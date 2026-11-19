@@ -201,6 +201,10 @@ QCheckBox {{ spacing: 8px; }}
 QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid {BORDER_STRONG}; border-radius: 4px; background: {SURFACE_ELEVATED}; }}
 QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
 QCheckBox::indicator:disabled {{ background: {SURFACE}; border-color: {BORDER}; }}
+QRadioButton {{ spacing: 8px; }}
+QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid {BORDER_STRONG}; border-radius: 8px; background: {SURFACE_ELEVATED}; }}
+QRadioButton::indicator:checked {{ background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 {ACCENT}, stop:0.45 {ACCENT}, stop:0.55 {SURFACE_ELEVATED}, stop:1 {SURFACE_ELEVATED}); border-color: {ACCENT}; }}
+QRadioButton::indicator:focus {{ border-color: {FOCUS}; }}
 QCheckBox:focus {{ color: {HIGHLIGHT}; }}
 QScrollArea {{ background: transparent; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}

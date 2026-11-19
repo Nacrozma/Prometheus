@@ -43,6 +43,13 @@ DEFAULTS: Dict[str, Any] = {
     "orbit_sensitivity": 0.5,
     #: ORBIT: autonomy for new sessions (approval_first, balanced, advanced).
     "orbit_autonomy": "approval_first",
+    #: Spoken replies (one shared speech service for Companion and ORBIT). speech_engine "" means "not
+    #: decided yet": resolved once at start (upgrade keeps Microsoft online, fresh install starts local).
+    "speech_enabled": True,
+    "speech_engine": "",
+    "speech_voice_local": "en_GB-alba-medium",
+    "speech_voice_online": "en-US-ChristopherNeural",
+    "speech_speed": 1.0,
     #: ORBIT: the last session, reopened when you return.
     "orbit_session": "",
 }

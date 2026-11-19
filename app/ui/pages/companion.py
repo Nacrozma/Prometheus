@@ -253,7 +253,7 @@ class CompanionPage(Page):
     state_changed = pyqtSignal(str)
     busy_changed = pyqtSignal(bool)
 
-    def __init__(self, core, settings, conversations=None, parent=None):
+    def __init__(self, core, settings, conversations=None, parent=None, speech=None):
         super().__init__(core, parent)
         import gui_orb as g
         import gui_markdown as md
@@ -303,14 +303,16 @@ class CompanionPage(Page):
         self.hist_btn.setChecked(self.history_panel.isVisible())
         self.ctx_btn.setChecked(self.context_panel.isVisible())
 
-        # Speech: the existing pipeline, used only where its packages are installed.
-        self.tts = None
-        if g.VOICE_OUTPUT_AVAILABLE:
-            try:
-                self.tts = g.TTSManager(voice=self.config.get("voice"), audio_callback=self._audio_level, rate_percent=self.config.get("speech_rate", 0))
-                self.tts.set_muted(not self.config.get("speech_enabled", True))
-            except Exception:
-                self.tts = None
+        # Speech: the one shared speech service (Settings → Voice decides engine, voice, speed, on/off).
+        if speech is None:
+            from ..speech_bridge import SpeechBridge
+
+            speech = SpeechBridge(core.paths()["data"], settings, parent=self)
+        self.tts = speech
+        self._speech_mine = False
+        self.tts.level.connect(lambda lv: self._speech_mine and self._audio_level(lv))
+        self.tts.speaking.connect(self._speech_state)
+        self.tts.error.connect(self._speech_error)
         self.voice = None
         self.refresh_voice()
 
@@ -598,7 +600,7 @@ class CompanionPage(Page):
         self.voice_lbl.setText(self._voice_text())
 
     def _voice_text(self) -> str:
-        speech = "Speech: " + ("on (edge-tts, sends the reply text to Microsoft's speech service)" if self.tts and self.config.get("speech_enabled", True) else "ready, muted" if self.tts else "not available")
+        speech = self.tts.describe()
         from ..voice_setup import voice_input_text
 
         return voice_input_text(self.voice) + "\n" + speech
@@ -874,15 +876,31 @@ class CompanionPage(Page):
         self.entries[idx] = self._entry("Prometheus", self._md(text), T.ACCENT, self._actions(idx, False))
         self.streaming = None
         self._render()
-        if self.tts and not self.spoke and text.strip():
-            self.tts.speak(self.md.clean_for_speech(text))
-            self.set_state("SPEAKING")
+        if self.tts.enabled and not self.spoke and text.strip():
+            self._speech_mine = self.tts.speak(text) or self._speech_mine
 
     def _speak_sentence(self, sentence: str) -> None:
-        if self.tts:
+        if self.tts.enabled:
             self.spoke = True
-            self.tts.speak(sentence)
+            self._speech_mine = self.tts.speak(sentence) or self._speech_mine
+
+    def _speech_state(self, playing: bool) -> None:
+        """The avatar speaks only while audio really plays (signal from the speech service)."""
+        if not self._speech_mine:
+            return
+        if playing:
             self.set_state("SPEAKING")
+        else:
+            self._speech_mine = False
+            if self.state == "SPEAKING":
+                self.set_state("IDLE")
+
+    def _speech_error(self, msg: str) -> None:
+        if self._speech_mine:
+            self._speech_mine = False
+            self.add("System", f"Not spoken: {msg}", T.WARN)
+            if self.state == "SPEAKING":
+                self.set_state("IDLE")
 
     def _tool_done(self, tool: str, args: str, result: str) -> None:
         try:
@@ -935,12 +953,9 @@ class CompanionPage(Page):
             self.card = None
 
     def stop(self) -> None:
-        if self.tts:
-            try:
-                self.tts.set_muted(True)
-                self.tts.set_muted(not self.config.get("speech_enabled", True))
-            except Exception:
-                pass
+        if self._speech_mine:
+            self.tts.stop()
+            self._speech_mine = False
         if self.busy():
             if self.card is not None:
                 self._answer("the pending tool", False)
@@ -967,7 +982,7 @@ class CompanionPage(Page):
         if self.state not in ("SPEAKING", "ERROR", "OFFLINE"):
             self.set_state("SUCCESS")
         if self.state != "ERROR":
-            self._idle_timer.start(2500 if not (self.tts and self.tts.is_busy) else 6000)
+            self._idle_timer.start(2500 if not self.tts.is_busy else 6000)
 
     def start_mission(self, discipline: str, project: str, objective: str) -> bool:
         """Open a new conversation framed by a Forge discipline and send the mission."""

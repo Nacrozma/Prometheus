@@ -318,8 +318,12 @@ class MainWindow(QMainWindow):
         # each page shows its navigation group as an eyebrow above the title
         for name, cls in (("Home", HomePage), ("Companion", CompanionPage), ("ORBIT", OrbitPage), ("Memory", MemoryPage), ("Engineering", EngineeringPage), ("Forge", ForgePage), ("Workspace", WorkspacePage), ("Reminders & tasks", TasksPage), ("Obsidian", ObsidianPage), ("Robot arm (simulation)", ArmPage), ("Reflection", ReflectionPage), ("Trust & safety", TrustPage), ("Settings", SettingsPage)):
             cls.eyebrow = SECTION_GROUP[name]
-        self.companion = CompanionPage(core, settings, self.conversations)
-        self.orbit = OrbitPage(core, settings, self.conversations, notify=lambda text, detail="", tone="ok": self.notify(text, tone, detail, "ORBIT"))
+        from .speech_bridge import SpeechBridge
+
+        # one speech service for the whole app (Companion and ORBIT share engine, voice, speed and the speaker)
+        self.speech = SpeechBridge(paths.data_dir, settings, parent=self)
+        self.companion = CompanionPage(core, settings, self.conversations, speech=self.speech)
+        self.orbit = OrbitPage(core, settings, self.conversations, speech=self.speech, notify=lambda text, detail="", tone="ok": self.notify(text, tone, detail, "ORBIT"))
         self.pages: Dict[str, QWidget] = {
             "Home": HomePage(core, settings, self.conversations, self),
             "Companion": self.companion,
@@ -336,6 +340,7 @@ class MainWindow(QMainWindow):
             "Settings": SettingsPage(core, settings, creds, platform, paths),
         }
         self.settings_page: SettingsPage = self.pages["Settings"]  # type: ignore[assignment]
+        self.settings_page.attach_speech(self.speech)
 
         central = QWidget()
         central.setObjectName("root")
@@ -710,5 +715,6 @@ class MainWindow(QMainWindow):
             pass
         self.companion.shutdown()
         self.orbit.shutdown()
+        self.speech.shutdown()
         if self.tray is not None:
             self.tray.hide()
