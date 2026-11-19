@@ -33,7 +33,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  APP_VERSION: "2.0.0"
+  APP_VERSION: "2.1.0"
 
 jobs:
   tests-windows:
@@ -182,14 +182,14 @@ jobs:
         run: |
           sha=$(cut -d' ' -f1 release/SHA256SUMS.txt)
           cat > notes.md <<NOTES
-          # Prometheus Desktop ${APP_VERSION} — the Renaissance
+          # Prometheus Desktop ${APP_VERSION} — ORBIT
 
           Windows 10/11, 64-bit. **Unsigned installer**: Windows SmartScreen will warn about an unknown publisher.
           Check the SHA-256 before running it, then choose *More info → Run anyway*.
 
           SHA-256 of \`Prometheus-Setup-${APP_VERSION}-x64-unsigned.exe\`: \`${sha}\`
 
-          What is new: [docs/RENAISSANCE_RELEASE_NOTES.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/RENAISSANCE_RELEASE_NOTES.md) ·
+          What is new: [docs/ORBIT_RELEASE_NOTES.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/ORBIT_RELEASE_NOTES.md) ·
           How to install: [WINDOWS_INSTALLATION.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/desktop-evolution/WINDOWS_INSTALLATION.md) ·
           Known limitations: [KNOWN_LIMITATIONS.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/desktop-evolution/KNOWN_LIMITATIONS.md)
 

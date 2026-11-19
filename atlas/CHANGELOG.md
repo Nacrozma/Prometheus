@@ -1,8 +1,15 @@
 # Changelog
 
-## 0.5.0 — in progress (not released)
+## 0.5.0 — 2026-11-19
 
 ### Added
+- **ORBIT** (new rail entry, Ctrl+Shift+O): talk with Atlas and watch the plan form as orbits around the voice
+  ring. Plans are versioned (who changed what and why; compare, restore, undo), editable by voice, typing or
+  dragging, and stay drafts until you approve them. An approved plan becomes a workflow of steps (Atlas works on
+  it, Atlas researches it, add to Tasks, you do it) under per-mission autonomy (Approval-first, Balanced,
+  Advanced); tool approvals still go through the Approvals dock every time. Continuous conversation or
+  push-to-talk with Atlas's own on-device voice; an outline view as an alternative to the orbit view; immersive
+  mode. Steps interrupted by closing Atlas are paused, never repeated. Rules live in the core (schema 10).
 - **Tasks** (new Tasks page): deadlines with optional times, priorities, categories, steps, repeats
   (daily, weekdays, weekly, monthly, yearly), postpone, search, Today / This week / Later / No date /
   Done views, and a history on every task.
