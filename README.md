@@ -1,10 +1,25 @@
 # Prometheus
 
 > **Looking for ATLAS Co-Pilot (the Windows desktop app)? → [How to install it](INSTALL.md)**
-> ([download the installer](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.4.2/ATLAS-Co-Pilot-Setup-x64.exe)).
+> (latest: **0.5.0** — [download the installer](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.5.0/ATLAS-Co-Pilot-Setup-x64.exe) ·
+> [release page](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.5.0)).
 > Its source is in [`atlas/`](atlas/) and does not share code with Prometheus.
 
-> **Prometheus 2.0 "Renaissance" (desktop):** [download the Windows installer](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.0.0) (unsigned; check the SHA-256). the same Prometheus as a desktop app with
+> **Prometheus Desktop — latest: 2.3.0** (Windows 10/11, 64-bit, unsigned):
+> **[⬇ download Prometheus-Setup-2.3.0-x64-unsigned.exe](https://github.com/Nacrozma/Prometheus/releases/download/prometheus-desktop-v2.3.0/Prometheus-Setup-2.3.0-x64-unsigned.exe)**
+> · [release page](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.3.0)
+> · SHA-256 `dae9a3966805d630b4bdb56a8ef192c3146e9aa4ce787f65aa8c5aab1ac55ccb`
+> · [all releases](https://github.com/Nacrozma/Prometheus/releases).
+> Windows will warn about an unknown publisher: check the SHA-256, then *More info → Run anyway*.
+>
+> | Version | What it added |
+> |---|---|
+> | [2.3.0](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.3.0) | Spoken replies with a **local voice** (on your PC, no internet) or Microsoft online; voice, speed, Test voice (Settings → Voice) |
+> | [2.2.0](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.2.0) | Voice input set up from inside Prometheus (whisper.cpp, on your PC) |
+> | [2.1.0](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.1.0) | **ORBIT**: plan out loud with Prometheus around the sun, approve, run |
+> | [2.0.0](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.0.0) | The Renaissance desktop app |
+>
+> The same Prometheus as a desktop app with
 > the living solar avatar, a command centre, search across everything (Ctrl+K), many conversations, memory
 > you control, Forge missions (Architect, Builder, Debugger, Reconstructor), workspace and Git, engineering,
 > reminders, Obsidian, arm simulation, Reflection and Trust & safety. Start it from a checkout with
@@ -209,7 +224,8 @@ Trust & safety, Settings. Ctrl+K command palette, tray, single instance, start a
 * Auto-approve: off by default, warns before turning on, shown in the status bar while on.
 * Packaging: `packaging/` (PyInstaller + Inno Setup) and `.github/workflows/prometheus-desktop.yml`,
   which builds, self-tests, installs, upgrades and uninstalls on a Windows VM and uploads an
-  **unsigned** installer as a workflow artifact (no release is published automatically).
+  **unsigned** installer as a workflow artifact; a GitHub release is published only by the workflow's
+  `publish` job, after every Windows check has passed.
 
 Design, security review, tests, limits and screenshots: [`docs/desktop-evolution/`](docs/desktop-evolution/).
 
