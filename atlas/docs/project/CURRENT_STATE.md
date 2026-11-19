@@ -2,6 +2,8 @@
 
 **Updated:** 2026-11-15 · **Branch:** `claude/prometheus-ai-evaluation-pxqzfr` · **Released:** 0.4.2
 
+**ORBIT (2026-11-19, not released):** Atlas's own voice-first planning space (`core/src/orbit.rs`, schema 10 `orbit_sessions`, `orbit_*` commands, `src/features/orbit/`). Rules live in the core; tool approvals stay in the dock. Tests pass (Rust, vitest). Not yet seen in the built app and **no screenshot yet** (owner rule: add one to `docs/screenshots/` before release). Specs: `../../../docs/ORBIT_*.md`.
+
 **Working on:** 0.5.0 is complete (all 7 stages) and awaits the owner's release decision. Not released. Plan: `PLAN_0.5-0.7.md`.
 
 ## Standing rules from the owner

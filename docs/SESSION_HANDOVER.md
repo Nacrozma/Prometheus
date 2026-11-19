@@ -3,7 +3,7 @@
 ## Run and test
 * Run: `pip install -r requirements.txt` then `python -m app` (set `PROMETHEUS_HOME`/`PROMETHEUS_WORKSPACE`
   to throwaway folders when testing).
-* Tests: `python -m pytest tests -q` (485 pass, 2 skipped by design). Window smoke test is in `tests/test_desktop_app.py`.
+* Tests: `python -m pytest tests -q` (498 pass, 2 skipped by design). Window smoke test is in `tests/test_desktop_app.py`.
 * Screenshots: `xvfb-run -s "-screen 0 1600x1000x24" python tools/renaissance_screens.py docs/screenshots/renaissance [names]`.
 
 ## Done (Renaissance)
@@ -25,7 +25,23 @@ PAUSED for approvals), approval cards (`app/services/approval.py`), memory map (
 PAGE_SPECIFICATIONS (renamed from UX_SPECIFICATIONS), MOTION_SYSTEM, LAUNCH_ANIMATION, AVATAR_SYSTEM,
 ACCESSIBILITY, and updates to DESIGN_SYSTEM, VISUAL_QA, TEST_REPORT.
 
-## Next action
+## Done (ORBIT, 2026-11-19)
+Commits `5030ec1` (Prometheus ORBIT) and `5576fd7` (Atlas ORBIT, `atlas/` only), pushed; docs commit follows.
+Prometheus: `app/services/orbit.py` (plans, versions, edits, workflow state machine, recovery, JSON store
+`<data>/orbit/`), `app/services/orbit_voice.py` (turn-taking), `app/ui/pages/orbit.py` (stage, outline, transcript,
+voice, workflow controls, versions), PLANNING/EXECUTING avatar states, nav + Ctrl+Shift+O / Ctrl+Shift+Space +
+immersive + palette + `/orbit`, settings `orbit_*`, Companion Esc scoped to the Companion. Tests:
+`tests/test_orbit.py` + smoke checks; screenshots `tools/orbit_screens.py` → `docs/screenshots/orbit/`.
+Atlas: `core/src/orbit.rs` (rules in the core), schema 10, engine `orbit_session` context, 7 Tauri commands,
+`src/features/orbit/*`, route/rail/immersive; Rust + vitest tests pass. Atlas page not visually checked.
+
+## Next action (ORBIT)
+1. Check the Windows workflow for the ORBIT commits and the Atlas workflow (run 80 was queued at hand-off).
+2. Try ORBIT with a real provider and voice; look at the Atlas ORBIT page in the built app.
+3. Then: versions as diffs / saves off the UI thread; Atlas specialist/Forge step operations; ORBIT buttons on
+   Prometheus Workspace and Forge pages.
+
+## Next action (before ORBIT)
 Windows CI run 12 (commit 4fe3a1d, all Second Birth code) passed: tests, build, install, upgrade,
 uninstall, packaged self-test. Released as prometheus-desktop-v2.0.0 (run 13, SHA-256 2a5a7756…faadd).
 Next: act on the owner's report from their Windows PC.
