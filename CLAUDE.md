@@ -866,6 +866,12 @@ Never publish a production release, create a public announcement or deploy exter
 
 Keep release notes accurate.
 
+> Repository note (owner decision, 2026-11-19): **standing authorisation to publish new versions** of Prometheus
+> Desktop and ATLAS to this repository's GitHub Releases without asking first, provided every release workflow
+> check passes (tests, build, install/upgrade/uninstall, real engine checks) and errors found are fixed first.
+> Never alter or replace an already-published release, tag or installer; always use a new version number; keep
+> release notes honest about what was and was not verified.
+
 > Repository note: the established development branch is `claude/prometheus-ai-evaluation-pxqzfr`. Do not push
 > directly to `main`. Pushes that touch `app/`, `packaging/`, `prometheus.py`, `gui_*.py` or `tests/` start the
 > Windows build-and-install workflow; check its result.
