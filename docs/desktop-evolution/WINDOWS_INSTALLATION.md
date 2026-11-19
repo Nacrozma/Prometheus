@@ -1,15 +1,15 @@
 # Installing Prometheus Desktop on Windows
 
-Prometheus Desktop 2.1.0 ("ORBIT") · Windows 10/11 64-bit · about 10 minutes.
+Prometheus Desktop 2.2.0 · Windows 10/11 64-bit · about 10 minutes.
 (This is Prometheus, the solar orb. ATLAS Co-Pilot is a different app: see the repository's INSTALL.md.)
 
 ## 1. Get the installer
-Download **Prometheus-Setup-2.1.0-x64-unsigned.exe** and **SHA256SUMS.txt** from the release page:
-https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.1.0
+Download **Prometheus-Setup-2.2.0-x64-unsigned.exe** and **SHA256SUMS.txt** from the release page:
+https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.2.0
 
 Check the download (PowerShell, in the folder you downloaded to):
 ```
-Get-FileHash .\Prometheus-Setup-2.1.0-x64-unsigned.exe -Algorithm SHA256
+Get-FileHash .\Prometheus-Setup-2.2.0-x64-unsigned.exe -Algorithm SHA256
 ```
 The result must match the value in `SHA256SUMS.txt` (also shown on the release page).
 
@@ -18,7 +18,7 @@ Double-click the installer. It is **not code-signed**, so Windows SmartScreen sa
 your PC": choose **More info → Run anyway** only if the checksum matched.
 * Installs for your user only (no administrator rights) into `%LOCALAPPDATA%\Programs\Prometheus`.
 * Adds a Start-menu entry; a desktop shortcut is optional.
-* Silent install: `Prometheus-Setup-2.1.0-x64-unsigned.exe /VERYSILENT /CURRENTUSER`.
+* Silent install: `Prometheus-Setup-2.2.0-x64-unsigned.exe /VERYSILENT /CURRENTUSER`.
 
 ## 3. First start
 The birth of the sun plays once (click or press Esc to skip it), then a short welcome helps you connect a
@@ -45,8 +45,11 @@ Ctrl+K jumps anywhere.
 
 ## Voice
 Speech output works if your PC has internet (Microsoft edge-tts; the spoken text is sent to it).
-Voice input (Whisper) is not included in the installer because it needs PyTorch (>1 GB); it works
-when running from source with `pip install openai-whisper`.
+Voice input: open **Settings → Voice → Set up voice input**, pick a model (Base is recommended, 142 MB)
+and press *Download and set up*. Prometheus downloads the whisper.cpp engine (4 MB, github.com) and the
+model (huggingface.co), checks both against their published SHA-256, and from then on turns speech into
+text on your PC. Talk then works in the Companion and in ORBIT, no restart needed. Remove the files from
+the same dialog.
 
 ## Upgrading
 Run a newer installer: it replaces the program in place and keeps your data and keys.

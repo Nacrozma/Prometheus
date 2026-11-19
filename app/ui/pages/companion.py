@@ -311,15 +311,8 @@ class CompanionPage(Page):
                 self.tts.set_muted(not self.config.get("speech_enabled", True))
             except Exception:
                 self.tts = None
-        self.voice = g.WhisperVoiceThread() if g.VOICE_INPUT_AVAILABLE else None
-        if self.voice is not None:
-            self.voice.transcription_done.connect(self._transcribed)
-            self.voice.status_signal.connect(lambda s: self.state_lbl.setText(s.capitalize()))
-            self.voice.audio_level_signal.connect(self._audio_level)
-            self.voice.finished.connect(lambda: self.mic.setChecked(False))
-        self.mic.setEnabled(self.voice is not None)
-        self.mic.setToolTip("Talk (speech is transcribed on this computer by Whisper; the text is put in the box for you to check)" if self.voice else "Voice input needs openai-whisper (pip install openai-whisper). See Settings → Voice.")
-        self.voice_lbl.setText(self._voice_text())
+        self.voice = None
+        self.refresh_voice()
 
         QShortcut(QKeySequence("Escape"), self, activated=self.stop, context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._idle_timer = QTimer(self)
@@ -588,9 +581,27 @@ class CompanionPage(Page):
         return True
 
     # ----- display -----
+    def refresh_voice(self) -> None:
+        """Pick up voice input set up (or removed) in Settings → Voice, without a restart."""
+        from ..voice_setup import make_voice_input
+
+        if self.voice is not None and self.voice.isRunning():
+            return
+        self.voice = make_voice_input(self.core.paths()["data"])
+        if self.voice is not None:
+            self.voice.transcription_done.connect(self._transcribed)
+            self.voice.status_signal.connect(lambda s: self.state_lbl.setText(s.capitalize()))
+            self.voice.audio_level_signal.connect(self._audio_level)
+            self.voice.finished.connect(lambda: self.mic.setChecked(False))
+        self.mic.setEnabled(self.voice is not None)
+        self.mic.setToolTip("Talk (speech is transcribed on this computer; the text is put in the box for you to check)" if self.voice else "Voice input is not set up: Settings → Voice → Set up voice input.")
+        self.voice_lbl.setText(self._voice_text())
+
     def _voice_text(self) -> str:
         speech = "Speech: " + ("on (edge-tts, sends the reply text to Microsoft's speech service)" if self.tts and self.config.get("speech_enabled", True) else "ready, muted" if self.tts else "not available")
-        return ("Voice input: on this computer (Whisper)" if self.voice else "Voice input: not installed") + "\n" + speech
+        from ..voice_setup import voice_input_text
+
+        return voice_input_text(self.voice) + "\n" + speech
 
     def refresh(self) -> None:
         r = self.core.router

@@ -6,4 +6,4 @@ what a desktop application needs on top of it: start-up, platform integration an
 
 APP_NAME = "Prometheus"
 APP_ID = "Prometheus.Desktop"
-__version__ = "2.1.0"
+__version__ = "2.2.0"

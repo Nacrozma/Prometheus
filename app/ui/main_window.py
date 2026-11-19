@@ -381,6 +381,7 @@ class MainWindow(QMainWindow):
         # settings → behaviour
         self.settings_page.behaviour_changed.connect(self._apply_behaviour)
         self.settings_page.restart_requested.connect(self._restart_needed)
+        self.settings_page.voice_changed.connect(lambda: (self.companion.refresh_voice(), self.orbit.refresh_voice()))
 
         # shortcuts
         QShortcut(QKeySequence("Ctrl+K"), self, activated=self.open_palette)

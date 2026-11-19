@@ -446,15 +446,8 @@ class OrbitPage(Page):
                 self.tts.set_muted(not self.config.get("speech_enabled", True))
             except Exception:
                 self.tts = None
-        self.voice = g.WhisperVoiceThread() if g.VOICE_INPUT_AVAILABLE else None
-        if self.voice is not None:
-            self.voice.transcription_done.connect(self._heard)
-            self.voice.audio_level_signal.connect(self._mic_level)
-            self.voice.status_signal.connect(self._voice_status)
-            self.voice.finished.connect(self._voice_finished)
-        self.talk_btn.setEnabled(self.voice is not None)
-        self.talk_btn.setToolTip("Talk (Ctrl+Shift+Space). Speech is transcribed on this computer." if self.voice else "Voice input needs openai-whisper and sounddevice; type instead. See Settings → Voice.")
-        self.voice_info.setText(self._voice_text())
+        self.voice = None
+        self.refresh_voice()
         # after Prometheus finishes speaking, listen again (continuous conversation)
         self._speech_watch = QTimer(self)
         self._speech_watch.setInterval(250)
@@ -1532,8 +1525,26 @@ class OrbitPage(Page):
         self.render_all()
 
     # ----- voice -----
+    def refresh_voice(self) -> None:
+        """Pick up voice input set up (or removed) in Settings → Voice, without a restart."""
+        from ..voice_setup import make_voice_input
+
+        if self.voice is not None and self.voice.isRunning():
+            return
+        self.voice = make_voice_input(self.core.paths()["data"])
+        if self.voice is not None:
+            self.voice.transcription_done.connect(self._heard)
+            self.voice.audio_level_signal.connect(self._mic_level)
+            self.voice.status_signal.connect(self._voice_status)
+            self.voice.finished.connect(self._voice_finished)
+        self.talk_btn.setEnabled(self.voice is not None)
+        self.talk_btn.setToolTip("Talk (Ctrl+Shift+Space). Speech is transcribed on this computer." if self.voice else "Voice input is not set up: Settings → Voice → Set up voice input. You can type meanwhile.")
+        self.voice_info.setText(self._voice_text())
+
     def _voice_text(self) -> str:
-        parts = ["Voice input: on this computer (Whisper)" if self.voice else "Voice input: not installed — type instead"]
+        from ..voice_setup import voice_input_text
+
+        parts = [voice_input_text(self.voice)]
         parts.append("Speech: edge-tts (reply text goes to Microsoft's speech service)" if self.tts and self.config.get("speech_enabled", True) else "Speech: muted" if self.tts else "Speech: not available")
         return " · ".join(parts)
 

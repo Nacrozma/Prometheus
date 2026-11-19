@@ -23,6 +23,7 @@ class SettingsPage(Page):
     subtitle = "Providers and models, workspace, desktop behaviour, voice, data and backups."
     restart_requested = pyqtSignal()
     behaviour_changed = pyqtSignal()
+    voice_changed = pyqtSignal()
 
     def __init__(self, core, settings, creds, platform, paths, parent=None):
         super().__init__(core, parent)
@@ -186,11 +187,24 @@ class SettingsPage(Page):
         vc = Card("")
         import gui_orb as g
 
-        status = ["Voice input (Whisper): " + ("ready" if g.VOICE_INPUT_AVAILABLE else "not installed"), "Speech output (edge-tts): " + ("ready" if g.VOICE_OUTPUT_AVAILABLE else "not available")]
-        vc.body.addWidget(label(" · ".join(status)))
-        for why in g.VOICE_MISSING.values():
-            vc.body.addWidget(label(why, "faint"))
-        vc.body.addWidget(label("Whisper needs PyTorch (a large download), so it is optional. Speech output uses Microsoft's online edge-tts service: the text being spoken is sent to it. Recordings are transcribed in memory and never saved.", "faint"))
+        from ...services import local_stt
+
+        self.voice_status = label("", "sub")
+        vc.body.addWidget(self.voice_status)
+        setup_btn = QPushButton(icons.icon("mic", T.ON_ACCENT), " Set up voice input…")
+        setup_btn.setObjectName("primary")
+        setup_btn.setToolTip("Download a speech-recognition engine and model (checked by SHA-256) and transcribe on this computer")
+        setup_btn.clicked.connect(self._voice_setup)
+        vc.body.addWidget(setup_btn)
+        self._voice_status_text = lambda: " · ".join([  # noqa: E731
+            "Voice input: " + ("ready (whisper.cpp, " + str(local_stt.status(paths.data_dir)["model"]).capitalize() + " model)" if local_stt.status(paths.data_dir)["ready"] else "ready (Python Whisper)" if g.VOICE_INPUT_AVAILABLE else "not set up"),
+            "Speech output (edge-tts): " + ("ready" if g.VOICE_OUTPUT_AVAILABLE else "not available"),
+        ])
+        self.voice_status.setText(self._voice_status_text())
+        for k, why in g.VOICE_MISSING.items():
+            if k != "speech_input":
+                vc.body.addWidget(label(why, "faint"))
+        vc.body.addWidget(label("Voice input runs on this computer: recordings are transcribed in memory and never saved or sent. Speech output uses Microsoft's online edge-tts service: the text being spoken is sent to it.", "faint"))
         add('Voice', 'mic', 'Speaking and listening, and where the audio goes.', vc)
 
         # ---- data ----
@@ -390,3 +404,10 @@ class SettingsPage(Page):
             return
         self.settings.set("workspace", real)
         self.restart_requested.emit()
+
+    def _voice_setup(self) -> None:
+        from ..voice_setup import VoiceSetupDialog
+
+        dlg = VoiceSetupDialog(self.paths.data_dir, self)
+        dlg.ready.connect(lambda: (self.voice_status.setText(self._voice_status_text()), self.voice_changed.emit()))
+        dlg.exec()

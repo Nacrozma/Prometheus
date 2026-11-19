@@ -10,8 +10,9 @@ Stated plainly so nothing is mistaken for validated.
 * **The orb on a real GPU** (CPU use, colours) is unmeasured; screenshots use software OpenGL.
 * **macOS and Linux desktop sessions**: adapters exist, nothing validated (see CROSS_PLATFORM_ROADMAP).
 * **Voice in the packaged app**: speech output (edge-tts, needs internet) is bundled but not tested
-  on Windows audio hardware. Voice input is not bundled (Whisper/PyTorch); the Talk button is
-  disabled with an explanation.
+  on Windows audio hardware. Voice input is set up from Settings → Voice
+  (whisper.cpp + a model, downloaded and checksum-verified on first use); the download, checksum and one
+  transcription are checked on Windows CI, but not with a real microphone.
 * **No real model conversation was run** in this work: no provider key was available here. The
   Companion uses the same worker as the existing HUD (which has its own tests); the router reports
   Ollama as a candidate even when no Ollama server is running, and a first message then fails with
