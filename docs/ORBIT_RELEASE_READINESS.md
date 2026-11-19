@@ -1,14 +1,15 @@
 # ORBIT — Release readiness
 
-**Status: implemented and tested on Linux; not released.** No release was published; Prometheus Desktop 2.0.0 and
-its artifacts are untouched.
+**Status: released at the owner's request (2026-11-19)**: Prometheus 2.1.0 (ORBIT) and 2.2.0 (ORBIT + voice input
+setup), ATLAS 0.5.0 (ORBIT + the 0.5.0 work). Earlier releases and their artifacts are untouched. The checks
+below that are still open were not done before release.
 
 | Item | Prometheus | Atlas |
 |---|---|---|
 | Implemented | yes | yes (core, commands, page) |
 | Unit/integration tests | pass (498 / 2 skipped) | pass (core all, vitest 100) |
 | Real-window visual QA | yes (10 screenshots) | **no** |
-| Windows build/install CI | not yet observed for the ORBIT commit | Atlas workflow queued at hand-off |
+| Windows build/install CI | passed (runs 14, 15, 16) | atlas-release run 7 (checks + build before publish) |
 | Real model turn producing a plan | not verified | not verified |
 | Real microphone/speaker | not verified | not verified |
 
