@@ -39,7 +39,11 @@ Atlas: `core/src/orbit.rs` (rules in the core), schema 10, engine `orbit_session
 * Prometheus 2.1.0 (run 15) and 2.2.0 (run 16, `8cec89e`): 2.2.0 adds Settings → Voice → Set up voice input.
   Windows CI really downloaded the engine + Tiny model, verified SHA-256 and ran one transcription.
   Installer SHA-256 `1f1f1c757d41b121e9a5917daf3780fe1d51977b7effe05d12f07b5dc705c5c3`.
-* ATLAS 0.5.0 (atlas-release run 7, tag atlas-v0.5.0): building at the time of writing.
+* Prometheus 2.3.0 (run 18, `b3d8e68`): local speech (sherpa-onnx) generated on Windows CI (3.19 s, RMS 0.0485);
+  playback not testable on the runner. SHA-256 `dae9a3966805d630b4bdb56a8ef192c3146e9aa4ce787f65aa8c5aab1ac55ccb`.
+* ATLAS 0.5.0 (atlas-release run 8): published after giving the publish job its own `contents: write` (runs 7/7b
+  got HTTP 403 creating the release). Setup exe SHA-256 `e9895ed87b553c582f891f2cc4e0c30cb9d267d5cd8e8b8eb950a20014adb0ed`.
+* Owner gave standing authorisation to publish new versions (recorded in CLAUDE.md §20) when every check passes.
 * Note: the Windows workflow runs only by hand or on tags (no branch-push trigger since the 2.0.0 release
   commit). Start it with workflow_dispatch, publish=false for a check.
 * Offered to the owner, not started: speech output controls in Settings → Voice and an on-device voice.
