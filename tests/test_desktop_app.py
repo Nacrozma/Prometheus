@@ -474,7 +474,7 @@ SMOKE = textwrap.dedent(
         orb.toggle_view()
         reopened = orb.store.get(orb.session["id"])
         out["orbit_recovered"] = reopened is not None and reopened["workflow"]["nodes"][0]["status"] == "paused"
-        # one speech service for the whole app; its controls live in Settings → Voice
+        # one speech service for the whole app; its controls live in Settings, Voice
         out["speech_shared"] = win.companion.tts is win.speech and win.orbit.tts is win.speech and win.settings_page.spoken.speech is win.speech
         out["speech_engine_decided"] = win.settings.get("speech_engine") in ("local", "microsoft")
         out["dangerous"] = win.core.is_dangerous("write_file") and win.core.is_dangerous("execute_shell")
@@ -496,7 +496,7 @@ class TestWindowSmoke(unittest.TestCase):
         for k in KNOWN_KEYS:
             env.pop(k, None)
         script = os.path.join(tmp, "smoke.py")
-        with open(script, "w") as f:
+        with open(script, "w", encoding="utf-8") as f:
             f.write(SMOKE.format(root=ROOT))
         r = subprocess.run([sys.executable, script], env=env, capture_output=True, text=True, timeout=180, cwd=tmp)
         line = next((l for l in r.stdout.splitlines() if l.startswith("RESULT")), None)
