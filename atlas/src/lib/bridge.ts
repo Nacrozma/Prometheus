@@ -193,7 +193,7 @@ export const api = {
 
   /** Stream a turn. `onEvent` receives validated events; malformed events are dropped and logged. */
   send: (
-    params: { conversationId: string; text: string; providerId?: string | null; model?: string | null; budgetOverride?: boolean; regenerate?: boolean },
+    params: { conversationId: string; text: string; providerId?: string | null; model?: string | null; budgetOverride?: boolean; regenerate?: boolean; orbitSessionId?: string | null },
     onEvent: (e: S.TurnEvent) => void,
   ) => {
     const channel = new Channel<unknown>();
@@ -212,6 +212,7 @@ export const api = {
           model: params.model ?? null,
           budgetOverride: params.budgetOverride ?? false,
           regenerate: params.regenerate ?? false,
+          orbitSessionId: params.orbitSessionId ?? null,
         },
         onEvent: channel,
       },
@@ -219,6 +220,15 @@ export const api = {
     );
   },
   cancel: (conversationId: string) => call("chat_cancel", { conversationId }, z.boolean()),
+
+  // ORBIT: every action is checked by the core (atlas_core::orbit); the UI never writes a session.
+  orbitSessions: () => call("orbit_sessions", {}, z.array(S.OrbitRowSchema)),
+  orbitCreate: (title: string, autonomy: string) => call("orbit_create", { title, autonomy }, S.OrbitSessionSchema),
+  orbitGet: (id: string) => call("orbit_get", { id }, S.OrbitSessionSchema),
+  orbitApply: (id: string, action: Record<string, unknown>) => call("orbit_apply", { id, action }, S.OrbitResultSchema),
+  orbitPropose: (id: string) => call("orbit_propose", { id }, S.OrbitResultSchema),
+  orbitRunTodo: (id: string, node: string) => call("orbit_run_todo", { id, node }, S.OrbitResultSchema),
+  orbitDelete: (id: string) => call("orbit_delete", { id }, z.boolean()),
 
   pendingApprovals: () => call("approvals_pending", {}, z.array(S.ApprovalSchema)),
   decideApproval: (id: string, approve: boolean) => call("approval_decide", { id, approve }, Void),

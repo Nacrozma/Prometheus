@@ -160,6 +160,12 @@ impl Atlas {
         {
             audit::record(&atlas.db, "specialist.missions_interrupted", "warn", None, None, json!({ "missions": n }));
         }
+        // ORBIT steps left running when Atlas closed are paused, never repeated.
+        if let Ok(n) = crate::orbit::recover_all(&atlas.db)
+            && n > 0
+        {
+            audit::record(&atlas.db, "orbit.steps_interrupted", "warn", None, None, json!({ "steps": n }));
+        }
         // Knowledge Vault documents left half-processed when Atlas closed are processed again from
         // Atlas's own copy (idempotent: their passages are replaced in one transaction).
         for id in crate::vault::interrupted(&atlas.db).unwrap_or_default() {

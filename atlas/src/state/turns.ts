@@ -27,7 +27,7 @@ export interface TurnState {
   budgetPrompt?: { text: string; message: string; opts?: SendOpts };
 }
 
-type SendOpts = { providerId?: string | null; model?: string | null; regenerate?: boolean };
+type SendOpts = { providerId?: string | null; model?: string | null; regenerate?: boolean; orbitSessionId?: string | null };
 
 /** Listeners for every turn event (the voice reads replies aloud from here). */
 type TurnListener = (conversationId: string, e: TurnEvent) => void;
@@ -108,7 +108,7 @@ export const useTurns = create<TurnsStore>((set, get) => ({
     patch((s) => ({ ...empty(), revision: s.revision + 1, running: true }));
     try {
       await api.send(
-        { conversationId, text, providerId: opts?.providerId, model: opts?.model, budgetOverride: opts?.budgetOverride, regenerate: opts?.regenerate },
+        { conversationId, text, providerId: opts?.providerId, model: opts?.model, budgetOverride: opts?.budgetOverride, regenerate: opts?.regenerate, orbitSessionId: opts?.orbitSessionId },
         (e) => {
           patch((s) => reduce(s, e));
           for (const fn of turnListeners) {
@@ -122,7 +122,7 @@ export const useTurns = create<TurnsStore>((set, get) => ({
       );
     } catch (e) {
       if (e instanceof AtlasError && e.code === "budget_confirmation_required") {
-        const held = { text, message: e.message, opts: { providerId: opts?.providerId, model: opts?.model, regenerate: opts?.regenerate } };
+        const held = { text, message: e.message, opts: { providerId: opts?.providerId, model: opts?.model, regenerate: opts?.regenerate, orbitSessionId: opts?.orbitSessionId } };
         patch((s) => ({ ...s, running: false, outcome: undefined, error: undefined, budgetPrompt: held }));
         return;
       }

@@ -13,6 +13,7 @@ import { HomePage } from "@/features/home/Home";
 import { IntegrationsPage } from "@/features/integrations/Integrations";
 import { MemoryPage } from "@/features/memory/Memory";
 import { MissionControlPage } from "@/features/mission-control/MissionControl";
+import { OrbitPage } from "@/features/orbit/Orbit";
 import { ProjectsPage } from "@/features/projects/Projects";
 import { SettingsPage } from "@/features/settings/Settings";
 import { TasksPage } from "@/features/tasks/Tasks";
@@ -38,6 +39,9 @@ function useShortcuts() {
       } else if (mod && e.key.toLowerCase() === "n" && !e.shiftKey) {
         e.preventDefault();
         void newConversation();
+      } else if (mod && e.shiftKey && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        ui.navigate("orbit");
       } else if (mod && e.key === ",") {
         e.preventDefault();
         ui.navigate("settings");
@@ -56,20 +60,22 @@ function useShortcuts() {
 
 export function Shell() {
   const route = useUi((s) => s.route);
+  const immersive = useUi((s) => s.immersive);
   useShortcuts();
   return (
     <div className="flex h-full bg-bg-1">
       <a href="#main" className="sr-only-focusable fixed left-2 top-2 z-50 rounded-md bg-accent px-3 py-2 text-text-inverse">
         Skip to content
       </a>
-      <Rail />
+      {!immersive && <Rail />}
       <main id="main" className="atmosphere relative flex min-w-0 flex-1 flex-col overflow-hidden" tabIndex={-1}>
         {/* In the page flow, above the page: it takes its own space and never covers content. */}
-        <FocusBar />
+        {!immersive && <FocusBar />}
         <ErrorBoundary key={route} label={NAV.find((n) => n.route === route)?.label ?? "Settings"}>
         <div className="min-h-0 flex-1 anim-fade">
           {route === "home" && <HomePage />}
           {route === "companion" && <CompanionPage />}
+          {route === "orbit" && <OrbitPage />}
           {route === "tasks" && <TasksPage />}
           {route === "map" && (
             <Suspense fallback={<div className="grid h-full place-items-center"><Spinner label="Loading the Atlas Map" /></div>}>

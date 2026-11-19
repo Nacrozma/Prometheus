@@ -576,6 +576,18 @@ pub const MIGRATIONS: &[&str] = &[
         updated_at TEXT NOT NULL
     );
     "#,
+    // v10: ORBIT sessions (plans with versions, workflows). One JSON document per session; the core
+    // validates every change before it is written (see orbit.rs).
+    r#"
+    CREATE TABLE orbit_sessions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        archived INTEGER NOT NULL DEFAULT 0,
+        data TEXT NOT NULL
+    );
+    CREATE INDEX idx_orbit_sessions_updated ON orbit_sessions (updated_at);
+    "#,
 ];
 
 pub const CURRENT_SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

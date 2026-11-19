@@ -1147,3 +1147,27 @@ export const SpecialistsOverviewSchema = z.object({
   missions: z.array(SpecialistMissionSchema),
 });
 export type SpecialistsOverview = z.infer<typeof SpecialistsOverviewSchema>;
+
+// ---------- ORBIT ----------
+export const OrbitTaskSchema = z.object({ id: z.string(), title: z.string(), phase: z.string(), detail: z.string(), priority: z.string(), estimate: z.string(), status: z.string(), operation: z.string() });
+export const OrbitPlanSchema = z.object({
+  title: z.string(), objective: z.string(), outcome: z.string(), phases: z.array(z.string()), tasks: z.array(OrbitTaskSchema),
+  deps: z.array(z.object({ from: z.string(), to: z.string() })), assumptions: z.array(z.string()), questions: z.array(z.string()), risks: z.array(z.string()),
+});
+export const OrbitNodeSchema = z.object({
+  id: z.string(), title: z.string(), detail: z.string(), phase: z.string(), operation: z.string(), deps: z.array(z.string()), status: z.string(),
+  conversation_id: z.string().nullable(), output: z.string(), error: z.string(), history: z.array(z.object({ at: z.string(), event: z.string(), status: z.string() })),
+});
+export const OrbitSessionSchema = z.object({
+  id: z.string(), title: z.string(), created_at: z.string(), updated_at: z.string(), conversation_id: z.string().nullable(), autonomy: z.string(), allowed: z.array(z.string()),
+  versions: z.array(z.object({ version: z.number(), plan: OrbitPlanSchema, author: z.string(), why: z.string(), at: z.string() })),
+  active_version: z.number(), approved_version: z.number(),
+  workflow: z.object({ id: z.string(), plan_version: z.number(), autonomy: z.string(), allowed: z.array(z.string()), paused: z.boolean(), state: z.string(), nodes: z.array(OrbitNodeSchema), created_at: z.string() }).nullable(),
+  events: z.array(z.object({ at: z.string(), kind: z.string(), detail: z.string() })), archived: z.boolean(),
+});
+export const OrbitRowSchema = z.object({ id: z.string(), title: z.string(), updated_at: z.string(), versions: z.number(), workflow_state: z.string().nullable() });
+export const OrbitResultSchema = z.object({ session: OrbitSessionSchema, message: z.string() });
+export type OrbitPlan = z.infer<typeof OrbitPlanSchema>;
+export type OrbitSession = z.infer<typeof OrbitSessionSchema>;
+export type OrbitNode = z.infer<typeof OrbitNodeSchema>;
+export type OrbitRow = z.infer<typeof OrbitRowSchema>;

@@ -3,6 +3,7 @@ import { create } from "zustand";
 export type Route =
   | "home"
   | "companion"
+  | "orbit"
   | "tasks"
   | "map"
   | "forge"
@@ -40,6 +41,9 @@ export type SettingsSection =
 
 interface UiState {
   route: Route;
+  /** ORBIT immersive mode: the rail and focus bar are hidden; Esc or Exit immersive brings them back. */
+  immersive: boolean;
+  setImmersive: (on: boolean) => void;
   settingsSection: SettingsSection;
   paletteOpen: boolean;
   activeConversationId: string | null;
@@ -66,6 +70,8 @@ interface UiState {
 
 export const useUi = create<UiState>((set) => ({
   route: "home",
+  immersive: false,
+  setImmersive: (immersive) => set({ immersive }),
   settingsSection: "companion",
   paletteOpen: false,
   activeConversationId: null,
@@ -79,7 +85,7 @@ export const useUi = create<UiState>((set) => ({
   introReplay: false,
   setIntroReplay: (introReplay) => set({ introReplay }),
   setForgeProject: (forgeProjectId) => set({ forgeProjectId }),
-  navigate: (route) => set({ route, paletteOpen: false }),
+  navigate: (route) => set((st) => ({ route, paletteOpen: false, immersive: route === "orbit" ? st.immersive : false })),
   openSettings: (settingsSection) => set({ route: "settings", settingsSection, paletteOpen: false }),
   openConversation: (activeConversationId) => set({ route: "companion", activeConversationId, paletteOpen: false }),
   openTask: (focusTaskId) => set({ route: "mission", focusTaskId, paletteOpen: false }),

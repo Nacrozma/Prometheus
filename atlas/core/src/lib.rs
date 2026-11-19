@@ -15,6 +15,7 @@ pub mod grants;
 pub mod integrations;
 pub mod map;
 pub mod memory;
+pub mod orbit;
 pub mod policy;
 pub mod pricing;
 pub mod projects;

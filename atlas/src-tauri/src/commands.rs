@@ -54,6 +54,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Syn
         mission_message, mission_accept, mission_cancel, mission_sync, mission_note,
         voice_status, voice_install, voice_install_cancel, voice_remove, voice_verify,
         voice_synthesize, voice_stop_speech, voice_transcribe, voice_cancel_transcription, voice_benchmark,
+        orbit_sessions, orbit_create, orbit_get, orbit_apply, orbit_propose, orbit_run_todo, orbit_delete,
     ]
 }
 
@@ -693,7 +694,7 @@ async fn conversation_export(app: AppHandle, state: State<'_, AppState>, id: Str
 #[tauri::command]
 async fn chat_send(state: State<'_, AppState>, params: TurnParamsIn, on_event: Channel<TurnEvent>) -> R<TurnSummary> {
     let atlas = state.atlas.clone();
-    let p = TurnParams { conversation_id: params.conversation_id, text: params.text, provider_id: params.provider_id, model: params.model, budget_override: params.budget_override, mission_id: None, regenerate: params.regenerate };
+    let p = TurnParams { conversation_id: params.conversation_id, text: params.text, provider_id: params.provider_id, model: params.model, budget_override: params.budget_override, mission_id: None, regenerate: params.regenerate, orbit_session: params.orbit_session_id };
     atlas
         .send_message(p, Box::new(move |e| {
             let _ = on_event.send(e);
@@ -712,6 +713,8 @@ pub struct TurnParamsIn {
     budget_override: bool,
     #[serde(default)]
     regenerate: bool,
+    #[serde(default)]
+    orbit_session_id: Option<String>,
 }
 
 #[tauri::command]
@@ -824,6 +827,84 @@ fn memory_history(state: State<'_, AppState>, id: String) -> R<Vec<atlas_core::m
 #[tauri::command]
 fn memory_similar(state: State<'_, AppState>, content: String, project_id: Option<String>, except: Option<String>) -> R<Vec<atlas_core::memory::Similar>> {
     state.atlas.memory_similar(&content, project_id.as_deref(), except.as_deref())
+}
+
+// ---------------- ORBIT (each operation is checked by atlas_core::orbit) ----------------
+
+use atlas_core::orbit;
+
+#[tauri::command]
+fn orbit_sessions(state: State<'_, AppState>) -> R<Vec<orbit::SessionRow>> {
+    orbit::list(&state.atlas.db)
+}
+
+#[tauri::command]
+fn orbit_create(state: State<'_, AppState>, title: String, autonomy: String) -> R<orbit::Session> {
+    let mut s = orbit::new_session(&title, &autonomy);
+    let conv = state.atlas.create_conversation(None, &format!("ORBIT \u{b7} {}", s.title))?;
+    s.conversation_id = Some(conv.id);
+    orbit::log(&mut s, "session.created", &title);
+    orbit::save(&state.atlas.db, &mut s)?;
+    Ok(s)
+}
+
+#[tauri::command]
+fn orbit_get(state: State<'_, AppState>, id: String) -> R<orbit::Session> {
+    orbit::get(&state.atlas.db, &id)
+}
+
+#[derive(Serialize)]
+pub struct OrbitResult {
+    session: orbit::Session,
+    message: String,
+}
+
+#[tauri::command]
+fn orbit_apply(state: State<'_, AppState>, id: String, action: orbit::Action) -> R<OrbitResult> {
+    let mut s = orbit::get(&state.atlas.db, &id)?;
+    let message = orbit::apply(&mut s, &action)?;
+    orbit::save(&state.atlas.db, &mut s)?;
+    Ok(OrbitResult { session: s, message })
+}
+
+/// After an ORBIT turn: read Atlas's last reply in the session's conversation (from storage, not from
+/// the UI) and record a plan it contains as a new draft version authored by Atlas.
+#[tauri::command]
+fn orbit_propose(state: State<'_, AppState>, id: String) -> R<OrbitResult> {
+    let mut s = orbit::get(&state.atlas.db, &id)?;
+    let conv = s.conversation_id.clone().ok_or_else(|| AtlasError::NotFound("session conversation".into()))?;
+    let rows = atlas_core::conversations::messages(&state.atlas.db, &conv)?;
+    let reply = rows.iter().rev().find(|m| m.role == "assistant" && !m.content.trim().is_empty()).map(|m| m.content.clone()).unwrap_or_default();
+    let message = match orbit::extract_plan(&reply) {
+        Some(p) if !p.tasks.is_empty() => {
+            let prev = orbit::active_plan(&s);
+            let changes = prev.as_ref().map(|old| orbit::compare(old, &p)).unwrap_or_default();
+            let v = orbit::add_version(&mut s, p, "atlas", if prev.is_some() { "Revised in conversation" } else { "Proposed in conversation" });
+            orbit::save(&state.atlas.db, &mut s)?;
+            if changes.is_empty() { format!("Plan version {v} is a draft. Change anything, then approve it.") } else { format!("Plan updated to version {v}: {}", changes.into_iter().take(6).collect::<Vec<_>>().join("; ")) }
+        }
+        _ => String::new(),
+    };
+    Ok(OrbitResult { session: s, message })
+}
+
+/// Run a "todo" step: it creates one task in Tasks with the step's title, then records the step done.
+#[tauri::command]
+fn orbit_run_todo(state: State<'_, AppState>, id: String, node: String) -> R<OrbitResult> {
+    let mut s = orbit::get(&state.atlas.db, &id)?;
+    let n = s.workflow.as_ref().and_then(|w| w.nodes.iter().find(|x| x.id == node)).cloned().ok_or_else(|| AtlasError::NotFound("workflow step".into()))?;
+    if n.operation != "todo" || n.status != "running" {
+        return Err(AtlasError::Conflict("this step is not a running task step".into()));
+    }
+    let todo = state.atlas.todo_create(atlas_core::todos::NewTodo { title: n.title.clone(), notes: n.detail.clone(), source: Some("atlas".into()), conversation_id: s.conversation_id.clone(), ..Default::default() })?;
+    orbit::apply(&mut s, &orbit::Action::StepFinished { node, ok: true, output: format!("Added to Tasks: {}", todo.title), error: String::new() })?;
+    orbit::save(&state.atlas.db, &mut s)?;
+    Ok(OrbitResult { session: s, message: "Added to Tasks.".into() })
+}
+
+#[tauri::command]
+fn orbit_delete(state: State<'_, AppState>, id: String) -> R<bool> {
+    orbit::delete(&state.atlas.db, &id)
 }
 
 // ---------------- Specialists ----------------

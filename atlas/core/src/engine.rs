@@ -41,6 +41,10 @@ pub struct TurnParams {
     /// regenerate can never repeat an action.
     #[serde(default)]
     pub regenerate: bool,
+    /// ORBIT session this turn belongs to: its planning instructions and current plan are added to
+    /// the system prompt (never to the owner's message).
+    #[serde(default)]
+    pub orbit_session: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -439,6 +443,11 @@ impl Atlas {
         if let Some(fs) = &forge_scope {
             let name = crate::forge::get_project(&self.db, &fs.project_id).map(|p| p.name).unwrap_or_default();
             system.push_str(&context::forge_section(&name, fs));
+        }
+        if let Some(sid) = &p.orbit_session
+            && let Ok(session) = crate::orbit::get(&self.db, sid)
+        {
+            system.push_str(&crate::orbit::system_section(&session));
         }
         let rows = conversations::messages(&self.db, &conv.id)?;
         let history = conversations::to_history(&rows);
