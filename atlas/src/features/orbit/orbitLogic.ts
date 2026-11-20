@@ -154,14 +154,18 @@ export function parseCommand(text: string, plan: OrbitPlan | null): Command | nu
   return null;
 }
 
-export function partialPlan(text: string): { phases: string[]; tasks: string[] } {
+export function partialPlan(text: string): { title: string; brief: string; ideas: string[]; phases: string[]; tasks: string[] } {
   const i = text.lastIndexOf("```orbit-plan");
-  if (i < 0) return { phases: [], tasks: [] };
+  if (i < 0) return { title: "", brief: "", ideas: [], phases: [], tasks: [] };
   const body = text.slice(i);
   const ph = body.match(/"phases"\s*:\s*\[([^\]]*)\]/);
   const phases = ph ? [...(ph[1] ?? "").matchAll(/"([^"]{1,80})"/g)].map((x) => x[1] ?? "") : [];
   const tasks = [...body.matchAll(/"title"\s*:\s*"([^"]{1,160})"\s*,\s*"phase"/g)].map((x) => x[1] ?? "");
-  return { phases: phases.slice(0, 20), tasks: tasks.slice(0, 80) };
+  const id = body.match(/"ideas"\s*:\s*\[([^\]]*)\]/);
+  const ideas = id ? [...(id[1] ?? "").matchAll(/"([^"]{1,300})"/g)].map((x) => x[1] ?? "") : [];
+  const title = body.match(/^```orbit-plan\s*\{\s*"title"\s*:\s*"([^"]{1,120})"/)?.[1] ?? "";
+  const brief = (body.match(/"brief"\s*:\s*"((?:[^"\\]|\\.){1,1200})"/)?.[1] ?? "").replace(/\\"/g, '"');
+  return { title, brief, ideas: ideas.slice(0, 20), phases: phases.slice(0, 20), tasks: tasks.slice(0, 80) };
 }
 
 export function stripPlanBlocks(text: string): string {

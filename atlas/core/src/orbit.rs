@@ -77,6 +77,12 @@ pub struct Plan {
     pub objective: String,
     #[serde(default)]
     pub outcome: String,
+    /// What the project is and why (2-4 sentences), shown in the Brief panel.
+    #[serde(default)]
+    pub brief: String,
+    /// Options and concepts worth considering, shown in the Ideas panel.
+    #[serde(default)]
+    pub ideas: Vec<String>,
     #[serde(default)]
     pub phases: Vec<String>,
     #[serde(default)]
@@ -160,6 +166,15 @@ pub struct Session {
     pub workflow: Option<Workflow>,
     pub events: Vec<Event>,
     pub archived: bool,
+    /// The owner looked at the results (only after every step completed).
+    #[serde(default)]
+    pub reviewed: bool,
+    /// The owner closed the project as complete (only after review).
+    #[serde(default)]
+    pub completed: bool,
+    /// ORBIT workspace layout (environment, panel positions as fractions); bounded, owned by the UI.
+    #[serde(default)]
+    pub layout: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -178,7 +193,7 @@ pub struct SessionRow {
 pub fn normalise(raw: &serde_json::Value) -> Plan {
     let s = |v: &serde_json::Value, k: &str, n: usize| clip(v.get(k).and_then(|x| x.as_str()).unwrap_or(""), n);
     let list = |k: &str| -> Vec<String> { raw.get(k).and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|x| x.as_str()).map(|x| clip(x, 300)).filter(|x| !x.is_empty()).take(20).collect()).unwrap_or_default() };
-    let mut p = Plan { title: s(raw, "title", 120), objective: s(raw, "objective", 300), outcome: s(raw, "outcome", 300), assumptions: list("assumptions"), questions: list("questions"), risks: list("risks"), ..Default::default() };
+    let mut p = Plan { title: s(raw, "title", 120), objective: s(raw, "objective", 300), outcome: s(raw, "outcome", 300), brief: s(raw, "brief", 1200), ideas: list("ideas"), assumptions: list("assumptions"), questions: list("questions"), risks: list("risks"), ..Default::default() };
     if p.title.is_empty() {
         p.title = "Untitled plan".into();
     }
@@ -433,6 +448,7 @@ pub fn system_section(s: &Session) -> String {
     let mut out = String::from(
         "\n\n## ORBIT planning session\nYou are working with the owner in ORBIT, a voice-first planning space. Talk naturally and briefly. \
          Whenever you propose or change a plan, append ONE fenced block ```orbit-plan {json} ``` with keys: title, objective, outcome, \
+         brief (2-4 sentences: what the project is and why), ideas (options or concepts worth considering), \
          phases (names), tasks ({id, title, phase, detail, priority high|normal|low, estimate only with a basis}), deps ({from, to}: \
          from finishes before to), assumptions, questions (what you still need to know), risks. Never present assumptions as confirmed \
          requirements; keep task ids stable between versions. Plans you propose are drafts until the owner approves them.\n",
@@ -667,6 +683,9 @@ pub fn new_session(title: &str, autonomy: &str) -> Session {
         workflow: None,
         events: vec![],
         archived: false,
+        reviewed: false,
+        completed: false,
+        layout: serde_json::Value::Null,
     }
 }
 
@@ -755,6 +774,10 @@ pub enum Action {
     Retry { node: String },
     Cancel,
     Rename { title: String },
+    MarkReviewed,
+    MarkComplete,
+    /// Store the workspace layout (a JSON object of at most 16 KB).
+    SetLayout { layout: serde_json::Value },
     Archive,
 }
 
@@ -968,13 +991,36 @@ pub fn apply(s: &mut Session, a: &Action) -> Result<String> {
             s.title = t;
             "Renamed.".into()
         }
+        Action::MarkReviewed => {
+            if s.workflow.as_ref().map(|w| w.state.as_str()) != Some("completed") {
+                return Err(bad("Review comes after every step is completed."));
+            }
+            s.reviewed = true;
+            log(s, "project.reviewed", "marked reviewed by you");
+            "Results reviewed.".into()
+        }
+        Action::MarkComplete => {
+            if !s.reviewed {
+                return Err(bad("Mark the results reviewed first."));
+            }
+            s.completed = true;
+            log(s, "project.completed", "marked complete by you");
+            "Project complete.".into()
+        }
+        Action::SetLayout { layout } => {
+            if !layout.is_object() || serde_json::to_string(layout).map(|t| t.len()).unwrap_or(usize::MAX) > 16 * 1024 {
+                return Err(bad("The layout must be a small JSON object."));
+            }
+            s.layout = layout.clone();
+            "ok".into()
+        }
         Action::Archive => {
             s.archived = true;
             log(s, "session.archived", "");
             "Archived.".into()
         }
     };
-    if !matches!(a, Action::Edit { .. } | Action::Undo | Action::Restore { .. } | Action::Approve | Action::SetAutonomy { .. } | Action::Pause | Action::Resume | Action::Cancel | Action::Archive | Action::BuildWorkflow) {
+    if !matches!(a, Action::SetLayout { .. } | Action::MarkReviewed | Action::MarkComplete | Action::Edit { .. } | Action::Undo | Action::Restore { .. } | Action::Approve | Action::SetAutonomy { .. } | Action::Pause | Action::Resume | Action::Cancel | Action::Archive | Action::BuildWorkflow) {
         log(s, "step", &format!("{a:?}").chars().take(160).collect::<String>());
     }
     Ok(msg)
@@ -1061,6 +1107,22 @@ mod tests {
         assert_eq!(recover(w), 1);
         assert!(w.paused && next_node(w).is_none());
         assert!(w.nodes[0].history.last().unwrap().event.contains("not repeated"));
+    }
+
+    #[test]
+    fn brief_ideas_review_complete_and_layout() {
+        let p = normalise(&json!({"title": "T", "brief": "Why.", "ideas": ["a", "", "b"], "tasks": [{"title": "x"}]}));
+        assert_eq!((p.brief.as_str(), p.ideas.len()), ("Why.", 2));
+        let mut s = new_session("x", "balanced");
+        add_version(&mut s, sample(), "atlas", "Proposed");
+        assert!(apply(&mut s, &Action::MarkReviewed).is_err(), "review needs a completed workflow");
+        assert!(apply(&mut s, &Action::MarkComplete).is_err(), "complete needs review");
+        assert!(apply(&mut s, &Action::SetLayout { layout: json!([1, 2]) }).is_err());
+        assert!(apply(&mut s, &Action::SetLayout { layout: json!({"pad": "x".repeat(20000)}) }).is_err());
+        apply(&mut s, &Action::SetLayout { layout: json!({"env": "operations", "panels": {}}) }).unwrap();
+        assert_eq!(s.layout["env"], "operations");
+        let old: Session = serde_json::from_str(&serde_json::to_string(&s).unwrap().replace(",\"reviewed\":false,\"completed\":false", "")).unwrap();
+        assert!(!old.reviewed, "sessions saved before these fields still load");
     }
 
     #[test]

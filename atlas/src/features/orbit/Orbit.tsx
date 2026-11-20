@@ -37,6 +37,8 @@ import { useVoice, voicePhase } from "@/state/voice";
 import { audio } from "@/features/voice/audioEngine";
 import { VoiceRing } from "@/features/voice/VoiceRing";
 import { TurnTaker, findTask, layout, parseCommand, partialPlan, stripPlanBlocks } from "./orbitLogic";
+import { OrbitSpace } from "./OrbitSpace";
+import { coreState } from "./orbitSpace";
 
 const MARK: Record<string, [string, string]> = {
   proposed: ["◌", "Proposed"],
@@ -99,7 +101,9 @@ export function OrbitPage() {
   const setImmersive = useUi((s) => s.setImmersive);
   const voice = useVoice();
   const phase = voicePhase(voice);
-  const turn = useTurns((s) => (session?.conversation_id ? s.get(session.conversation_id) : null));
+  // select the stored state itself (stable between renders); `get` would build a new empty object each time
+  // and make React re-render forever while a session has no turn yet
+  const turn = useTurns((s) => (session?.conversation_id ? (s.byConversation[session.conversation_id] ?? null) : null));
   const send = useTurns((s) => s.send);
   const plan = activePlan(session);
   const runningNode = useRef<string | null>(null);
@@ -475,19 +479,46 @@ export function OrbitPage() {
               "Tell Atlas what you want to achieve. As you talk, the plan forms around the ring; you shape it, approve it, then run it."
             )}
           </p>
-          <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg border border-line-1 bg-bg-0/60">
+          <div className={cn("relative min-h-0 flex-1 overflow-hidden", view !== "orbit" && "rounded-lg border border-line-1 bg-bg-0/60")}>
             {view === "orbit" ? (
-              <Stage
-                plan={plan}
-                status={status}
+              <OrbitSpace
+                session={session}
+                coreState={coreState({
+                  voice: phase,
+                  turnRunning: !!turn?.running,
+                  planning: provisional.tasks.length > 0 || provisional.phases.length > 0,
+                  waiting: !!waiting,
+                  running,
+                  failed: !!wf?.nodes.some((n) => n.status === "failed"),
+                  completed: wf?.state === "completed",
+                })}
                 provisional={provisional}
-                sel={sel}
-                onSelect={(id) => (setSel(id), setTab("step"))}
-                onMove={(id, ph) => void act({ action: "edit", edit: { op: "move_to_phase", task: id, phase: ph } })}
-                onRemove={(id) => void act({ action: "edit", edit: { op: "remove_task", task: id } })}
+                speaking={phase === "speaking"}
+                onAct={act}
+                onLink={(kind, ref) => {
+                  if (kind === "approve" && waiting?.id === ref) void approveStep(ref);
+                  else if (kind === "file") useUi.getState().navigate("files");
+                  else {
+                    setSel(ref);
+                    setTab("step");
+                  }
+                }}
+                constellation={
+                  <Stage
+                    plan={plan}
+                    status={status}
+                    provisional={provisional}
+                    sel={sel}
+                    onSelect={(id) => (setSel(id), setTab("step"))}
+                    onMove={(id, ph) => void act({ action: "edit", edit: { op: "move_to_phase", task: id, phase: ph } })}
+                    onRemove={(id) => void act({ action: "edit", edit: { op: "remove_task", task: id } })}
+                  >
+                    {null}
+                  </Stage>
+                }
               >
                 <VoiceRing phase={ringPhase} size={150} />
-              </Stage>
+              </OrbitSpace>
             ) : (
               <Outline plan={plan} status={status} sel={sel} onSelect={(id) => (setSel(id), setTab("step"))} />
             )}
@@ -563,6 +594,16 @@ export function OrbitPage() {
                 onClick={() => void cancelWorkflow()}
               >
                 Cancel workflow
+              </Button>
+            )}
+            {wf?.state === "completed" && !session?.reviewed && (
+              <Button size="sm" onClick={() => void act({ action: "mark_reviewed" })}>
+                Mark reviewed
+              </Button>
+            )}
+            {session?.reviewed && !session.completed && (
+              <Button size="sm" variant="primary" onClick={() => void act({ action: "mark_complete" })}>
+                Mark complete
               </Button>
             )}
           </div>
@@ -1078,6 +1119,8 @@ function Stage({
           title: "",
           objective: "",
           outcome: "",
+          brief: "",
+          ideas: [],
           phases: provisional.phases.length ? provisional.phases : ["Plan"],
           tasks: provisional.tasks.map((t, i) => ({
             id: `p${i}`,

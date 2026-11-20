@@ -7,6 +7,8 @@ const plan: OrbitPlan = {
   title: "Launch",
   objective: "",
   outcome: "",
+  brief: "",
+  ideas: [],
   phases: ["Research", "Build", "Release"],
   tasks: [
     {
@@ -126,7 +128,7 @@ describe("ORBIT streaming and layout", () => {
       partialPlan(
         'ok ```orbit-plan {"phases":["A","B"],"tasks":[{"id":"1","title":"First","phase":"A"},{"id":"2","title":"Sec',
       ),
-    ).toEqual({ phases: ["A", "B"], tasks: ["First"] });
+    ).toMatchObject({ phases: ["A", "B"], tasks: ["First"] });
     expect(stripPlanBlocks('Here.\n```orbit-plan {"title":"x"}```\nOK?')).toBe("Here.\n\nOK?");
     expect(stripPlanBlocks('Talking ```orbit-plan {"pha')).toBe("Talking");
   });

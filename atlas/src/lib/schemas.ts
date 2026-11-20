@@ -1151,7 +1151,7 @@ export type SpecialistsOverview = z.infer<typeof SpecialistsOverviewSchema>;
 // ---------- ORBIT ----------
 export const OrbitTaskSchema = z.object({ id: z.string(), title: z.string(), phase: z.string(), detail: z.string(), priority: z.string(), estimate: z.string(), status: z.string(), operation: z.string() });
 export const OrbitPlanSchema = z.object({
-  title: z.string(), objective: z.string(), outcome: z.string(), phases: z.array(z.string()), tasks: z.array(OrbitTaskSchema),
+  title: z.string(), objective: z.string(), outcome: z.string(), brief: z.string().default(""), ideas: z.array(z.string()).default([]), phases: z.array(z.string()), tasks: z.array(OrbitTaskSchema),
   deps: z.array(z.object({ from: z.string(), to: z.string() })), assumptions: z.array(z.string()), questions: z.array(z.string()), risks: z.array(z.string()),
 });
 export const OrbitNodeSchema = z.object({
@@ -1164,6 +1164,7 @@ export const OrbitSessionSchema = z.object({
   active_version: z.number(), approved_version: z.number(),
   workflow: z.object({ id: z.string(), plan_version: z.number(), autonomy: z.string(), allowed: z.array(z.string()), paused: z.boolean(), state: z.string(), nodes: z.array(OrbitNodeSchema), created_at: z.string() }).nullable(),
   events: z.array(z.object({ at: z.string(), kind: z.string(), detail: z.string() })), archived: z.boolean(),
+  reviewed: z.boolean().default(false), completed: z.boolean().default(false), layout: z.unknown().optional(),
 });
 export const OrbitRowSchema = z.object({ id: z.string(), title: z.string(), updated_at: z.string(), versions: z.number(), workflow_state: z.string().nullable() });
 export const OrbitResultSchema = z.object({ session: OrbitSessionSchema, message: z.string() });
