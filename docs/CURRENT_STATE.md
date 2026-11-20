@@ -10,9 +10,9 @@ states, approval cards with real diffs, memory map, grouped search, secure-stora
 CI builds, installs and runs the tests on every push. **Released 2026-11-17 with the owner's approval as
 [prometheus-desktop-v2.0.0](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.0.0)** (unsigned installer).
 
-**2.5.0 (2026-11-20):** ORBIT closer to the owner's reference image — particle-torus core with a geodesic shell, curved connections, chamfered panels with real actions (Compare ideas, + Add, Edit brief), full-screen heads-up layer in immersive mode; see `RELEASE_NOTES_2.5.0.md`.
+**2.5.0 (2026-11-20):** ORBIT closer to the owner's reference image — particle-torus core with a geodesic shell, curved connections, chamfered panels with real actions (Compare ideas, + Add, Edit brief), full-screen heads-up layer in immersive mode; see `RELEASE_NOTES_2.5.0.md`. [Published](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.5.0) (run 20); installer SHA-256 `79446b8b976842861d46cc833305b49108c10e5b2fedfdc3220f5625cddb6dd5`.
 
-**2.4.0 (2026-11-20, [published](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.4.0)):** the ORBIT universe (layered solar core, holographic panels, project journey, four environments); see `ORBIT_UNIVERSE_REPORT.md`.
+**2.4.0 (2026-11-20, [published](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.4.0), SHA-256 `c30f115c3e5cd5f82403da4c590e7ac9a5c0533524f276fa7837c2691ed80b5f`):** the ORBIT universe (layered solar core, holographic panels, project journey, four environments); see `ORBIT_UNIVERSE_REPORT.md`.
 
 **2.3.0 (2026-11-19):** [spoken replies with a local voice](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.3.0), one shared speech service; see `VOICE_EXPERIENCE_REPORT.md`.
 

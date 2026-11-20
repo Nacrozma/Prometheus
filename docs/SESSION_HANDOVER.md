@@ -60,6 +60,11 @@ full-screen HUD). Built in both, from real data only:
 * ATLAS 0.6.0 was never published (release run 9: Forge test 10 s timeout on Windows → raised to 60 s; run 10: the
   casing collision). Its content ships in 0.7.0; the changelog says so.
 
+* Open: the ATLAS push workflow's **Ubuntu `cargo test --workspace` step hangs until the 1-hour job limit** (runs 84
+  and 85, before and after these changes). Locally every ATLAS test binary passes in under a minute on Linux, and
+  Windows/macOS CI pass, so it is specific to the GitHub Ubuntu runner (suspect: a test reaching the OS credential
+  store / Secret Service). Next: read the job log's last `Running` line once a run finishes, then fix.
+
 ## Released 2026-11-19 (owner-approved)
 * Prometheus 2.1.0 (run 15) and 2.2.0 (run 16, `8cec89e`): 2.2.0 adds Settings → Voice → Set up voice input.
   Windows CI really downloaded the engine + Tiny model, verified SHA-256 and ran one transcription.
