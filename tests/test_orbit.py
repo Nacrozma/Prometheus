@@ -71,6 +71,18 @@ class TestPlanModel(unittest.TestCase):
         with self.assertRaises(O.PlanError):
             O.edit(p, "set_priority", ref="Publish", priority="urgent")
 
+    def test_ideas_can_be_added_and_removed(self):
+        p = sample()
+        p, msg = O.edit(p, "add_idea", title="Use a static site")
+        self.assertEqual(p["ideas"], ["Use a static site"])
+        with self.assertRaises(O.PlanError):
+            O.edit(p, "add_idea", title="use a STATIC site")
+        p, _ = O.edit(p, "set_field", field="brief", value="Why we do it.")
+        self.assertEqual(p["brief"], "Why we do it.")
+        self.assertEqual(O.parse_command("add idea: a blog", p), {"op": "add_idea", "title": "a blog"})
+        p, _ = O.edit(p, "remove_idea", title="static")
+        self.assertEqual(p["ideas"], [])
+
     def test_spoken_commands(self):
         p = sample()
         self.assertEqual(O.parse_command("Move Release before Build.", p), {"op": "move_phase_before", "phase": "Release", "other": "Build"})

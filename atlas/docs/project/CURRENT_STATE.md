@@ -1,6 +1,6 @@
 # Current state
 
-**Updated:** 2026-11-19 · **Branch:** `claude/prometheus-ai-evaluation-pxqzfr` · **Released:** 0.5.0 → 0.6.0 (ORBIT universe; fixes the 0.5.0 ORBIT freeze) ([atlas-v0.5.0](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.5.0))
+**Updated:** 2026-11-20 · **Branch:** `claude/prometheus-ai-evaluation-pxqzfr` · **Released:** [atlas-v0.5.0](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.5.0); **releasing 0.7.0** (ORBIT universe + the reference look; fixes the 0.5.0 ORBIT freeze). 0.6.0 was never published: its Windows build failed on a file-name casing collision (`OrbitSpace.tsx` / `orbitSpace.ts`, now `orbitUniverse.ts`, guarded by `tests/unit/filenames.test.ts`).
 
 **ORBIT (2026-11-19, not released):** Atlas's own voice-first planning space (`core/src/orbit.rs`, schema 10 `orbit_sessions`, `orbit_*` commands, `src/features/orbit/`). Rules live in the core; tool approvals stay in the dock. Tests pass (Rust, vitest). Not yet seen in the built app and **no screenshot yet** (owner rule: add one to `docs/screenshots/` before release). Specs: `../../../docs/ORBIT_*.md`.
 
@@ -8,7 +8,7 @@
 
 ## Standing rules from the owner
 * Every new feature gets a screenshot in `docs/screenshots/` and `docs/WHATS_NEW_SCREENSHOTS.md`.
-* Do not publish a release until the owner says so. Pushing commits to the branch is fine.
+* ~~Do not publish a release until the owner says so.~~ Superseded 2026-11-19: standing authorisation to publish new versions when every release check passes (root `CLAUDE.md` §20). Never replace a published release.
 * Do not change voice recognition defaults or tune latency without a Voice check report.
 * Atlas and Prometheus stay separate projects; `prometheus.py` is not modified.
 * The welcome line never uses the owner's name. The dedication is exactly "Created with love."

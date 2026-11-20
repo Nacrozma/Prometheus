@@ -3,7 +3,7 @@
 ## Run and test
 * Run: `pip install -r requirements.txt` then `python -m app` (set `PROMETHEUS_HOME`/`PROMETHEUS_WORKSPACE`
   to throwaway folders when testing).
-* Tests: `python -m pytest tests -q` (498 pass, 2 skipped by design). Window smoke test is in `tests/test_desktop_app.py`.
+* Tests: `python -m pytest tests -q` (547 pass, 2 skipped by design). Window smoke test is in `tests/test_desktop_app.py`.
 * Screenshots: `xvfb-run -s "-screen 0 1600x1000x24" python tools/renaissance_screens.py docs/screenshots/renaissance [names]`.
 
 ## Done (Renaissance)
@@ -42,6 +42,23 @@ harness `atlas/tests/visual/orbit-shots.mjs` (run `npx vite --port 5179` first).
 infinite re-render. Report: `docs/ORBIT_UNIVERSE_REPORT.md`. Owner asked: commit and push once CI is done without
 waiting for approval; publish when every check passes (CLAUDE.md §20).
 Note: the session disk filled once from `atlas/target` (25 GB of stale test binaries); stale binaries were deleted.
+
+## ORBIT reference look (2026-11-20) — Prometheus 2.5.0, ATLAS 0.7.0
+The owner sent a reference image (particle torus, geodesic sphere, curved links, chamfered panels with actions,
+full-screen HUD). Built in both, from real data only:
+* Prometheus: `orbit_motion.py` geometry (torus, geodesic, rotate, curve_ctrl, bezier, torus_count);
+  `orbit_universe.py` CoreFX torus + shell, curved links/pulses, chamfered `HoloPanel.paintEvent` + `paint_icon` +
+  `add_action`, `StageTrack`, `Hud` (reserve band for panels), `caption_text`; page: `_panel_action`
+  (compare_ideas → real message, add_idea / set_field brief → plan versions), immersive hides rows and shows the HUD,
+  *Conversation* toggles the right column. `orbit.py`: add_idea / remove_idea / brief edits + "add idea:" command.
+* Fixed: delayed materialise animation starting after a resize (panels misplaced); automatic geometry changes were
+  being saved as the owner's layout (now only grip resizes persist).
+* ATLAS: core `Edit::AddIdea/RemoveIdea/SetBrief` (+ test), parseCommand "add idea:" / "remove idea",
+  `orbitUniverse.ts` (renamed from `orbitSpace.ts`: it collided with `OrbitSpace.tsx` on Windows and broke the 0.6.0
+  release build; `tests/unit/filenames.test.ts` now guards this), canvas torus/shell/curves, chamfered panels with
+  lucide icons and actions (inline editors), immersive HUD (`hud` prop) and caption in `Orbit.tsx`.
+* ATLAS 0.6.0 was never published (release run 9: Forge test 10 s timeout on Windows → raised to 60 s; run 10: the
+  casing collision). Its content ships in 0.7.0; the changelog says so.
 
 ## Released 2026-11-19 (owner-approved)
 * Prometheus 2.1.0 (run 15) and 2.2.0 (run 16, `8cec89e`): 2.2.0 adds Settings → Voice → Set up voice input.

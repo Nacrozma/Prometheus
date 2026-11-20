@@ -19,17 +19,18 @@ const node = (id, title, status, output = "") => ({ id, title, detail: "", phase
 const base = { id: "s1", title: "Rocket-sim public release", created_at: "", updated_at: "", conversation_id: "c1", autonomy: "balanced", allowed: [], versions: [{ version: 1, plan, author: "atlas", why: "Proposed in conversation", at: "2026-11-20T10:00:00Z" }], active_version: 1, approved_version: 1, workflow: null, events: [{ at: "2026-11-20T10:00:00Z", kind: "plan.approved", detail: "version 1 approved by you" }], archived: false, reviewed: false, completed: false, layout: null };
 const running = { ...base, workflow: { id: "w", plan_version: 1, autonomy: "balanced", allowed: [], paused: false, state: "awaiting_approval", created_at: "", nodes: [node("u1", "Review the trajectory model", "completed", "Assumptions: fixed Isp per stage, no wind."), node("u2", "List what users need", "completed"), node("b1", "Write the user guide", "awaiting_approval"), node("b2", "Package the installer", "ready"), node("v1", "Run the test suite", "waiting"), node("r1", "Tag and publish", "waiting")] } };
 const scenes = [
-  ["01-atlas-orbit-entry", null, "command", 700, false],
-  ["02-atlas-orbit-empty", null, "command", 3200, false],
-  ["03-atlas-orbit-command", base, "command", 1600, true],
-  ["04-atlas-orbit-intelligence", base, "intelligence", 1600, true],
-  ["05-atlas-orbit-design", base, "design", 1600, true],
-  ["06-atlas-orbit-operations-approval", running, "operations", 1600, true],
-  ["07-atlas-orbit-reduced-motion", running, "operations", 900, true, "reduce"],
+  ["orbit-01-entry", null, "command", 700, false],
+  ["orbit-02-empty", null, "command", 3200, false],
+  ["orbit-03-command", base, "command", 1600, true],
+  ["orbit-04-intelligence", base, "intelligence", 1600, true],
+  ["orbit-05-design", base, "design", 1600, true],
+  ["orbit-06-operations-approval", running, "operations", 1600, true],
+  ["orbit-07-reduced-motion", running, "operations", 900, true, "reduce"],
+  ["orbit-08-immersive", base, "command", 1600, true, undefined, true],
 ];
 const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
-for (const [name, session, env, wait, seen, motion] of scenes) {
-  for (const [w, h, suffix] of [[1440, 900, ""], ...(name === "03-atlas-orbit-command" ? [[1280, 800, "-1280x800"]] : [])]) {
+for (const [name, session, env, wait, seen, motion, immersive] of scenes) {
+  for (const [w, h, suffix] of [[1440, 900, ""], ...(name === "orbit-03-command" ? [[1280, 800, "-1280x800"]] : [])]) {
     const page = await browser.newPage({ viewport: { width: w, height: h }, reducedMotion: motion ?? "no-preference" });
     await page.addInitScript(([s, e, seen]) => {
       window.__ORBIT_SESSION__ = s ? { ...s, layout: { env: e } } : null;
@@ -39,7 +40,7 @@ for (const [name, session, env, wait, seen, motion] of scenes) {
     }, [session, env, seen]);
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await page.goto(`http://localhost:5179/tests/visual/orbit-harness.html?env=${env}`);
+    await page.goto(`http://localhost:5179/tests/visual/orbit-harness.html?env=${env}${immersive ? "&immersive=1" : ""}`);
     await page.waitForTimeout(wait);
     await page.screenshot({ path: `${out}/${name}${suffix}.png` });
     console.log(name + suffix, errors.length ? `ERRORS: ${errors.join(" | ")}` : "ok");

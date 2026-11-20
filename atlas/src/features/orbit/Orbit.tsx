@@ -38,7 +38,7 @@ import { audio } from "@/features/voice/audioEngine";
 import { VoiceRing } from "@/features/voice/VoiceRing";
 import { TurnTaker, findTask, layout, parseCommand, partialPlan, stripPlanBlocks } from "./orbitLogic";
 import { OrbitSpace } from "./OrbitSpace";
-import { coreState } from "./orbitSpace";
+import { captionText, coreState } from "./orbitUniverse";
 
 const MARK: Record<string, [string, string]> = {
   proposed: ["◌", "Proposed"],
@@ -109,7 +109,9 @@ export function OrbitPage() {
   const runningNode = useRef<string | null>(null);
   const nodeConv = useRef<string | null>(null);
 
-  const say = (l: Line) => setLines((x) => [...x.slice(-80), l]);
+  const [caption, setCaption] = useState("");
+  const [convOpen, setConvOpen] = useState(false);
+  const say = (l: Line) => (setLines((x) => [...x.slice(-80), l]), setCaption(captionText(l.who, l.text)));
   const fail = (e: unknown) =>
     say({ who: "ORBIT", text: e instanceof AtlasError ? e.message : String(e), tone: "warn" });
 
@@ -213,6 +215,16 @@ export function OrbitPage() {
   useEffect(() => {
     replies.reload();
   }, [turn?.revision]);
+  // the immersive caption follows the newest real line: Atlas's last reply when it arrives
+  const lastReplyId = useRef("");
+  useEffect(() => {
+    const last = (replies.data ?? []).filter((m) => m.role === "assistant" && m.content.trim()).at(-1);
+    if (!last || last.id === lastReplyId.current) return;
+    const first = lastReplyId.current === "";
+    lastReplyId.current = last.id;
+    if (!first || !caption) setCaption(captionText("Atlas", stripPlanBlocks(last.content)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replies.data]);
 
   // ----- voice: continuous conversation or push-to-talk -----
   const taker = useRef(new TurnTaker());
@@ -394,13 +406,38 @@ export function OrbitPage() {
   const done = wf?.nodes.filter((n) => n.status === "completed").length ?? 0;
   const ringPhase = phase === "idle" && (turn?.running || running) ? "processing" : phase;
 
+  const statusWord =
+    phase === "listening"
+      ? "Listening · microphone on"
+      : phase === "speaking"
+        ? "Speaking"
+        : turn?.running
+          ? provisional.tasks.length
+            ? "Planning"
+            : "Thinking"
+          : running
+            ? "Running the workflow"
+            : waiting
+              ? "Waiting for you"
+              : "Ready";
+  const liveCaption = streaming ? captionText("Atlas", stripPlanBlocks(streaming)) : caption;
+  const panelAction = (action: "compare_ideas" | "add_idea" | "edit_brief", value?: string) => {
+    if (action === "compare_ideas") {
+      const ideas = plan?.ideas ?? [];
+      if (ideas.length < 2) return say({ who: "ORBIT", text: "Compare needs at least two ideas in the plan." });
+      if (turn?.running) return say({ who: "ORBIT", text: "Atlas is still replying; compare once it has finished." });
+      void talk(`Compare these ideas for the project and recommend one, with the trade-offs: ${ideas.join("; ")}`);
+    } else if (action === "add_idea" && value) void act({ action: "edit", edit: { op: "add_idea", idea: value } });
+    else if (action === "edit_brief" && value !== undefined) void act({ action: "edit", edit: { op: "set_brief", brief: value } });
+  };
+
   const transcript = (replies.data ?? [])
     .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim())
     .slice(-40);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 px-5 py-4">
-      <header className="flex flex-wrap items-center gap-2">
+    <div className={cn("flex h-full min-h-0 flex-col gap-3", immersive ? "px-3 py-2" : "px-5 py-4")}>
+      <header className={cn("flex flex-wrap items-center gap-2", immersive && "hidden")}>
         <h1 className="mr-2 font-display text-lg tracking-[0.3em] text-accent-strong">ORBIT</h1>
         <Select
           aria-label="ORBIT session"
@@ -462,9 +499,9 @@ export function OrbitPage() {
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_400px] gap-4">
+      <div className={cn("grid min-h-0 flex-1 gap-4", immersive && !convOpen ? "grid-cols-1" : "grid-cols-[minmax(0,1fr)_400px]")}>
         <section className="flex min-h-0 flex-col gap-2" aria-label="Plan">
-          <p className="text-sm text-text-2">
+          <p className={cn("text-sm text-text-2", immersive && "hidden")}>
             {plan ? (
               <>
                 <strong className="text-text-1">{plan.title}</strong>
@@ -495,6 +532,23 @@ export function OrbitPage() {
                 provisional={provisional}
                 speaking={phase === "speaking"}
                 onAct={act}
+                onPanelAction={panelAction}
+                hud={
+                  immersive
+                    ? {
+                        status: statusWord,
+                        caption: liveCaption,
+                        talkLabel: voice.capture === "listening" ? "Send" : voice.capture === "transcribing" ? "…" : "Talk",
+                        canTalk: !!voice.status?.stt_ready && !!voice.settings?.enabled,
+                        talkTitle: voice.status?.stt_ready ? "Talk (Ctrl+Shift+Space)" : "Set up speech recognition in Settings → Voice",
+                        onTalk: () => void voice.toggleListening(),
+                        onSend: (text) => void talk(text),
+                        conversationOpen: convOpen,
+                        onConversation: () => (setConvOpen((v) => !v), setTab("talk")),
+                        onExit: () => (setImmersive(false), setConvOpen(false)),
+                      }
+                    : undefined
+                }
                 onLink={(kind, ref) => {
                   if (kind === "approve" && waiting?.id === ref) void approveStep(ref);
                   else if (kind === "file") useUi.getState().navigate("files");
@@ -609,7 +663,7 @@ export function OrbitPage() {
           </div>
         </section>
 
-        <aside className="flex min-h-0 flex-col gap-2" aria-label="Conversation and details">
+        <aside className={cn("flex min-h-0 flex-col gap-2", immersive && !convOpen && "hidden")} aria-label="Conversation and details">
           <div role="tablist" className="flex gap-1 border-b border-line-1">
             {(["talk", "step", "versions"] as const).map((t) => (
               <button
@@ -629,20 +683,7 @@ export function OrbitPage() {
           {tab === "talk" && (
             <div className="flex min-h-0 flex-1 flex-col gap-2">
               <div className="text-sm" aria-live="polite">
-                <span className="text-accent-strong">●</span>{" "}
-                {phase === "listening"
-                  ? "Listening · microphone on"
-                  : phase === "speaking"
-                    ? "Speaking"
-                    : turn?.running
-                      ? provisional.tasks.length
-                        ? "Planning"
-                        : "Thinking"
-                      : running
-                        ? "Running the workflow"
-                        : waiting
-                          ? "Waiting for you"
-                          : "Ready"}
+                <span className="text-accent-strong">●</span> {statusWord}
               </div>
               <div
                 className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-md border border-line-1 bg-bg-1/60 p-3 text-sm"

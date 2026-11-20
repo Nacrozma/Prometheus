@@ -4,6 +4,7 @@ layout clamping, the animation state engine, effects, adaptive quality and the o
 import os
 import sys
 import tempfile
+import math
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -163,6 +164,38 @@ class TestMotion(unittest.TestCase):
         ps = M.spawn(20)
         M.advance(ps, 0.1, 0.5, -1.0)
         self.assertGreater(sum(p.radius for p in ps), r0)
+
+
+class TestCoreGeometryAndHud(unittest.TestCase):
+    def test_geodesic_shell_and_bounded_torus(self):
+        verts, edges = M.geodesic(1)
+        self.assertEqual((len(verts), len(edges)), (42, 120))
+        for v in verts:
+            self.assertAlmostEqual(math.sqrt(sum(c * c for c in v)), 1.0, places=9)
+        self.assertEqual(M.torus(10), M.torus(10))
+        full = M.Settings()
+        self.assertLess(M.Settings(particles="low").torus_count(), full.torus_count())
+        self.assertLess(full.torus_count(0.25), full.torus_count())
+        self.assertLess(M.Settings(reduced_motion=True).torus_count(), full.torus_count() + 1)
+
+    def test_tilted_ring_near_side_faces_the_viewer(self):
+        near = M.rotate(M.torus_point(math.pi / 2, 0, 0, 2, 0.4), 0, 0.37)
+        far = M.rotate(M.torus_point(-math.pi / 2, 0, 0, 2, 0.4), 0, 0.37)
+        self.assertGreater(near[2], 0)
+        self.assertLess(far[2], 0)
+
+    def test_curves_bow_away_from_the_core_and_pulses_stay_on_them(self):
+        c = M.curve_ctrl((0, 0), (10, 0), (5, 5))
+        self.assertLess(c[1], 0)
+        self.assertEqual(M.bezier((0, 0), c, (10, 0), 0), (0, 0))
+        self.assertEqual(M.bezier((0, 0), c, (10, 0), 1), (10, 0))
+
+    def test_caption_is_one_clean_line_of_real_text(self):
+        from app.ui.orbit_universe import caption_text
+
+        self.assertEqual(caption_text("Prometheus", "**Here** is ```orbit-plan {}``` the plan"), "Prometheus: Here is the plan")
+        self.assertLessEqual(len(caption_text("Prometheus", "x" * 500)), 194)
+        self.assertEqual(caption_text("You", "   "), "")
 
 
 class TestSound(unittest.TestCase):

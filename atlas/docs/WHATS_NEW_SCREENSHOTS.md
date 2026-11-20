@@ -1,4 +1,4 @@
-# What's new, in pictures (0.3.0 → 0.6.0)
+# What's new, in pictures (0.3.0 → 0.7.0)
 
 Every screenshot here was taken by the automated end-to-end run of the real desktop app, on Linux, at
 version 0.4.2.
@@ -175,7 +175,7 @@ built on the first. The same results reach a conversation when Atlas consults a 
 Captured by the end-to-end suite from the real app (automated-test build, scripted model).
 
 
-## 0.6.0 — the ORBIT universe
+## 0.7.0 — the ORBIT universe (0.6.0 was not published)
 
 Rendered from the real ORBIT page (React, canvas core, Atlas's voice ring) in Chromium by
 `tests/visual/orbit-shots.mjs`, with the desktop backend replaced by fixed sample answers (a sample project, not a
@@ -186,3 +186,8 @@ real conversation). The desktop app itself was not built for these.
 | ![Command](screenshots/orbit-03-command.png) | ![Intelligence](screenshots/orbit-04-intelligence.png) |
 | ![Design](screenshots/orbit-05-design.png) | ![Operations, waiting for approval](screenshots/orbit-06-operations-approval.png) |
 | ![Reduced motion](screenshots/orbit-07-reduced-motion.png) | ![1280×800](screenshots/orbit-03-command-1280x800.png) |
+
+Immersive ORBIT with the heads-up layer (status, project title over the stage track, environment, conversation,
+visual settings, Talk and message, caption of the latest line):
+
+![Immersive ORBIT](screenshots/orbit-08-immersive.png)

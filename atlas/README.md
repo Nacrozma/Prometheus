@@ -5,13 +5,13 @@ provider you choose, remembers only what you approve, carries out tasks with a s
 tools, and shows everything it can reach on a live **Atlas Map**.
 
 > **Just want to use it on Windows? → [How to install ATLAS Co-Pilot](../INSTALL.md)**
-> Latest version: **0.6.0** —
-> **[⬇ download ATLAS-Co-Pilot-Setup-x64.exe](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.6.0/ATLAS-Co-Pilot-Setup-x64.exe)**
-> · [MSI](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.6.0/ATLAS-Co-Pilot-x64.msi)
-> · [release page](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.6.0)
+> Latest version: **0.7.0** —
+> **[⬇ download ATLAS-Co-Pilot-Setup-x64.exe](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.7.0/ATLAS-Co-Pilot-Setup-x64.exe)**
+> · [MSI](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.7.0/ATLAS-Co-Pilot-x64.msi)
+> · [release page](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.7.0)
 > · SHA-256 on the release page (`SHA256SUMS.txt`)
 >
-> New in 0.6.0: the **ORBIT universe** (a living electric-blue command environment; fixes ORBIT freezing with a session open in 0.5.0). New in 0.5.0: **ORBIT** (plan out loud with Atlas around the voice ring), Tasks with reminders and a scheduler,
+> New in 0.7.0: the **ORBIT universe** — a living electric-blue command environment with a particle-torus core, curved connections, chamfered panels with real actions and a full-screen heads-up layer (it also fixes ORBIT freezing with a session open in 0.5.0; 0.6.0 was never published). New in 0.5.0: **ORBIT** (plan out loud with Atlas around the voice ring), Tasks with reminders and a scheduler,
 > Command Center and daily briefing, Focus, recap, Knowledge Vault, specialists — see [CHANGELOG](CHANGELOG.md).
 
 ![Atlas Map](docs/screenshots/09-map-inspector.png)

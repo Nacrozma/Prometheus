@@ -224,6 +224,7 @@ export type Fx = { intensity: "subtle" | "balanced" | "spectacular"; particles: 
 export const FX_DEFAULT: Fx = { intensity: "spectacular", particles: "high", depth: "immersive", camera: "gentle", cinematic: true, energy: true, sound: false, volume: 0.5 };
 const INTENSITY = { subtle: 0.45, balanced: 0.75, spectacular: 1 };
 const DENSITY = { low: 40, medium: 90, high: 160 };
+const TORUS = { low: 260, medium: 520, high: 900 };
 
 export function readFx(raw: string | null): Fx {
   try {
@@ -249,7 +250,9 @@ export function budget(fx: Fx, reduced: boolean, quality = 1) {
   return {
     scale,
     particles: reduced ? Math.min(24, DENSITY[fx.particles] / 4) : Math.max(12, Math.round(DENSITY[fx.particles] * scale * Math.max(0.25, Math.min(1, quality)))),
-    rings: fx.intensity === "subtle" ? 3 : fx.intensity === "balanced" ? 4 : 5,
+    rings: fx.intensity === "subtle" ? 1 : fx.intensity === "balanced" ? 2 : 3,
+    // the core's particle torus: dense enough to read as a luminous ring, bounded for weak GPUs
+    torus: reduced ? TORUS[fx.particles] / 2 : Math.max(80, Math.round(TORUS[fx.particles] * (0.6 + 0.4 * scale) * Math.max(0.25, Math.min(1, quality)))),
     animate: !reduced,
   };
 }
@@ -287,4 +290,113 @@ export class FrameMonitor {
     }
     return this.quality;
   }
+}
+
+// ---------------------------------------------------------------- core geometry and curved connections
+
+export type V3 = [number, number, number];
+export type Pt = { x: number; y: number };
+
+/** `n` particles on a torus as [u around the ring, v around the tube, radial jitter, size]; deterministic. */
+export function torus(n: number, seed = 11): [number, number, number, number][] {
+  let x = seed >>> 0;
+  const rnd = () => ((x = (Math.imul(x, 1664525) + 1013904223) >>> 0) / 4294967296);
+  const out: [number, number, number, number][] = [];
+  for (let i = 0; i < Math.max(0, n); i++) {
+    const g = (rnd() + rnd() + rnd() - 1.5) * 0.24; // roughly normal, sd ≈ 0.12
+    out.push([rnd() * Math.PI * 2, rnd() * Math.PI * 2, g, 0.6 + rnd() * 1.2]);
+  }
+  return out;
+}
+
+export function torusPoint(u: number, v: number, jitter: number, major: number, minor: number): V3 {
+  const r = minor * (1 + jitter);
+  return [(major + r * Math.cos(v)) * Math.cos(u), r * Math.sin(v), (major + r * Math.cos(v)) * Math.sin(u)];
+}
+
+/** Turn about the vertical axis by `yaw`, then tilt toward the viewer by `pitch`; +z faces the viewer. */
+export function rotate([x0, y0, z0]: V3, yaw: number, pitch: number): V3 {
+  const x = x0 * Math.cos(yaw) + z0 * Math.sin(yaw);
+  const z1 = -x0 * Math.sin(yaw) + z0 * Math.cos(yaw);
+  return [x, y0 * Math.cos(pitch) - z1 * Math.sin(pitch), y0 * Math.sin(pitch) + z1 * Math.cos(pitch)];
+}
+
+/** A geodesic sphere: an icosahedron split `frequency` times, on the unit sphere (frequency 1: 42 vertices, 120 edges). */
+export function geodesic(frequency = 1): { verts: V3[]; edges: [number, number][] } {
+  const t = (1 + Math.sqrt(5)) / 2;
+  const unit = (v: V3): V3 => {
+    const n = Math.hypot(v[0], v[1], v[2]);
+    return [v[0] / n, v[1] / n, v[2] / n];
+  };
+  const verts: V3[] = ([[-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0], [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t], [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]] as V3[]).map(unit);
+  let faces: [number, number, number][] = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+    [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
+  for (let f = 0; f < frequency; f++) {
+    const cache = new Map<string, number>();
+    const mid = (a: number, b: number) => {
+      const k = a < b ? `${a},${b}` : `${b},${a}`;
+      if (!cache.has(k)) {
+        const va = verts[a]!;
+        const vb = verts[b]!;
+        verts.push(unit([(va[0] + vb[0]) / 2, (va[1] + vb[1]) / 2, (va[2] + vb[2]) / 2]));
+        cache.set(k, verts.length - 1);
+      }
+      return cache.get(k)!;
+    };
+    faces = faces.flatMap(([a, b, c]) => {
+      const ab = mid(a, b);
+      const bc = mid(b, c);
+      const ca = mid(c, a);
+      return [[a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]] as [number, number, number][];
+    });
+  }
+  const set = new Set<string>();
+  const edges: [number, number][] = [];
+  for (const [a, b, c] of faces)
+    for (const [i, j] of [[a, b], [b, c], [c, a]] as [number, number][]) {
+      const k = i < j ? `${i},${j}` : `${j},${i}`;
+      if (!set.has(k)) {
+        set.add(k);
+        edges.push(i < j ? [i, j] : [j, i]);
+      }
+    }
+  return { verts, edges };
+}
+
+/** Control point of the quadratic curve a→b: the midpoint pushed sideways by `bend` × length, away from the core. */
+export function curveCtrl(a: Pt, b: Pt, centre: Pt, bend = 0.22): Pt {
+  const mx = (a.x + b.x) / 2;
+  const my = (a.y + b.y) / 2;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return { x: mx, y: my };
+  let nx = -dy / len;
+  let ny = dx / len;
+  if ((mx - centre.x) * nx + (my - centre.y) * ny < 0) {
+    nx = -nx;
+    ny = -ny;
+  }
+  return { x: mx + nx * len * bend, y: my + ny * len * bend };
+}
+
+export function bezier(a: Pt, c: Pt, b: Pt, t: number): Pt {
+  const u = 1 - t;
+  return { x: u * u * a.x + 2 * u * t * c.x + t * t * b.x, y: u * u * a.y + 2 * u * t * c.y + t * t * b.y };
+}
+
+/** Where a line from the core toward `to` meets the torus's rim (an ellipse with radii ra, rb). */
+export function rimPoint(centre: Pt, to: Pt, ra: number, rb: number): Pt {
+  const dx = to.x - centre.x;
+  const dy = to.y - centre.y;
+  const k = 1 / Math.max(1e-6, Math.sqrt((dx / ra) ** 2 + (dy / rb) ** 2));
+  return { x: centre.x + dx * k, y: centre.y + dy * k };
+}
+
+/** One readable caption line from a real transcript line: markdown and plan blocks removed; long text shows its end. */
+export function captionText(who: string, text: string, limit = 180): string {
+  let t = (text || "").replace(/```[\s\S]*?(```|$)/g, " ").replace(/[*_#>`]+/g, "").replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  if (t.length > limit) t = "…" + t.slice(-(limit - 1)).trimStart();
+  return who ? `${who}: ${t}` : t;
 }

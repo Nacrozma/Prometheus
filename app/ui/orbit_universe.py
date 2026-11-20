@@ -17,8 +17,8 @@ import random
 import time
 from typing import Callable, Dict, List, Optional
 
-from PyQt6.QtCore import QEasingCurve, QParallelAnimationGroup, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
+from PyQt6.QtCore import QEasingCurve, QLineF, QParallelAnimationGroup, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -45,6 +45,10 @@ from . import theme as T
 GOLD = QColor(244, 181, 44)
 CHAMPAGNE = QColor(247, 217, 139)
 STATE_MARK = {"done": "✓", "current": "●", "open": "○"}
+TORUS_MAJOR = 2.6   # the particle torus's ring radius, in core radii
+TORUS_MINOR = 0.46  # its tube radius
+TORUS_RATIO = 0.36  # how flat the ring looks (sin of the viewing tilt)
+GEO_VERTS, GEO_EDGES = M.geodesic(1)
 
 
 def _c(rgb, a: float) -> QColor:
@@ -73,8 +77,9 @@ class CoreFX(QWidget):
         self.fx = M.Effects(energy=settings.energy)
         self.monitor = M.FrameMonitor()
         self.particles = M.spawn(settings.particle_count())
+        self.torus = M.torus(settings.torus_count())
         self.arcs: List[tuple] = []
-        self.links: List[tuple] = []  # (QPointF a, QPointF b, kind, key)
+        self.links: List[tuple] = []  # (QPointF a, QPointF ctrl, QPointF b, kind, key)
         self._last = time.perf_counter()
         self._rnd = random.Random(3)
         self.timer = QTimer(self)
@@ -85,6 +90,7 @@ class CoreFX(QWidget):
         self.settings = settings
         self.fx.energy = settings.energy
         self.particles = M.spawn(settings.particle_count(self.monitor.quality))
+        self.torus = M.torus(settings.torus_count(self.monitor.quality))
         self.running(self.isVisible())
         self.update()
 
@@ -129,6 +135,30 @@ class CoreFX(QWidget):
             self.apply(self.settings)
 
     # --- painting ---
+    def _paint_torus(self, p: QPainter, c: QPointF, R: float, v: dict, tone, glow: float, s: float, t: float) -> None:
+        pitch = math.asin(TORUS_RATIO)
+        spin = t * 0.16 * max(0.15, float(v["ring_speed"]))
+        swirl = t * 0.5 * max(0.2, float(v["flow"]) * 2)
+        major = R * TORUS_MAJOR
+        minor = R * TORUS_MINOR * (1.0 + 0.6 * self.level)
+        depth_max = major + minor
+        buckets: List[List[QPointF]] = [[], [], [], []]
+        for u, w, jit, _size in self.torus:
+            x, y, z = M.rotate(M.torus_point(u + spin, w + swirl, jit, major, minor), 0.0, pitch)
+            if z < 0 and x * x + y * y < (R * 1.02) ** 2:
+                continue  # behind the sun
+            k = min(3, int((z / depth_max + 1) * 2))
+            buckets[k].append(QPointF(c.x() + x, c.y() - y))
+        hot = CHAMPAGNE.getRgb()[:3]
+        for k, pts in enumerate(buckets):
+            if not pts:
+                continue
+            col = tone if k < 2 else tuple(int(tone[i] + (hot[i] - tone[i]) * (k - 1) / 2) for i in range(3))
+            pen = QPen(_c(col, (0.30 + 0.22 * k) * (0.6 + 0.4 * glow) * (0.75 + 0.25 * s)), 1.3 + 0.6 * k)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(pen)
+            p.drawPoints(pts)
+
     def paintEvent(self, _e) -> None:
         t0 = time.perf_counter()
         p = QPainter(self)
@@ -152,19 +182,34 @@ class CoreFX(QWidget):
             p.setBrush(QBrush(g))
             p.drawEllipse(c, R * 3.1, R * 3.1)
 
-        # inner geometric energy mesh (thinking and building make it denser)
-        mesh = 6 + int(6 * float(v["nodes"]))
-        p.setPen(QPen(_c(tone, 0.10 + 0.12 * glow * s), 0.8))
+        # geodesic shell: a slowly turning wireframe sphere around the sun; thinking and building brighten it
+        nodes = float(v["nodes"])
+        yaw, pitch = t * 0.09, 0.42
+        rg = R * 1.45
+        verts = [M.rotate(q, yaw, pitch) for q in GEO_VERTS]
+        front, back = [], []
+        for i, j in GEO_EDGES:
+            a3, b3 = verts[i], verts[j]
+            line = QLineF(c.x() + a3[0] * rg, c.y() - a3[1] * rg, c.x() + b3[0] * rg, c.y() - b3[1] * rg)
+            (front if a3[2] + b3[2] > 0 else back).append(line)
         p.setBrush(Qt.BrushStyle.NoBrush)
-        rot = t * 0.12
-        pts = [QPointF(c.x() + math.cos(rot + k * math.tau / mesh) * R * 1.22, c.y() + math.sin(rot + k * math.tau / mesh) * R * 1.22) for k in range(mesh)]
-        for k in range(mesh):
-            p.drawLine(pts[k], pts[(k + 2) % mesh])
+        p.setPen(QPen(_c(tone, (0.05 + 0.06 * nodes) * (0.6 + 0.4 * s)), 0.7))
+        p.drawLines(back)
+        p.setPen(QPen(_c(tone, (0.24 + 0.24 * nodes + 0.1 * glow) * (0.6 + 0.4 * s)), 0.9))
+        p.drawLines(front)
+        dot = QPen(_c(CHAMPAGNE.getRgb()[:3], 0.35 + 0.35 * nodes), 2.2)
+        dot.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(dot)
+        p.drawPoints([QPointF(c.x() + q[0] * rg, c.y() - q[1] * rg) for q in verts if q[2] > 0])
+
+        # particle torus: the core's luminous ring of dust. It turns with the real state's ring speed, the real
+        # microphone / playback level swells its tube, and the sun hides the particles behind it.
+        self._paint_torus(p, c, R, v, tone, glow, s, t)
 
         # concentric orbital rings: different radii, inclinations and directions; a bead travels on each
         n = self.settings.ring_count()
         for i in range(n):
-            r = R * (1.45 + 0.34 * i)
+            r = R * (TORUS_MAJOR + 0.75 + 0.4 * i)
             direction = 1 if i % 2 == 0 else -1
             orient = (t * float(v["ring_speed"]) * 6.0 * direction * (1 - 0.12 * i)) + i * 37
             incline = 18 + float(v["tilt"]) * ((i % 3) - 1) * 0.6 + 50
@@ -241,15 +286,15 @@ class CoreFX(QWidget):
                     p.setPen(Qt.PenStyle.NoPen)
                     p.setBrush(_c((255, 214, 120), (1 - k) * 0.9))
                     p.drawEllipse(QPointF(c.x() + math.cos(ang) * rr, c.y() + math.sin(ang) * rr * 0.8), 2.4 * (1 - k) + 0.6, 2.4 * (1 - k) + 0.6)
-        # pulses along real connections
-        for a, b, kind, key in self.links:
+        # pulses travelling along the real (curved) connections; a real event boosts its line
+        for a, ctrl, b, kind, key in self.links:
             boosted = any(e.kind == "pulse" and e.target == key for e in self.fx.active())
             ph = ((t * 0.35) + (hash(key) % 100) / 100.0) % 1.0
-            pt = QPointF(a.x() + (b.x() - a.x()) * ph, a.y() + (b.y() - a.y()) * ph)
+            x, y = M.bezier((a.x(), a.y()), (ctrl.x(), ctrl.y()), (b.x(), b.y()), ph)
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(_c(tone, 0.9 if boosted else 0.45))
-            rad = 3.4 if boosted else 2.0
-            p.drawEllipse(pt, rad, rad)
+            p.setBrush(_c(tone, 0.9 if boosted else 0.5))
+            rad = 3.4 if boosted else 2.2
+            p.drawEllipse(QPointF(x, y), rad, rad)
         p.end()
         self.monitor.add((time.perf_counter() - t0) * 1000 * 2.2)  # paint dominates frame cost
 
@@ -303,6 +348,83 @@ def paint_background(p: QPainter, stage, cache: Dict[str, object], t: float, set
 
 # ====================================================================== holographic panels
 
+#: each panel's accent (Prometheus stays solar: gold, amber, bronze, champagne; ideas carry a soft violet so
+#: they read as possibilities rather than commitments; risks a warm red)
+PANEL_ACCENT = {
+    "brief": (247, 217, 139), "ideas": (178, 146, 255), "files": (244, 181, 44), "plan": (255, 170, 60),
+    "next": (255, 196, 110), "activity": (214, 196, 160), "structure": (205, 150, 90), "operations": (255, 138, 36),
+    "approvals": (247, 217, 139), "research": (247, 217, 139), "questions": (226, 204, 160), "risks": (240, 110, 90),
+}
+CHAMFER = 12
+
+
+def chamfer_path(r: QRectF, k: float = CHAMFER) -> QPainterPath:
+    """A panel outline with the top-left and bottom-right corners cut at 45°."""
+    path = QPainterPath(QPointF(r.left() + k, r.top()))
+    path.lineTo(r.right(), r.top())
+    path.lineTo(r.right(), r.bottom() - k)
+    path.lineTo(r.right() - k, r.bottom())
+    path.lineTo(r.left(), r.bottom())
+    path.lineTo(r.left(), r.top() + k)
+    path.closeSubpath()
+    return path
+
+
+def paint_icon(p: QPainter, kind: str, r: QRectF, col: QColor) -> None:
+    """Small line icons for the panels, drawn as vectors so they look the same on every system font."""
+    p.save()
+    p.translate(r.topLeft())
+    s = r.width() / 14.0
+    p.scale(s, s)
+    pen = QPen(col, 1.3)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    P = QPointF
+    if kind == "files":
+        p.drawPolygon([P(1, 3), P(5.5, 3), P(7, 4.6), P(13, 4.6), P(13, 12), P(1, 12)])
+    elif kind == "ideas":
+        p.drawEllipse(P(7, 5.6), 4.2, 4.2)
+        p.drawLine(P(5.2, 11), P(8.8, 11))
+        p.drawLine(P(5.8, 13), P(8.2, 13))
+    elif kind == "brief":
+        p.drawRect(QRectF(2.5, 1, 9, 12))
+        for y in (4.5, 7, 9.5):
+            p.drawLine(P(4.5, y), P(9.5, y))
+    elif kind in ("plan", "operations"):
+        for y in (2.5, 7, 11.5):
+            p.drawRect(QRectF(1, y - 1.3, 2.6, 2.6))
+            p.drawLine(P(5.5, y), P(13, y))
+    elif kind == "next":
+        p.drawLine(P(1.5, 7), P(12, 7))
+        p.drawPolyline([P(8, 3), P(12.5, 7), P(8, 11)])
+    elif kind == "activity":
+        p.drawPolyline([P(1, 7), P(4, 7), P(5.5, 2.5), P(8.5, 11.5), P(10, 7), P(13, 7)])
+    elif kind == "approvals":
+        p.drawPolygon([P(7, 1), P(12.5, 3), P(12, 8), P(7, 13), P(2, 8), P(1.5, 3)])
+        p.drawPolyline([P(4.6, 7), P(6.4, 8.8), P(9.6, 5.2)])
+    elif kind == "research":
+        p.drawEllipse(P(6, 6), 4.2, 4.2)
+        p.drawLine(P(9.2, 9.2), P(13, 13))
+    elif kind == "questions":
+        path = QPainterPath(P(4, 4.6))
+        path.cubicTo(P(4, 0.6), P(10.5, 0.6), P(10.5, 4.6))
+        path.cubicTo(P(10.5, 7), P(7, 7), P(7, 9.4))
+        p.drawPath(path)
+        p.drawPoint(P(7, 12.4))
+    elif kind == "risks":
+        p.drawPolygon([P(7, 1.5), P(13, 12.5), P(1, 12.5)])
+        p.drawLine(P(7, 5.5), P(7, 8.8))
+        p.drawPoint(P(7, 10.8))
+    elif kind == "structure":
+        for q in (P(3, 3), P(11, 3), P(7, 11.5)):
+            p.drawEllipse(q, 1.8, 1.8)
+        p.drawLine(P(4.6, 4.2), P(6.2, 9.8))
+        p.drawLine(P(9.4, 4.2), P(7.8, 9.8))
+    p.restore()
+
+
 class HoloPanel(QFrame):
     """A floating translucent panel: drag by its title, resize from the corner, collapse, expand, hide. Its
     content is real data (or the honest empty hint). Clicking a link inside asks the page to act."""
@@ -321,13 +443,16 @@ class HoloPanel(QFrame):
         self.expanded = False
         self._drag = None
         self._restore: Optional[QRect] = None
-        self.setStyleSheet(self._style(False))
+        self._focus = False
+        self.accent = QColor(*PANEL_ACCENT.get(pid, (244, 181, 44)))
+        self.setStyleSheet("QFrame#holo { background: transparent; border: none; }")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 6, 6, 6)
+        lay.setContentsMargins(12, 7, 7, 6)
         lay.setSpacing(4)
         head = QHBoxLayout()
-        self.title = QLabel(title.upper())
-        self.title.setStyleSheet(f"color: {T.HIGHLIGHT}; letter-spacing: 1px; font-size: 8pt; font-weight: 600; background: transparent; border: none;")
+        head.addSpacing(20)  # the panel's icon is painted here
+        self.title = QLabel(title)
+        self.title.setStyleSheet(f"color: {T.TEXT}; font-size: 9.5pt; font-weight: 600; background: transparent; border: none;")
         self.title.setMinimumWidth(self.title.sizeHint().width())
         self.count = QLabel("")
         self.count.setStyleSheet(f"color: {T.TEXT_FAINT}; font-size: 8pt; background: transparent; border: none;")
@@ -342,7 +467,7 @@ class HoloPanel(QFrame):
             b.setToolTip(tip)
             b.setAccessibleName(f"{tip}: {title}")
             b.setAutoRaise(True)
-            b.setStyleSheet(f"QToolButton {{ color: {T.TEXT_SECONDARY}; background: transparent; border: none; padding: 0 3px; }} QToolButton:hover {{ color: {T.ACCENT}; }}")
+            b.setStyleSheet(f"QToolButton {{ color: {T.TEXT_SECONDARY}; background: transparent; border: none; padding: 0 1px; }} QToolButton:hover {{ color: {T.ACCENT}; }}")
             b.clicked.connect(fn)
             head.addWidget(b)
         lay.addLayout(head)
@@ -351,21 +476,71 @@ class HoloPanel(QFrame):
         self.body.anchorClicked.connect(lambda u: self.link.emit(self.pid, u.toString()))
         self.body.setStyleSheet(f"QTextBrowser {{ background: transparent; border: none; color: {T.TEXT}; }}")
         lay.addWidget(self.body, 1)
-        grip_row = QHBoxLayout()
+        # footer: the panel's real actions (left) and the resize grip (right)
+        self.footer = QWidget()
+        self.footer.setStyleSheet("background: transparent;")
+        grip_row = QHBoxLayout(self.footer)
+        grip_row.setContentsMargins(0, 0, 0, 0)
+        grip_row.setSpacing(6)
+        self.actions = QHBoxLayout()
+        self.actions.setSpacing(6)
+        grip_row.addLayout(self.actions)
         grip_row.addStretch(1)
         self.grip = QSizeGrip(self)
+        self._resizing = False
+        self.grip.installEventFilter(self)
         grip_row.addWidget(self.grip)
-        lay.addLayout(grip_row)
+        lay.addWidget(self.footer)
         self.opacity = QGraphicsOpacityEffect(self)
         self.opacity.setOpacity(1.0)
         self.setGraphicsEffect(self.opacity)
         self._anim = None
 
-    @staticmethod
-    def _style(focus: bool) -> str:
-        edge = "rgba(244,181,44,0.75)" if focus else "rgba(244,181,44,0.28)"
-        return (f"QFrame#holo {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(30,26,20,0.94), stop:1 rgba(14,15,20,0.92)); "
-                f"border: 1px solid {edge}; border-radius: 10px; }}")
+    def add_action(self, text: str, tip: str, fn: Callable[[], None], primary: bool = False) -> QPushButton:
+        """A real action at the foot of the panel (e.g. "Compare ideas", "+ Add")."""
+        a = self.accent
+        rgb = f"{a.red()},{a.green()},{a.blue()}"
+        b = QPushButton(text)
+        b.setToolTip(tip)
+        b.setAccessibleName(tip)
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        fill = f"rgba({rgb},0.22)" if primary else "rgba(255,255,255,0.03)"
+        b.setStyleSheet(f"QPushButton {{ color: {T.TEXT}; background: {fill}; border: 1px solid rgba({rgb},0.55); border-radius: 12px; "
+                        f"padding: 3px 11px; font-size: 8.5pt; min-width: 0; }} QPushButton:hover {{ background: rgba({rgb},0.32); }} "
+                        f"QPushButton:focus {{ border: 1px solid {T.FOCUS}; }}")
+        b.clicked.connect(fn)
+        b.ensurePolished()
+        b.setMinimumWidth(b.sizeHint().width() + 6)  # never clipped: the label is the promise of what it does
+        self.actions.addWidget(b)
+        return b
+
+    def paintEvent(self, _e) -> None:
+        """The chamfered holographic frame: a dark translucent glass, a faint accent wash behind the title, a thin
+        edge (brighter when focused), bright accent brackets on the cut corners and the panel's icon."""
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0)
+        path = chamfer_path(r)
+        g = QLinearGradient(0, 0, 0, r.height())
+        g.setColorAt(0.0, QColor(30, 26, 21, 242))
+        g.setColorAt(1.0, QColor(12, 13, 18, 236))
+        p.fillPath(path, QBrush(g))
+        a = self.accent
+        wash = QRadialGradient(QPointF(0, 0), max(80.0, r.width() * 0.7))
+        wash.setColorAt(0.0, _c(a.getRgb()[:3], 0.13))
+        wash.setColorAt(1.0, _c(a.getRgb()[:3], 0.0))
+        p.fillPath(path, QBrush(wash))
+        p.setPen(QPen(_c(a.getRgb()[:3], 0.7 if self._focus else 0.26), 1.0))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPath(path)
+        k = CHAMFER
+        pen = QPen(_c(a.getRgb()[:3], 0.95 if self._focus else 0.75), 1.6)
+        pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        p.setPen(pen)
+        p.drawPolyline([QPointF(r.left(), r.top() + k + 10), QPointF(r.left(), r.top() + k), QPointF(r.left() + k, r.top()), QPointF(r.left() + k + 22, r.top())])
+        p.drawPolyline([QPointF(r.right(), r.bottom() - k - 10), QPointF(r.right(), r.bottom() - k), QPointF(r.right() - k, r.bottom()), QPointF(r.right() - k - 22, r.bottom())])
+        paint_icon(p, self.pid, QRectF(13, 9, 14, 14), _c(a.getRgb()[:3], 0.95))
+        p.end()
 
     def set_content(self, content: Dict[str, object], provisional: bool = False) -> None:
         items = content["items"]
@@ -391,7 +566,7 @@ class HoloPanel(QFrame):
         """Title bar only (small stages); expanding opens it over the stage."""
         if not self.expanded and not self.collapsed:
             self.body.setVisible(not on)
-            self.grip.setVisible(not on)
+            self.footer.setVisible(not on)
 
     def settle(self) -> None:
         """Finish any running animation at once (e.g. the stage was resized mid-animation)."""
@@ -404,7 +579,8 @@ class HoloPanel(QFrame):
         self.body.setHtml(text)
 
     def focus(self, on: bool) -> None:
-        self.setStyleSheet(self._style(on))
+        self._focus = on
+        self.update()
 
     # --- interaction ---
     def mousePressEvent(self, e) -> None:
@@ -435,15 +611,27 @@ class HoloPanel(QFrame):
         if e.position().y() < 28:
             self.toggle_expand()
 
+    def eventFilter(self, obj, ev) -> bool:
+        from PyQt6.QtCore import QEvent
+
+        if obj is self.grip and ev.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
+            self._resizing = ev.type() == QEvent.Type.MouseButtonPress
+        return False
+
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
-        if not self.expanded and not self.collapsed and self.isVisible() and e.oldSize().isValid():
+        # only the owner's own resize (dragging the grip) is remembered; layout changes made by ORBIT itself
+        # (compact chips on a small stage, overlap avoidance, animations) must never overwrite the saved layout
+        from PyQt6.QtWidgets import QApplication
+
+        user = self._resizing and bool(QApplication.mouseButtons() & Qt.MouseButton.LeftButton)
+        if user and not self.expanded and not self.collapsed and self.isVisible() and e.oldSize().isValid():
             self.moved.emit(self.pid, self.geometry())
 
     def toggle_collapse(self) -> None:
         self.collapsed = not self.collapsed
         self.body.setVisible(not self.collapsed)
-        self.grip.setVisible(not self.collapsed)
+        self.footer.setVisible(not self.collapsed)
         self.state_changed.emit(self.pid, "collapsed" if self.collapsed else "restored")
 
     def toggle_expand(self) -> None:
@@ -503,7 +691,8 @@ class HoloPanel(QFrame):
         group.addAnimation(g)
         group.addAnimation(o)
         self._anim = group
-        QTimer.singleShot(delay, group.start)
+        # start later, unless settle() (a resize, an environment switch) has finished this panel meanwhile
+        QTimer.singleShot(delay, lambda: group.start() if self._anim is group else None)
 
     def dissolve(self, reduced: bool, done: Callable[[], None]) -> None:
         if reduced:
@@ -584,6 +773,280 @@ class EnvBar(QWidget):
 
 
 # ====================================================================== entry sequence
+
+class StageTrack(QWidget):
+    """The immersive title: "Projects / ‹project›" over a gently curved track of the seven stages. Each dot
+    shows the stage's real state (filled = done, ringed = current, hollow = open); clicking one (or arrow keys +
+    Enter) goes where that stage's work happens."""
+
+    clicked = pyqtSignal(str)
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setMouseTracking(True)
+        self.setAccessibleName("Project stages")
+        self.title = ""
+        self.stages: List[Dict[str, str]] = []
+        self.cursor = -1
+
+    def set_data(self, title: str, stages: List[Dict[str, str]]) -> None:
+        self.title, self.stages = title, stages
+        cur = next((st for st in stages if st["state"] == "current"), None)
+        self.setAccessibleDescription(f"{title or 'New project'}. " + (f"Current stage: {cur['name']}, {cur['why']}" if cur else "All stages done"))
+        self.update()
+
+    def _dots(self) -> List[QPointF]:
+        n = max(1, len(self.stages))
+        w, h = self.width(), self.height()
+        left, right, base, sag = 40.0, w - 40.0, h - 30.0, 12.0
+        out = []
+        for i in range(n):
+            f = i / max(1, n - 1)
+            out.append(QPointF(left + (right - left) * f, base - sag + 4 * sag * (f - 0.5) ** 2))  # a shallow smile
+        return out
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        f = QFont(self.font())
+        f.setPointSizeF(13.0)
+        f.setWeight(QFont.Weight.DemiBold)
+        p.setFont(f)
+        head = "Projects  /  "
+        name = self.title or "New project"
+        fm = p.fontMetrics()
+        name = fm.elidedText(name, Qt.TextElideMode.ElideRight, max(80, self.width() - fm.horizontalAdvance(head) - 40))
+        total = fm.horizontalAdvance(head) + fm.horizontalAdvance(name)
+        x = (self.width() - total) / 2
+        p.setPen(QColor(T.TEXT_SECONDARY))
+        p.drawText(QPointF(x, 22), head)
+        p.setPen(QColor(T.TEXT))
+        p.drawText(QPointF(x + fm.horizontalAdvance(head), 22), name)
+        dots = self._dots()
+        if len(dots) > 1:
+            path = QPainterPath(dots[0])
+            for a, b in zip(dots, dots[1:]):
+                path.quadTo(QPointF((a.x() + b.x()) / 2, (a.y() + b.y()) / 2 + 3), b)
+            p.setPen(QPen(QColor(244, 181, 44, 70), 1.2))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPath(path)
+        f2 = QFont(self.font())
+        f2.setPointSizeF(7.5)
+        f2.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
+        p.setFont(f2)
+        for i, (pt, st) in enumerate(zip(dots, self.stages)):
+            state = st["state"]
+            if state == "current":
+                g = QRadialGradient(pt, 14)
+                g.setColorAt(0.0, QColor(244, 181, 44, 120))
+                g.setColorAt(1.0, QColor(244, 181, 44, 0))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(g))
+                p.drawEllipse(pt, 14, 14)
+                p.setPen(QPen(GOLD, 1.6))
+                p.setBrush(QColor(20, 18, 14))
+                p.drawEllipse(pt, 6, 6)
+                p.setBrush(GOLD)
+                p.setPen(Qt.PenStyle.NoPen)
+                p.drawEllipse(pt, 2.6, 2.6)
+            elif state == "done":
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor(244, 181, 44, 200))
+                p.drawEllipse(pt, 4.2, 4.2)
+            else:
+                p.setPen(QPen(QColor(T.TEXT_FAINT), 1.1))
+                p.setBrush(QColor(12, 13, 18))
+                p.drawEllipse(pt, 4.2, 4.2)
+            if i == self.cursor and self.hasFocus():
+                p.setPen(QPen(QColor(T.FOCUS), 1.2))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawEllipse(pt, 9, 9)
+            label = st["name"].upper()
+            p.setPen(QColor(T.HIGHLIGHT if state == "current" else T.TEXT_SECONDARY if state == "done" else T.TEXT_FAINT))
+            tw = p.fontMetrics().horizontalAdvance(label)
+            p.drawText(QPointF(pt.x() - tw / 2, pt.y() + 20), label)
+        p.end()
+
+    def _hit(self, pos: QPointF) -> int:
+        for i, pt in enumerate(self._dots()):
+            if abs(pt.x() - pos.x()) < 24 and abs(pt.y() - pos.y()) < 22:
+                return i
+        return -1
+
+    def mouseMoveEvent(self, e) -> None:
+        i = self._hit(e.position())
+        if 0 <= i < len(self.stages):
+            st = self.stages[i]
+            self.setToolTip(f"{st['name']}: {st['state']} — {st['why']}")
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.setToolTip("")
+            self.unsetCursor()
+
+    def mousePressEvent(self, e) -> None:
+        i = self._hit(e.position())
+        if 0 <= i < len(self.stages):
+            self.clicked.emit(self.stages[i]["key"])
+
+    def keyPressEvent(self, e) -> None:
+        n = len(self.stages)
+        if not n:
+            return super().keyPressEvent(e)
+        if e.key() in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+            self.cursor = (max(0, self.cursor) + (1 if e.key() == Qt.Key.Key_Right else -1)) % n
+            self.update()
+        elif e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space) and self.cursor >= 0:
+            self.clicked.emit(self.stages[self.cursor]["key"])
+        else:
+            super().keyPressEvent(e)
+
+
+def caption_text(who: str, text: str, limit: int = 180) -> str:
+    """One readable line for the caption bar from a real transcript line: markdown and plan blocks removed,
+    whitespace collapsed; a long reply shows its end (the part being said now)."""
+    import re
+
+    t = re.sub(r"```.*?(```|$)", " ", text or "", flags=re.S)
+    t = re.sub(r"[*_#>`]+", "", t)
+    t = " ".join(t.split())
+    if not t:
+        return ""
+    if len(t) > limit:
+        t = "…" + t[-(limit - 1):].lstrip()
+    return f"{who}: {t}" if who else t
+
+
+class Hud:
+    """The immersive heads-up layer over the ORBIT stage: status chip (top left), project title with the stage
+    track (top centre), environment / conversation / visual settings / exit (top right), a talk button and
+    message field (bottom left) and a caption of the latest real line (bottom centre). Only shown while ORBIT is
+    immersive; every control does what the page's own controls do."""
+
+    TOP, BOTTOM = 84, 58
+
+    def __init__(self, stage: QWidget, on_stage: Callable[[str], None], on_send: Callable[[str], None], on_talk: Callable[[], None],
+                 on_env: Callable[[str], None], on_conversation: Callable[[], None], on_visual: Callable[[], None], on_exit: Callable[[], None]):
+        self.stage = stage
+        self.visible = False
+        self.chip = QLabel(stage)
+        self.chip.setAccessibleName("ORBIT status")
+        self.track = StageTrack(stage)
+        self.track.clicked.connect(on_stage)
+        self.caption = QLabel(stage)
+        self.caption.setAccessibleName("Latest line")
+        self.caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.caption.setStyleSheet(f"QLabel {{ color: {T.TEXT}; background: rgba(12,13,18,0.82); border: 1px solid rgba(244,181,44,0.22); "
+                                   f"border-radius: 15px; padding: 6px 16px; font-size: 9.5pt; }}")
+        pill = (f"QPushButton, QToolButton {{ color: {T.TEXT}; background: rgba(12,13,18,0.82); border: 1px solid rgba(244,181,44,0.30); "
+                f"border-radius: 14px; padding: 4px 12px; font-size: 8.5pt; min-width: 0; }} "
+                f"QPushButton:hover, QToolButton:hover {{ background: rgba(244,181,44,0.18); }} "
+                f"QPushButton:checked {{ background: rgba(244,181,44,0.85); color: {T.ON_ACCENT}; }} "
+                f"QPushButton:focus, QToolButton:focus {{ border: 1px solid {T.FOCUS}; }} QToolButton::menu-indicator {{ image: none; }}")
+        self.tools = QWidget(stage)
+        self.tools.setStyleSheet(pill)
+        tl = QHBoxLayout(self.tools)
+        tl.setContentsMargins(0, 0, 0, 0)
+        tl.setSpacing(6)
+        from PyQt6.QtWidgets import QMenu
+
+        self.env_btn = QToolButton()
+        self.env_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.env_btn.setAccessibleName("ORBIT environment")
+        menu = QMenu(self.env_btn)
+        for key, env in SP.ENVIRONMENTS.items():
+            menu.addAction(env["name"], lambda k=key: on_env(k)).setToolTip(env["purpose"])
+        self.env_btn.setMenu(menu)
+        tl.addWidget(self.env_btn)
+        self.conv_btn = QPushButton("Conversation")
+        self.conv_btn.setCheckable(True)
+        self.conv_btn.setToolTip("Show or hide the conversation beside ORBIT")
+        self.conv_btn.clicked.connect(on_conversation)
+        tl.addWidget(self.conv_btn)
+        gear = QPushButton("⚙")
+        gear.setToolTip("Visual experience: intensity, particles, depth, camera, sounds")
+        gear.setAccessibleName("Visual experience settings")
+        gear.clicked.connect(on_visual)
+        tl.addWidget(gear)
+        ex = QPushButton("Exit")
+        ex.setToolTip("Leave immersive ORBIT (Esc)")
+        ex.setAccessibleName("Exit immersive ORBIT")
+        ex.clicked.connect(on_exit)
+        tl.addWidget(ex)
+        self.composer = QWidget(stage)
+        self.composer.setStyleSheet(pill + f" QLineEdit {{ color: {T.TEXT}; background: rgba(12,13,18,0.82); border: 1px solid rgba(244,181,44,0.30); "
+                                    f"border-radius: 14px; padding: 4px 12px; font-size: 9pt; }} QLineEdit:focus {{ border: 1px solid {T.FOCUS}; }}")
+        cl = QHBoxLayout(self.composer)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(6)
+        self.talk_btn = QPushButton("Talk")
+        self.talk_btn.setToolTip("Talk to Prometheus (the microphone opens only while you talk)")
+        self.talk_btn.setAccessibleName("Talk to Prometheus")
+        self.talk_btn.clicked.connect(on_talk)
+        cl.addWidget(self.talk_btn)
+        from PyQt6.QtWidgets import QLineEdit
+
+        self.field = QLineEdit()
+        self.field.setPlaceholderText("Message Prometheus…")
+        self.field.setAccessibleName("Message Prometheus")
+        self.field.returnPressed.connect(lambda: (on_send(self.field.text()), self.field.clear()))
+        cl.addWidget(self.field, 1)
+        self.widgets = [self.chip, self.track, self.caption, self.tools, self.composer]
+        for w in self.widgets:
+            w.hide()
+        self.set_status("Idle", T.TEXT_SECONDARY, "")
+        self.set_env("command")
+
+    def show(self, on: bool) -> None:
+        self.visible = on
+        for w in self.widgets:
+            w.setVisible(on and (w is not self.caption or bool(self.caption.text())))
+            if on:
+                w.raise_()
+        self.place()
+
+    def reserve(self):
+        return (self.TOP, self.BOTTOM) if self.visible else (0, 0)
+
+    def place(self) -> None:
+        if not self.visible:
+            return
+        w, h = self.stage.width(), self.stage.height()
+        self.chip.adjustSize()
+        self.chip.move(14, 14)
+        self.tools.adjustSize()
+        self.tools.move(w - self.tools.width() - 14, 12)
+        side = max(self.chip.width(), self.tools.width()) + 28
+        tw = max(320, min(760, w - 2 * side))
+        self.track.setGeometry(int((w - tw) / 2), 6, int(tw), 76)
+        cw = min(360, int(w * 0.32))
+        self.composer.setGeometry(14, h - 44, cw, 32)
+        capw = max(200, min(int(w * 0.5), w - cw - 60))
+        self.caption.setMaximumWidth(capw)
+        self.caption.adjustSize()
+        x = max(cw + 28, int((w - self.caption.width()) / 2))
+        self.caption.move(x, h - 46)
+
+    def set_status(self, word: str, colour: str, stage: str) -> None:
+        extra = f"  ·  {stage}" if stage else ""
+        self.chip.setText(f"<span style='color:{colour}'>●</span>&nbsp; {html.escape(word.upper())}<span style='color:{T.TEXT_FAINT}'>{html.escape(extra)}</span>")
+        self.chip.setStyleSheet(f"QLabel {{ color: {T.TEXT}; background: rgba(12,13,18,0.82); border: 1px solid rgba(244,181,44,0.30); "
+                                f"border-radius: 13px; padding: 5px 12px; font-size: 8.5pt; letter-spacing: 1px; }}")
+        self.chip.setAccessibleDescription(f"{word}{extra}")
+        self.place()
+
+    def set_env(self, env: str) -> None:
+        self.env_btn.setText(f"{SP.ENVIRONMENTS.get(env, SP.ENVIRONMENTS['command'])['name']} ▾")
+        self.place()
+
+    def set_caption(self, text: str) -> None:
+        fm = self.caption.fontMetrics()
+        cap = self.caption.maximumWidth() - 40 if self.caption.maximumWidth() < 10000 else 560
+        self.caption.setText(fm.elidedText(text, Qt.TextElideMode.ElideLeft, max(120, cap)))
+        self.caption.setToolTip(text)
+        self.caption.setVisible(self.visible and bool(text))
+        self.place()
+
 
 class EntrySequence(QWidget):
     """Entering ORBIT: a point of light, the core forming, rings unfolding, the space opening. Click or any key
@@ -738,6 +1201,7 @@ class Universe:
         self.env_bar = EnvBar()
         self.env_bar.changed.connect(lambda e: self.set_env(e, user=True))
         self.stage_bar.clicked.connect(self.go_stage)
+        self.hud: Optional[Hud] = None  # the immersive heads-up layer, attached by the page
 
     # --- settings ---
     def apply_settings(self) -> None:
@@ -753,25 +1217,33 @@ class Universe:
             self.sounds.play(cue)
 
     # --- geometry ---
+    def _band(self):
+        """The vertical band panels live in: the whole stage, minus what the immersive HUD reserves."""
+        top, bottom = self.hud.reserve() if self.hud is not None else (0, 0)
+        return top, max(120, self.stage.height() - top - bottom)
+
     def to_px(self, r: Dict[str, float]) -> QRect:
-        w, h = self.stage.width(), self.stage.height()
+        w = self.stage.width()
+        top, h = self._band()
         narrow = w < 820
         pw = min(max(180 if narrow else 200, int(r["w"] * w)), max(180, int(w * (0.31 if narrow else 0.34))))
         ph = max(96, int(r["h"] * h))
         x, y = int(r["x"] * w), int(r["y"] * h)
         x = max(4, min(w - pw - 4, x)) if pw < w else 0  # always fully inside the stage when it fits
         y = max(4, min(h - ph - 4, y)) if ph < h else 0
-        return QRect(x, y, pw, ph)
+        return QRect(x, y + top, pw, ph)
 
     def to_frac(self, g: QRect) -> Dict[str, float]:
-        w, h = max(1, self.stage.width()), max(1, self.stage.height())
-        return {"x": g.x() / w, "y": g.y() / h, "w": g.width() / w, "h": g.height() / h}
+        w = max(1, self.stage.width())
+        top, h = self._band()
+        return {"x": g.x() / w, "y": (g.y() - top) / max(1, h), "w": g.width() / w, "h": g.height() / max(1, h)}
 
     def _placed(self, lay: Dict[str, Dict[str, object]]) -> Dict[str, QRect]:
         """Pixel rectangles for this environment's visible panels, nudged apart when the stage is too small for
         them not to overlap (stored fractions are untouched; only what is drawn moves)."""
         out: Dict[str, QRect] = {}
-        H, W = self.stage.height(), self.stage.width()
+        top, band = self._band()
+        H, W = top + band, self.stage.width()  # H: the band's bottom edge
         c = self.stage.centre()
         narrow = W < 820
         chips = 0
@@ -779,7 +1251,7 @@ class Universe:
             r = self.to_px(lay[pid])
             if narrow and k >= 4 and not lay[pid]["hidden"]:
                 # a small stage: extra panels become title bars along the top, opened with a click
-                r = QRect(int(c.x() - 95), H - 38 * (chips + 1), 190, 34)
+                r = QRect(int(c.x() - 105), H - 38 * (chips + 1), 210, 34)
                 chips += 1
                 out[pid] = r
                 continue
@@ -791,7 +1263,7 @@ class Universe:
                     down = r.center().y() >= c.y()
                     dy = (hit.bottom() - r.top() + 6) if down else -(r.bottom() - hit.top() + 6)
                     moved = r.translated(0, dy)
-                    if moved.top() < 4 or moved.bottom() > H - 4:  # no room vertically: shrink instead
+                    if moved.top() < top + 4 or moved.bottom() > H - 4:  # no room vertically: shrink instead
                         r.setHeight(max(80, r.height() - abs(dy)))
                         if down:
                             r.moveTop(min(H - r.height() - 4, max(hit.bottom() + 6, r.top())))
@@ -812,6 +1284,7 @@ class Universe:
         for pid, panel in self.panels.items():
             if pid in lay and not panel.expanded and panel.isVisible() and pid in SP.ENVIRONMENTS[self.env]["panels"]:
                 panel.settle()
+                panel.set_compact(targets[pid].height() <= 40)
                 panel.setGeometry(targets[pid])
         self._links()
 
@@ -824,15 +1297,14 @@ class Universe:
             pnl.state_changed.connect(self._panel_state)
             pnl.link.connect(self._link)
             pnl.selected.connect(self._select)
+            # real actions only: each one goes through the page (a message to Prometheus or a plan edit)
             if pid == "files":
-                b = QToolButton()
-                b.setText("+")
-                b.setToolTip("Attach a file from the workspace")
-                b.setAccessibleName("Attach a file from the workspace")
-                b.setAutoRaise(True)
-                b.setStyleSheet(f"QToolButton {{ color: {T.ACCENT}; background: transparent; border: none; font-weight: 700; }}")
-                b.clicked.connect(lambda: self.on_link("files", "attach:"))
-                pnl.extra.addWidget(b)
+                pnl.add_action("+ Attach", "Attach a file from the workspace", lambda: self.on_link("files", "attach:"))
+            elif pid == "ideas":
+                pnl.add_action("Compare ideas", "Ask Prometheus to compare the ideas", lambda: self.on_link("ideas", "action:compare_ideas"), primary=True)
+                pnl.add_action("+ Add", "Add an idea of your own", lambda: self.on_link("ideas", "action:add_idea"))
+            elif pid == "brief":
+                pnl.add_action("Edit brief", "Write or change the project brief", lambda: self.on_link("brief", "action:edit_brief"))
             self.panels[pid] = pnl
         return self.panels[pid]
 
@@ -847,6 +1319,8 @@ class Universe:
             if user:
                 self.save()
         self.env_bar.set_env(env)
+        if self.hud is not None:
+            self.hud.set_env(env)
         self.stage.show_constellation = SP.ENVIRONMENTS[env]["constellation"]
         wanted = set(SP.ENVIRONMENTS[env]["panels"])
         for pid, pnl in self.panels.items():
@@ -862,7 +1336,12 @@ class Universe:
 
     def refresh(self, provisional: Optional[dict] = None, materialise: bool = False) -> None:
         s = self.get_session() or {}
-        self.stage_bar.set_stages(SP.stages(s))
+        st = SP.stages(s)
+        self.stage_bar.set_stages(st)
+        if self.hud is not None:
+            plan = SP.plan_of(s) or {}
+            title = (provisional or {}).get("title") or plan.get("title") or s.get("title") or ""
+            self.hud.track.set_data(str(title), st)
         lay = SP.layout(s, self.env)
         origin = self.stage.centre()
         targets = self._placed(lay)
@@ -903,21 +1382,25 @@ class Universe:
         self._links()
 
     def _links(self) -> None:
+        """Curved lines for the real relationships only. Lines from the core leave from the particle torus's rim
+        (an ellipse around the sun) and every curve bows away from the core, as in a star chart."""
         s = self.get_session() or {}
         edges = SP.connections(s, self.env)
         c = self.stage.centre()
-        R = self.stage.core_radius() * 1.3
+        R = self.stage.core_radius()
+        ra, rb = R * TORUS_MAJOR * 1.08, R * TORUS_MAJOR * TORUS_RATIO * 1.6
         lines = []
         for e in edges:
             a = self._anchor(e["from"], c, R)
             b = self._anchor(e["to"], c, R)
             if a is None or b is None:
                 continue
-            if e["from"] == "core":  # lines leave from the core's edge, not through the sun
+            if e["from"] == "core":
                 dx, dy = b.x() - c.x(), b.y() - c.y()
-                d = max(1.0, math.hypot(dx, dy))
-                a = QPointF(c.x() + dx / d * R, c.y() + dy / d * R)
-            lines.append((a, b, e["kind"], f"{e['from']}>{e['to']}"))
+                k = 1.0 / max(1e-6, math.sqrt((dx / ra) ** 2 + (dy / rb) ** 2))
+                a = QPointF(c.x() + dx * k, c.y() + dy * k)
+            cx, cy = M.curve_ctrl((a.x(), a.y()), (b.x(), b.y()), (c.x(), c.y()))
+            lines.append((a, QPointF(cx, cy), b, e["kind"], f"{e['from']}>{e['to']}"))
         self.stage.link_lines = lines
         self.core.links = lines
         self.stage.update()

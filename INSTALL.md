@@ -13,9 +13,9 @@ OpenAI, OpenRouter, Mistral or Cerebras, or the free Ollama app if you'd rather 
 
 ## 1. Download
 
-**[⬇ Download ATLAS-Co-Pilot-Setup-x64.exe](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.6.0/ATLAS-Co-Pilot-Setup-x64.exe)** (version 0.6.0)
+**[⬇ Download ATLAS-Co-Pilot-Setup-x64.exe](https://github.com/Nacrozma/Prometheus/releases/download/atlas-v0.7.0/ATLAS-Co-Pilot-Setup-x64.exe)** (version 0.7.0)
 
-All files for this version are on the [release page](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.6.0):
+All files for this version are on the [release page](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.7.0):
 
 | File | What it is |
 |---|---|
@@ -24,7 +24,7 @@ All files for this version are on the [release page](https://github.com/Nacrozma
 | `SHA256SUMS.txt` | Checksums, to confirm the download isn't damaged (optional, see the end of this page). |
 
 **Already have an earlier version?** Run the new installer over it. Your conversations, settings, memories and
-keys are kept. Voice (step 6) arrived in 0.4.0. New in 0.4.2: a guided voice setup, and the tray icon, global shortcut and notifications (step 7). New in 0.5.0: ORBIT, Tasks and reminders. New in 0.6.0: the ORBIT universe. If you use the Prometheus link and are
+keys are kept. Voice (step 6) arrived in 0.4.0. New in 0.4.2: a guided voice setup, and the tray icon, global shortcut and notifications (step 7). New in 0.5.0: ORBIT, Tasks and reminders. New in 0.7.0: the ORBIT universe. If you use the Prometheus link and are
 coming from 0.2.0, also update `sibling_adapter.py` on the Prometheus side (it has a security fix).
 
 ## 2. Install
@@ -186,7 +186,7 @@ In PowerShell, in your Downloads folder:
 Get-FileHash .\ATLAS-Co-Pilot-Setup-x64.exe -Algorithm SHA256
 ```
 
-For version 0.6.0 it must match the value for `ATLAS-Co-Pilot-Setup-x64.exe` in `SHA256SUMS.txt` on the release page.
+For version 0.7.0 it must match the value for `ATLAS-Co-Pilot-Setup-x64.exe` in `SHA256SUMS.txt` on the release page.
 
 (The same values are in `SHA256SUMS.txt` on the release page.)
 

@@ -33,7 +33,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  APP_VERSION: "2.4.0"
+  APP_VERSION: "2.5.0"
 
 jobs:
   tests-windows:
@@ -193,7 +193,7 @@ jobs:
 
           SHA-256 of \`Prometheus-Setup-${APP_VERSION}-x64-unsigned.exe\`: \`${sha}\`
 
-          What is new: [docs/RELEASE_NOTES_2.4.0.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/RELEASE_NOTES_2.4.0.md) ·
+          What is new: [docs/RELEASE_NOTES_2.5.0.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/RELEASE_NOTES_2.5.0.md) ·
           How to install: [WINDOWS_INSTALLATION.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/desktop-evolution/WINDOWS_INSTALLATION.md) ·
           Known limitations: [KNOWN_LIMITATIONS.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/desktop-evolution/KNOWN_LIMITATIONS.md)
 

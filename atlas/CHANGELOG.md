@@ -1,6 +1,32 @@
 # Changelog
 
-## 0.6.0 — 2026-11-20
+## 0.7.0 — 2026-11-20
+
+0.6.0 was prepared but **never published**: its Windows release build failed because two ORBIT source files
+(`OrbitSpace.tsx` and `orbitSpace.ts`) differed only in letter case, which Windows treats as the same file. 0.7.0
+contains everything listed under 0.6.0 below, the fix, and the following.
+
+### Fixed
+- The ORBIT logic module is now `orbitUniverse.ts`; a new test fails if any two source files differ only in case.
+- A Forge engine test waited only 10 s for a turn that runs Python's unit tests twice; on a cold Windows runner that
+  could time out. The wait is now 60 s (assertions unchanged).
+
+### Added
+- **ORBIT core, closer to the reference design**: a dense **particle torus** around the voice ring (turns with the real
+  state, swells with the real microphone or playback level, hidden behind the core) and a slowly turning **geodesic
+  wireframe shell**; orbital rings now sit outside the torus.
+- **Curved connections** that bow away from the core, leave from the torus rim and carry their light pulses along the
+  curve (still only for real relationships).
+- **Chamfered holographic panels** with a line icon and an accent per panel (electric blue / cyan; Ideas violet; risks
+  amber) and **real actions**: Ideas — *Compare ideas* (a real message to Atlas) and *+ Add* (a plan edit); Project
+  brief — *Edit brief* (a plan edit); Files — *+ Share*.
+- Core plan edits `add_idea`, `remove_idea` (never guesses between several matches) and `set_brief`; "add idea: …"
+  and "remove idea …" work by voice or typing.
+- **Immersive ORBIT heads-up layer**: status chip, *Projects / ‹project›* over a curved stage track (click or keys to
+  go to a stage), environment menu, *Conversation* (slides the conversation in), visual settings, Exit, *Talk* with a
+  message field, and a caption of the latest real line.
+
+## 0.6.0 — 2026-11-20 (not published; included in 0.7.0)
 
 ### Fixed
 - **ORBIT no longer freezes when a session is open.** In 0.5.0 the ORBIT page subscribed to conversation state in a

@@ -466,8 +466,11 @@ SMOKE = textwrap.dedent(
         orb.worker, orb.worker_kind = None, ""
         orb.set_immersive(True)
         out["orbit_immersive"] = not win.nav.isVisible() and not win.topbar.isVisible()
+        out["orbit_hud"] = orb.hud.track.isVisible() and orb.hud.composer.isVisible() and not orb.top_bar.isVisible() and not orb.right.isVisible() and orb.universe.hud.reserve() == (orb.hud.TOP, orb.hud.BOTTOM)
+        orb.hud.conv_btn.click()
+        out["orbit_hud_conversation"] = orb.right.isVisible() and orb.hud.conv_btn.isChecked()
         win.go("Home")
-        out["orbit_immersive_exit"] = win.nav.isVisible() and not orb.immersive
+        out["orbit_immersive_exit"] = win.nav.isVisible() and not orb.immersive and orb.top_bar.isVisibleTo(orb) and not orb.hud.track.isVisibleTo(orb) and orb.universe.hud.reserve() == (0, 0)
         win.go("ORBIT")
         orb.toggle_view()
         out["orbit_outline"] = orb.views.currentWidget() is orb.outline and orb.outline.topLevelItemCount() >= 1
@@ -515,7 +518,7 @@ class TestWindowSmoke(unittest.TestCase):
         self.assertTrue(out["new_conv"] and out["renamed"] and out["deleted"])
         self.assertTrue(out["toast"] and out["activity"] and out["last_section"])
         self.assertTrue(out["launch_ok"] and out["states_ok"])
-        for k in ("orbit_versions", "orbit_undo", "orbit_build_needs_approval", "orbit_workflow", "orbit_go_ahead", "orbit_architect_refused", "orbit_card", "orbit_denied", "orbit_immersive", "orbit_immersive_exit", "orbit_outline", "orbit_recovered", "speech_shared", "speech_engine_decided", "orbit_universe", "orbit_stagebar"):
+        for k in ("orbit_versions", "orbit_undo", "orbit_build_needs_approval", "orbit_workflow", "orbit_go_ahead", "orbit_architect_refused", "orbit_card", "orbit_denied", "orbit_immersive", "orbit_immersive_exit", "orbit_outline", "orbit_recovered", "speech_shared", "speech_engine_decided", "orbit_universe", "orbit_stagebar", "orbit_hud", "orbit_hud_conversation"):
             self.assertTrue(out[k], k)
         self.assertTrue(out["dangerous"])
         self.assertFalse(out["auto_default"])

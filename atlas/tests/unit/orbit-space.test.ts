@@ -4,7 +4,15 @@ import { partialPlan } from "@/features/orbit/orbitLogic";
 import {
   ENVIRONMENTS,
   FrameMonitor,
+  bezier,
   budget,
+  captionText,
+  curveCtrl,
+  geodesic,
+  rimPoint,
+  rotate,
+  torus,
+  torusPoint,
   clampRect,
   connections,
   coreState,
@@ -18,7 +26,7 @@ import {
   stageEnvironment,
   stages,
   withRect,
-} from "@/features/orbit/orbitSpace";
+} from "@/features/orbit/orbitUniverse";
 
 const plan: OrbitPlan = {
   title: "Site",
@@ -120,5 +128,37 @@ describe("ORBIT universe motion", () => {
   it("streams brief and ideas progressively", () => {
     const p = partialPlan('```orbit-plan {"title": "Site", "brief": "A \\"small\\" site.", "ideas": ["Static", "Blog"], "phases": ["A"');
     expect([p.title, p.brief, p.ideas]).toEqual(["Site", 'A "small" site.', ["Static", "Blog"]]);
+  });
+});
+
+describe("ORBIT core geometry and curved connections", () => {
+  it("builds a geodesic shell and a bounded particle torus", () => {
+    const { verts, edges } = geodesic(1);
+    expect([verts.length, edges.length]).toEqual([42, 120]);
+    for (const v of verts) expect(Math.abs(Math.hypot(...v) - 1)).toBeLessThan(1e-9);
+    expect(torus(50)).toHaveLength(50);
+    expect(torus(10)).toEqual(torus(10));
+    const full = budget(readFx(null), false);
+    expect(budget(readFx(JSON.stringify({ particles: "low" })), false).torus).toBeLessThan(full.torus);
+    expect(budget(readFx(null), false, 0.25).torus).toBeLessThan(full.torus);
+  });
+  it("projects a tilted ring: the near side is toward the viewer", () => {
+    const [, , zNear] = rotate(torusPoint(Math.PI / 2, 0, 0, 2, 0.4), 0, 0.37);
+    const [, , zFar] = rotate(torusPoint(-Math.PI / 2, 0, 0, 2, 0.4), 0, 0.37);
+    expect(zNear).toBeGreaterThan(0);
+    expect(zFar).toBeLessThan(0);
+  });
+  it("curves bow away from the core and pulses stay on the curve", () => {
+    const c = curveCtrl({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 5, y: 5 });
+    expect(c.y).toBeLessThan(0);
+    expect(bezier({ x: 0, y: 0 }, c, { x: 10, y: 0 }, 0)).toEqual({ x: 0, y: 0 });
+    expect(bezier({ x: 0, y: 0 }, c, { x: 10, y: 0 }, 1)).toEqual({ x: 10, y: 0 });
+    const r = rimPoint({ x: 0, y: 0 }, { x: 100, y: 0 }, 50, 20);
+    expect(r).toEqual({ x: 50, y: 0 });
+  });
+  it("captions show one clean line of real text", () => {
+    expect(captionText("Atlas", "**Here** is ```orbit-plan {}``` the plan")).toBe("Atlas: Here is the plan");
+    expect(captionText("Atlas", "x".repeat(400)).length).toBeLessThanOrEqual(188);
+    expect(captionText("You", "   ")).toBe("");
   });
 });

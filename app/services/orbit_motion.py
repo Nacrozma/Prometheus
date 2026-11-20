@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 # ring_speed (turns/min), tilt (deg spread between rings), flow (particle speed), inflow (+ toward the core,
 # - outward), arcs (arc events per second), shield (outer shell alpha), pulse (core pulse Hz), tone, glow
@@ -92,7 +92,15 @@ class Settings:
         return max(12, int(DENSITY[self.particles] * self.scale() * max(0.25, min(1.0, quality))))
 
     def ring_count(self) -> int:
-        return {"subtle": 3, "balanced": 4, "spectacular": 5}[self.intensity]
+        """Orbital rings around the torus; fewer than before since the torus carries the core's motion."""
+        return {"subtle": 1, "balanced": 2, "spectacular": 3}[self.intensity]
+
+    def torus_count(self, quality: float = 1.0) -> int:
+        """Particles in the core's torus: dense enough to read as a luminous ring, bounded for weak GPUs."""
+        base = {"low": 260, "medium": 520, "high": 900}[self.particles]
+        if self.reduced_motion:
+            return base // 2  # still drawn (as a still image), never animated
+        return max(80, int(base * (0.6 + 0.4 * self.scale()) * max(0.25, min(1.0, quality))))
 
     def animate(self) -> bool:
         return not self.reduced_motion
@@ -217,3 +225,85 @@ def advance(ps: List[Particle], dt: float, flow: float, inflow: float) -> None:
             p.radius = 3.2
         elif p.radius > 3.3:
             p.radius = 1.1
+
+
+# ------------------------------------------------------------------ core geometry (particle torus, geodesic shell)
+
+Vec3 = Tuple[float, float, float]
+
+
+def torus(n: int, seed: int = 11) -> List[Tuple[float, float, float, float]]:
+    """`n` particles on a torus as (u around the ring, v around the tube, radial jitter, size). Jitter gives the
+    ring a dusty volume instead of a hard surface; the painter turns them by u over time."""
+    rnd = random.Random(seed)
+    return [(rnd.uniform(0, math.tau), rnd.uniform(0, math.tau), rnd.gauss(0.0, 0.12), rnd.uniform(0.6, 1.8)) for _ in range(max(0, n))]
+
+
+def torus_point(u: float, v: float, jitter: float, major: float, minor: float) -> Vec3:
+    r = minor * (1.0 + jitter)
+    return ((major + r * math.cos(v)) * math.cos(u), r * math.sin(v), (major + r * math.cos(v)) * math.sin(u))
+
+
+def rotate(p: Vec3, yaw: float, pitch: float) -> Vec3:
+    """Turn about the vertical axis by `yaw`, then tilt toward the viewer by `pitch` (radians). +z faces the viewer."""
+    x, y, z = p
+    x, z = x * math.cos(yaw) + z * math.sin(yaw), -x * math.sin(yaw) + z * math.cos(yaw)
+    y, z = y * math.cos(pitch) - z * math.sin(pitch), y * math.sin(pitch) + z * math.cos(pitch)
+    return x, y, z
+
+
+def geodesic(frequency: int = 1) -> Tuple[List[Vec3], List[Tuple[int, int]]]:
+    """A geodesic sphere: an icosahedron whose faces are split `frequency` times, vertices pushed onto the unit
+    sphere. Frequency 1 gives 42 vertices and 120 edges."""
+    t = (1 + math.sqrt(5)) / 2
+    verts: List[Vec3] = [(-1, t, 0), (1, t, 0), (-1, -t, 0), (1, -t, 0), (0, -1, t), (0, 1, t), (0, -1, -t), (0, 1, -t), (t, 0, -1), (t, 0, 1), (-t, 0, -1), (-t, 0, 1)]
+    faces = [(0, 11, 5), (0, 5, 1), (0, 1, 7), (0, 7, 10), (0, 10, 11), (1, 5, 9), (5, 11, 4), (11, 10, 2), (10, 7, 6), (7, 1, 8),
+             (3, 9, 4), (3, 4, 2), (3, 2, 6), (3, 6, 8), (3, 8, 9), (4, 9, 5), (2, 4, 11), (6, 2, 10), (8, 6, 7), (9, 8, 1)]
+
+    def unit(v: Vec3) -> Vec3:
+        n = math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2)
+        return v[0] / n, v[1] / n, v[2] / n
+
+    verts = [unit(v) for v in verts]
+    for _ in range(max(0, frequency)):
+        cache: Dict[Tuple[int, int], int] = {}
+
+        def mid(a: int, b: int) -> int:
+            key = (min(a, b), max(a, b))
+            if key not in cache:
+                va, vb = verts[a], verts[b]
+                verts.append(unit(((va[0] + vb[0]) / 2, (va[1] + vb[1]) / 2, (va[2] + vb[2]) / 2)))
+                cache[key] = len(verts) - 1
+            return cache[key]
+
+        nxt = []
+        for a, b, c in faces:
+            ab, bc, ca = mid(a, b), mid(b, c), mid(c, a)
+            nxt += [(a, ab, ca), (b, bc, ab), (c, ca, bc), (ab, bc, ca)]
+        faces = nxt
+    edges = sorted({(min(a, b), max(a, b)) for f in faces for a, b in ((f[0], f[1]), (f[1], f[2]), (f[2], f[0]))})
+    return verts, edges
+
+
+# ------------------------------------------------------------------ curved connections
+
+Pt = Tuple[float, float]
+
+
+def curve_ctrl(a: Pt, b: Pt, centre: Pt, bend: float = 0.22) -> Pt:
+    """Control point of the quadratic curve from a to b: the midpoint pushed sideways by `bend` × the length,
+    always away from the core, so every line arcs gracefully around the sun instead of cutting across it."""
+    mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length = math.hypot(dx, dy)
+    if length < 1e-6:
+        return mx, my
+    nx, ny = -dy / length, dx / length
+    if (mx - centre[0]) * nx + (my - centre[1]) * ny < 0:
+        nx, ny = -nx, -ny
+    return mx + nx * length * bend, my + ny * length * bend
+
+
+def bezier(a: Pt, ctrl: Pt, b: Pt, t: float) -> Pt:
+    u = 1 - t
+    return u * u * a[0] + 2 * u * t * ctrl[0] + t * t * b[0], u * u * a[1] + 2 * u * t * ctrl[1] + t * t * b[1]

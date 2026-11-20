@@ -111,6 +111,8 @@ describe("ORBIT commands", () => {
     expect(parseCommand("Publish must come after Survey hosting", plan)).toEqual({
       edit: { op: "add_dep", before: "Survey hosting", after: "Publish" },
     });
+    expect(parseCommand("Add an idea: a dark theme", plan)).toEqual({ edit: { op: "add_idea", idea: "a dark theme" } });
+    expect(parseCommand("remove idea dark theme", plan)).toEqual({ edit: { op: "remove_idea", idea: "dark theme" } });
     expect(parseCommand("undo", plan)).toEqual({ undo: true });
     expect(parseCommand("Stop", null)).toEqual({ control: "stop_speaking" });
     expect(parseCommand("What does hosting cost?", plan)).toBeNull();

@@ -150,6 +150,8 @@ export function parseCommand(text: string, plan: OrbitPlan | null): Command | nu
     return findTask(plan, g(1)) ? { edit: { op: "set_priority", task: g(1), priority: g(2).toLowerCase() } } : null;
   if ((m = t.match(/^(.+?) (?:must|should) (?:come )?after (.+)$/i)))
     return findTask(plan, g(1)) && findTask(plan, g(2)) ? { edit: { op: "add_dep", before: g(2), after: g(1) } } : null;
+  if ((m = t.match(/^(?:please\s+)?add (?:an |the )?idea:?\s+(.+)$/i))) return { edit: { op: "add_idea", idea: g(1) } };
+  if ((m = t.match(/^(?:please\s+)?(?:remove|drop) (?:the )?idea:?\s+(.+)$/i))) return { edit: { op: "remove_idea", idea: g(1) } };
   if (/^(?:please\s+)?undo(?: that)?$/i.test(t)) return { undo: true };
   return null;
 }

@@ -7,7 +7,7 @@
  * is hidden and under reduced motion (a single still frame is drawn). Panels are DOM (accessible, keyboard
  * reachable) and show only real session data. Layout is saved in the session through the core (set_layout).
  */
-import { ChevronDown, Maximize2, Minimize2, Plus, Settings2, X } from "lucide-react";
+import { Activity, ArrowRight, ChevronDown, CircleHelp, FileText, Folder, Lightbulb, ListChecks, Maximize2, MessageSquare, Mic, Minimize2, Network, Search, Settings2, ShieldCheck, TriangleAlert, Workflow, X, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useReducedMotion } from "@/components/Emblem";
 import { api } from "@/lib/bridge";
@@ -17,6 +17,7 @@ import type { OrbitSession } from "@/lib/schemas";
 import { audio } from "@/features/voice/audioEngine";
 import {
   ENVIRONMENTS,
+  activePlan,
   FrameMonitor,
   PANELS,
   budget,
@@ -36,7 +37,15 @@ import {
   type Layout,
   type PanelKey,
   type Rect,
-} from "./orbitSpace";
+  type StageKey,
+  bezier,
+  curveCtrl,
+  geodesic,
+  rimPoint,
+  rotate,
+  torus,
+  torusPoint,
+} from "./orbitUniverse";
 
 const MARK: Record<string, string> = { completed: "✓", done: "✓", running: "▶", failed: "!", awaiting_approval: "?", blocked: "⊘", ready: "○", question: "?", risk: "⚠", file: "▤" };
 const TONE: Record<string, string> = { completed: "var(--ok)", done: "var(--ok)", failed: "var(--err)", awaiting_approval: "var(--warn)", risk: "var(--warn)", running: "var(--accent)" };
@@ -79,16 +88,119 @@ type Props = {
   onLink: (kind: string, ref: string) => void;
   constellation: ReactNode;
   children: ReactNode;
+  /** panel buttons: compare ideas (a real message to Atlas), add an idea or change the brief (plan edits) */
+  onPanelAction?: (action: "compare_ideas" | "add_idea" | "edit_brief", value?: string) => void;
+  /** the immersive heads-up layer; absent outside immersive mode */
+  hud?: Hud;
 };
+
+export type Hud = {
+  status: string;
+  caption: string;
+  talkLabel: string;
+  canTalk: boolean;
+  talkTitle: string;
+  onTalk: () => void;
+  onSend: (text: string) => void;
+  conversationOpen: boolean;
+  onConversation: () => void;
+  onExit: () => void;
+};
+
+const HUD_TOP = 84;
+const HUD_BOTTOM = 58;
+const CHAMFER = 12;
+
+/** each panel's accent and icon (ATLAS stays electric blue / cyan; ideas carry a soft violet, risks amber) */
+const PANEL_LOOK: Record<PanelKey, [string, LucideIcon]> = {
+  brief: ["125,243,255", FileText],
+  ideas: ["178,146,255", Lightbulb],
+  files: ["60,207,230", Folder],
+  plan: ["90,170,255", ListChecks],
+  next: ["125,220,255", ArrowRight],
+  activity: ["160,200,230", Activity],
+  structure: ["90,150,230", Network],
+  operations: ["90,170,255", Workflow],
+  approvals: ["255,200,120", ShieldCheck],
+  research: ["125,243,255", Search],
+  questions: ["170,210,240", CircleHelp],
+  risks: ["255,170,90", TriangleAlert],
+};
+
+function chamferPath(w: number, h: number, k = CHAMFER) {
+  return `M${k} 0.5 H${w - 0.5} V${h - k} L${w - k} ${h - 0.5} H0.5 V${k} Z`;
+}
+
+/** The immersive title: "Projects / ‹project›" over a gently curved track of the real stages; click (or arrow
+ * keys + Enter) to go where a stage's work happens. */
+function StageTrack({ title, list, onGo }: { title: string; list: ReturnType<typeof stages>; onGo: (k: StageKey) => void }) {
+  const [w, setW] = useState(640);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setW(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const n = list.length;
+  const pt = (i: number) => {
+    const f = i / Math.max(1, n - 1);
+    return { x: 40 + (w - 80) * f, y: 46 - 12 + 48 * (f - 0.5) ** 2 };
+  };
+  const d = list.map((_, i) => pt(i)).reduce((acc, p, i, arr) => (i ? `${acc} Q${(arr[i - 1]!.x + p.x) / 2} ${(arr[i - 1]!.y + p.y) / 2 + 3} ${p.x} ${p.y}` : `M${p.x} ${p.y}`), "");
+  return (
+    <div ref={ref} className="pointer-events-auto absolute left-1/2 top-1.5 h-[76px] -translate-x-1/2" style={{ width: "min(760px, calc(100% - 520px))", minWidth: 320 }}>
+      <div className="truncate text-center text-[15px] font-semibold">
+        <span className="text-text-3">Projects&nbsp;&nbsp;/&nbsp;&nbsp;</span>
+        <span className="text-text-1">{title || "New project"}</span>
+      </div>
+      <svg className="absolute inset-0 overflow-visible" width={w} height={76} aria-hidden>
+        <path d={d} fill="none" stroke="rgba(60,207,230,0.3)" strokeWidth={1.2} />
+      </svg>
+      <nav aria-label="Project stages">
+        {list.map((st, i) => {
+          const p = pt(i);
+          return (
+            <button
+              key={st.key}
+              onClick={() => onGo(st.key)}
+              title={`${st.name}: ${st.state} — ${st.why}`}
+              aria-label={`Stage ${st.name}, ${st.state}: ${st.why}`}
+              aria-current={st.state === "current" ? "step" : undefined}
+              className="absolute flex -translate-x-1/2 flex-col items-center gap-1 rounded focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+              style={{ left: p.x, top: p.y - 7 }}
+            >
+              <span
+                className={cn(
+                  "block rounded-full",
+                  st.state === "current" ? "size-3.5 border-2 border-accent-strong bg-bg-0 shadow-[0_0_14px_rgba(60,207,230,0.8)]" : st.state === "done" ? "size-2.5 bg-[rgba(60,207,230,0.85)]" : "size-2.5 border border-text-3 bg-bg-0",
+                )}
+              />
+              <span className={cn("text-[0.6rem] font-semibold tracking-[0.12em]", st.state === "current" ? "text-accent-strong" : st.state === "done" ? "text-text-2" : "text-text-3")}>{st.name.toUpperCase()}</span>
+            </button>
+          );
+        })}
+      </nav>
+    </div>
+  );
+}
 
 type Particle = { a: number; r: number; s: number; size: number; d: number };
 type Effect = { kind: "shockwave" | "celebrate" | "pulse"; age: number; life: number; target?: string };
+const TORUS_MAJOR = 2.6; // the particle torus's ring radius, in core radii
+const TORUS_MINOR = 0.46; // its tube radius
+const TORUS_RATIO = 0.36; // how flat the ring looks (sin of the viewing tilt)
+const GEO = geodesic(1);
 
-export function OrbitSpace({ session, coreState, provisional, speaking, onAct, onLink, constellation, children }: Props) {
+export function OrbitSpace({ session, coreState, provisional, speaking, onAct, onLink, constellation, children, onPanelAction, hud }: Props) {
   const reduced = useReducedMotion();
   const [fx, setFx] = useState<Fx>(() => readFx(localStorage.getItem("orbit.fx")));
   const [showFx, setShowFx] = useState(false);
   const [showPanels, setShowPanels] = useState(false);
+  const [envMenu, setEnvMenu] = useState(false);
+  const [editing, setEditing] = useState<{ pid: PanelKey; value: string } | null>(null);
+  const [msg, setMsg] = useState("");
   const layout = useMemo(() => readLayout(session?.layout), [session?.layout]);
   const [env, setEnv] = useState<EnvKey>(layout.env && ENVIRONMENTS[layout.env] ? layout.env : "command");
   const [local, setLocal] = useState<Layout>(layout);
@@ -149,14 +261,18 @@ export function OrbitSpace({ session, coreState, provisional, speaking, onAct, o
     if (contents.ideas && provisional.ideas?.length) contents.ideas = { ...contents.ideas, items: provisional.ideas.map((x) => ({ text: x, sub: "idea", state: "", ref: "" })), empty: "" };
     if (contents.plan && provisional.phases.length) contents.plan = { ...contents.plan, items: [...provisional.phases.map((x) => ({ text: x, sub: "phase", state: "", ref: "" })), ...provisional.tasks.map((x) => ({ text: x, sub: "task", state: "", ref: "" }))], empty: "" };
   }
+  // panels live in the stage's band: all of it, minus what the immersive heads-up layer reserves
+  const top = hud ? HUD_TOP : 0;
+  const bottom = hud ? HUD_BOTTOM : 0;
+  const bandH = Math.max(120, size.h - top - bottom);
   const px = useCallback(
     (r: Rect) => {
       const narrow = size.w < 820;
       const w = Math.min(Math.max(narrow ? 180 : 200, r.w * size.w), Math.max(180, size.w * (narrow ? 0.31 : 0.34)));
-      const h = r.collapsed ? 34 : Math.max(96, r.h * size.h);
-      return { x: Math.max(4, Math.min(size.w - w - 4, r.x * size.w)), y: Math.max(4, Math.min(size.h - h - 4, r.y * size.h)), w, h };
+      const h = r.collapsed ? 34 : Math.max(96, r.h * bandH);
+      return { x: Math.max(4, Math.min(size.w - w - 4, r.x * size.w)), y: top + Math.max(4, Math.min(bandH - h - 4, r.y * bandH)), w, h };
     },
-    [size],
+    [size, top, bandH],
   );
   const placed = Object.fromEntries(panelIds.map((p) => [p, px(rects[p])])) as Record<PanelKey, { x: number; y: number; w: number; h: number }>;
   const edges = connections(session, env, grants.data ?? []).filter((e) => !rects[e.to]?.hidden && (e.from === "core" || !rects[e.from]?.hidden));
@@ -179,8 +295,8 @@ export function OrbitSpace({ session, coreState, provisional, speaking, onAct, o
   };
 
   // ---------------- the canvas loop (atmosphere, core, pulses) ----------------
-  const stateRef = useRef({ coreState, edges, placed, size, fx, reduced });
-  stateRef.current = { coreState, edges, placed, size, fx, reduced };
+  const stateRef = useRef({ coreState, edges, placed, size, fx, reduced, top, bottom });
+  stateRef.current = { coreState, edges, placed, size, fx, reduced, top, bottom };
   useEffect(() => {
     const cv = canvas.current;
     if (!cv) return;
@@ -188,6 +304,7 @@ export function OrbitSpace({ session, coreState, provisional, speaking, onAct, o
     if (!g) return;
     const monitor = new FrameMonitor();
     let particles: Particle[] = [];
+    let torusPts: [number, number, number, number][] = [];
     let t = 0;
     let last = performance.now();
     let raf = 0;
@@ -258,9 +375,10 @@ export function OrbitSpace({ session, coreState, provisional, speaking, onAct, o
         }
       }
       const cx = w / 2;
-      const cy = h / 2;
-      const R = Math.min(w, h) * 0.075;
-      // real connections and the pulses travelling along them
+      const cy = (st.top + (h - st.bottom)) / 2;
+      const R = Math.min(w, h - st.top - st.bottom) * 0.075;
+      const centre = { x: cx, y: cy };
+      // real connections, curved away from the core, and the pulses travelling along them
       const effects = fxRef.current;
       for (const e of st.edges) {
         const pb = st.placed[e.to];
@@ -271,30 +389,34 @@ export function OrbitSpace({ session, coreState, provisional, speaking, onAct, o
           const pa = st.placed[e.from];
           if (!pa) continue;
           a = { x: pa.x + pa.w / 2, y: pa.y + pa.h / 2 };
-        } else {
-          const d = Math.hypot(bxp.x - cx, bxp.y - cy) || 1;
-          a = { x: cx + ((bxp.x - cx) / d) * R * 1.4, y: cy + ((bxp.y - cy) / d) * R * 1.4 };
-        }
+        } else a = rimPoint(centre, bxp, R * TORUS_MAJOR * 1.08, R * TORUS_MAJOR * TORUS_RATIO * 1.6);
+        const ctrl = curveCtrl(a, bxp, centre);
         const lg = g.createLinearGradient(a.x, a.y, bxp.x, bxp.y);
-        lg.addColorStop(0, "rgba(60,207,230,0.45)");
-        lg.addColorStop(1, "rgba(60,207,230,0.12)");
+        lg.addColorStop(0, "rgba(60,207,230,0.5)");
+        lg.addColorStop(1, "rgba(60,207,230,0.14)");
         g.strokeStyle = lg;
-        g.lineWidth = 1.1;
+        g.lineWidth = 1.2;
         g.beginPath();
         g.moveTo(a.x, a.y);
-        g.lineTo(bxp.x, bxp.y);
+        g.quadraticCurveTo(ctrl.x, ctrl.y, bxp.x, bxp.y);
         g.stroke();
+        g.fillStyle = "rgba(160,235,255,0.6)";
+        g.beginPath();
+        g.arc(bxp.x, bxp.y, 2.6, 0, Math.PI * 2);
+        g.fill();
         if (e.kind !== "context") {
+          const mid = bezier(a, ctrl, bxp, 0.5);
           g.fillStyle = "rgba(160,200,230,0.6)";
           g.font = "10px Inter, sans-serif";
-          g.fillText(e.kind, (a.x + bxp.x) / 2 + 4, (a.y + bxp.y) / 2 - 4);
+          g.fillText(e.kind, mid.x + 4, mid.y - 4);
         }
         const keyId = `${e.from}>${e.to}`;
         const boost = effects.some((f) => f.kind === "pulse" && f.target === keyId);
         const ph = (t * 0.35 + (keyId.length % 10) / 10) % 1;
-        g.fillStyle = col(boost ? 0.95 : 0.5);
+        const q = bezier(a, ctrl, bxp, ph);
+        g.fillStyle = col(boost ? 0.95 : 0.55);
         g.beginPath();
-        g.arc(a.x + (bxp.x - a.x) * ph, a.y + (bxp.y - a.y) * ph, boost ? 3.4 : 2, 0, Math.PI * 2);
+        g.arc(q.x, q.y, boost ? 3.4 : 2.2, 0, Math.PI * 2);
         g.fill();
       }
       // the core: shield, mesh, rings, particles, audio ring, pulse, arcs, effects
@@ -307,19 +429,53 @@ export function OrbitSpace({ session, coreState, provisional, speaking, onAct, o
       g.beginPath();
       g.arc(cx, cy, R * 3.1, 0, Math.PI * 2);
       g.fill();
-      g.strokeStyle = col(0.1 + 0.12 * m.glow * b.scale);
-      g.lineWidth = 0.8;
-      const mesh = 8;
-      for (let k = 0; k < mesh; k++) {
-        const a1 = t * 0.12 + (k * Math.PI * 2) / mesh;
-        const a2 = t * 0.12 + (((k + 2) % mesh) * Math.PI * 2) / mesh;
+      // geodesic shell: a slowly turning wireframe sphere around the core; thinking and running brighten it
+      const busy = Math.min(1, m.arcs * 1.6 + (m.ringSpeed > 2.4 ? 0.3 : 0));
+      const rg = R * 1.45;
+      const vs = GEO.verts.map((v) => rotate(v, t * 0.09, 0.42));
+      g.lineWidth = 0.7;
+      for (const front of [false, true]) {
+        g.strokeStyle = col(front ? (0.24 + 0.24 * busy + 0.1 * m.glow) * (0.6 + 0.4 * b.scale) : (0.05 + 0.06 * busy) * (0.6 + 0.4 * b.scale));
         g.beginPath();
-        g.moveTo(cx + Math.cos(a1) * R * 1.22, cy + Math.sin(a1) * R * 1.22);
-        g.lineTo(cx + Math.cos(a2) * R * 1.22, cy + Math.sin(a2) * R * 1.22);
+        for (const [i0, j0] of GEO.edges) {
+          const va = vs[i0]!;
+          const vb = vs[j0]!;
+          if (va[2] + vb[2] > 0 !== front) continue;
+          g.moveTo(cx + va[0] * rg, cy - va[1] * rg);
+          g.lineTo(cx + vb[0] * rg, cy - vb[1] * rg);
+        }
         g.stroke();
       }
+      g.fillStyle = `rgba(200,245,255,${0.35 + 0.35 * busy})`;
+      for (const v of vs) if (v[2] > 0) g.fillRect(cx + v[0] * rg - 1, cy - v[1] * rg - 1, 2, 2);
+      // particle torus: the core's luminous ring of dust; it turns with the real state's ring speed, the real
+      // audio level swells its tube, and particles behind the core are hidden by it
+      if (torusPts.length !== b.torus) torusPts = torus(b.torus);
+      const lvl = st.coreState === "listening" || st.coreState === "speaking" ? audio.level() : 0;
+      const pitch = Math.asin(TORUS_RATIO);
+      const spin = t * 0.16 * Math.max(0.15, m.ringSpeed);
+      const swirl = t * 0.5 * Math.max(0.2, m.flow * 2);
+      const major = R * TORUS_MAJOR;
+      const minor = R * TORUS_MINOR * (1 + 0.6 * lvl);
+      const buckets: number[][] = [[], [], [], []];
+      for (const [u, v, j] of torusPts) {
+        const [x, y, z] = rotate(torusPoint(u + spin, v + swirl, j, major, minor), 0, pitch);
+        if (z < 0 && x * x + y * y < (R * 1.02) ** 2) continue;
+        buckets[Math.min(3, Math.floor((z / (major + minor) + 1) * 2))]!.push(cx + x, cy - y);
+      }
+      buckets.forEach((pts, k) => {
+        const a = (0.3 + 0.22 * k) * (0.6 + 0.4 * m.glow) * (0.75 + 0.25 * b.scale);
+        g.fillStyle = k < 2 ? col(a) : `rgba(${Math.round(r0 + (220 - r0) * (k - 1) / 2)},${Math.round(g0 + (250 - g0) * (k - 1) / 2)},255,${a})`;
+        const rad = 0.65 + 0.3 * k;
+        g.beginPath();
+        for (let i = 0; i < pts.length; i += 2) {
+          g.moveTo(pts[i]! + rad, pts[i + 1]!);
+          g.arc(pts[i]!, pts[i + 1]!, rad, 0, Math.PI * 2);
+        }
+        g.fill();
+      });
       for (let i = 0; i < b.rings; i++) {
-        const rr = R * (1.45 + 0.34 * i);
+        const rr = R * (TORUS_MAJOR + 0.75 + 0.4 * i);
         const dir = i % 2 ? -1 : 1;
         const orient = ((t * m.ringSpeed * 6 * dir * (1 - 0.12 * i) + i * 37) * Math.PI) / 180;
         const incline = 18 + m.tilt * ((i % 3) - 1) * 0.6 + 50;
@@ -435,7 +591,7 @@ export function OrbitSpace({ session, coreState, provisional, speaking, onAct, o
     const dx = e.clientX - d.x;
     const dy = e.clientY - d.y;
     const r = d.mode === "move" ? { ...d.r, x: d.r.x + dx, y: d.r.y + dy } : { ...d.r, w: Math.max(180, d.r.w + dx), h: Math.max(96, d.r.h + dy) };
-    setLocal((l) => withRect(l, env, d.pid, { x: r.x / size.w, y: r.y / size.h, w: r.w / size.w, h: r.h / size.h }));
+    setLocal((l) => withRect(l, env, d.pid, { x: r.x / size.w, y: (r.y - top) / bandH, w: r.w / size.w, h: r.h / bandH }));
   };
   const onUp = () => {
     if (!drag.current) return;
@@ -451,50 +607,60 @@ export function OrbitSpace({ session, coreState, provisional, speaking, onAct, o
   };
   const hidden = panelIds.filter((p) => rects[p].hidden);
 
+  const stageList = stages(session);
+  const planTitle = activePlanExists(session) ? (session?.versions.find((x) => x.version === session.active_version)?.plan.title ?? "") : "";
+  const title = provisional.title || planTitle || session?.title || "";
+  const envButtons = (Object.keys(ENVIRONMENTS) as EnvKey[]).map((k) => (
+    <button
+      key={k}
+      onClick={() => (changeEnv(k), setEnvMenu(false))}
+      title={ENVIRONMENTS[k].purpose}
+      aria-pressed={env === k}
+      className={cn("rounded-md border px-2.5 py-1 text-[0.7rem] font-semibold tracking-[0.12em]", env === k ? "border-accent bg-accent text-text-inverse" : "border-line-2 text-text-2 hover:text-text-1", hud && "block w-full text-left")}
+    >
+      {ENVIRONMENTS[k].name.toUpperCase()}
+    </button>
+  ));
+  const pill = "pointer-events-auto rounded-full border border-[rgba(60,207,230,0.32)] bg-[rgba(5,12,24,0.82)] px-3 py-1 text-xs text-text-1 hover:bg-[rgba(60,207,230,0.16)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent";
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-1.5">
-        {(Object.keys(ENVIRONMENTS) as EnvKey[]).map((k) => (
-          <button
-            key={k}
-            onClick={() => changeEnv(k)}
-            title={ENVIRONMENTS[k].purpose}
-            aria-pressed={env === k}
-            className={cn("rounded-md border px-2.5 py-1 text-[0.7rem] font-semibold tracking-[0.12em]", env === k ? "border-accent bg-accent text-text-inverse" : "border-line-2 text-text-2 hover:text-text-1")}
-          >
-            {ENVIRONMENTS[k].name.toUpperCase()}
-          </button>
-        ))}
-        <div className="relative ml-auto flex gap-1.5">
-          <button className="rounded-md border border-line-2 px-2 py-1 text-xs text-text-2 hover:text-text-1" onClick={() => setShowPanels((v) => !v)} aria-expanded={showPanels}>
-            Panels <ChevronDown className="inline size-3" />
-          </button>
-          <button className="rounded-md border border-line-2 px-2 py-1 text-xs text-text-2 hover:text-text-1" onClick={() => setShowFx((v) => !v)} aria-expanded={showFx} aria-label="ORBIT visual experience">
-            <Settings2 className="inline size-3.5" /> Visual
-          </button>
-          {showPanels && (
-            <div className="absolute right-20 top-8 z-50 w-60 rounded-md border border-line-2 bg-bg-2 p-2 text-sm shadow-xl">
-              {hidden.length ? hidden.map((p) => <button key={p} className="block w-full rounded px-2 py-1 text-left hover:bg-bg-3" onClick={() => (setPanel(p, { hidden: false }), setShowPanels(false))}>Show {PANELS[p][0]}</button>) : <div className="px-2 py-1 text-text-3">All panels of this environment are shown</div>}
-              <button className="mt-1 block w-full rounded px-2 py-1 text-left hover:bg-bg-3" onClick={() => (persist({ ...local, panels: { ...local.panels, [env]: {} } }), setShowPanels(false))}>Reset this environment's layout</button>
+      {!hud && (
+        <>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {envButtons}
+            <div className="relative ml-auto flex gap-1.5">
+              <button className="rounded-md border border-line-2 px-2 py-1 text-xs text-text-2 hover:text-text-1" onClick={() => setShowPanels((v) => !v)} aria-expanded={showPanels}>
+                Panels <ChevronDown className="inline size-3" />
+              </button>
+              <button className="rounded-md border border-line-2 px-2 py-1 text-xs text-text-2 hover:text-text-1" onClick={() => setShowFx((v) => !v)} aria-expanded={showFx} aria-label="ORBIT visual experience">
+                <Settings2 className="inline size-3.5" /> Visual
+              </button>
+              {showPanels && (
+                <div className="absolute right-20 top-8 z-50 w-60 rounded-md border border-line-2 bg-bg-2 p-2 text-sm shadow-xl">
+                  {hidden.length ? hidden.map((p) => <button key={p} className="block w-full rounded px-2 py-1 text-left hover:bg-bg-3" onClick={() => (setPanel(p, { hidden: false }), setShowPanels(false))}>Show {PANELS[p][0]}</button>) : <div className="px-2 py-1 text-text-3">All panels of this environment are shown</div>}
+                  <button className="mt-1 block w-full rounded px-2 py-1 text-left hover:bg-bg-3" onClick={() => (persist({ ...local, panels: { ...local.panels, [env]: {} } }), setShowPanels(false))}>Reset this environment's layout</button>
+                </div>
+              )}
+              {showFx && <FxPanel fx={fx} setFx={setFx} reduced={reduced} onClose={() => setShowFx(false)} />}
             </div>
-          )}
-          {showFx && <FxPanel fx={fx} setFx={setFx} reduced={reduced} onClose={() => setShowFx(false)} />}
-        </div>
-      </div>
-      <nav aria-label="Project stages" className="flex flex-wrap items-center gap-1 text-[0.68rem] tracking-[0.1em]">
-        {stages(session).map((st, i) => (
-          <span key={st.key} className="flex items-center gap-1">
-            {i > 0 && <span className="text-text-3">→</span>}
-            <button onClick={() => goStage(st.key)} title={`${st.name}: ${st.state} — ${st.why}`} aria-label={`Stage ${st.name}, ${st.state}: ${st.why}`} className={cn("px-1 py-0.5 font-semibold", st.state === "done" ? "text-ok" : st.state === "current" ? "text-accent-strong" : "text-text-3")}>
-              {st.state === "done" ? "✓" : st.state === "current" ? "●" : "○"} {st.name.toUpperCase()}
-            </button>
-          </span>
-        ))}
-      </nav>
-      <div ref={box} className="relative min-h-0 flex-1 overflow-hidden rounded-lg border border-line-1" onPointerMove={onMove} onPointerUp={onUp}>
+          </div>
+          <nav aria-label="Project stages" className="flex flex-wrap items-center gap-1 text-[0.68rem] tracking-[0.1em]">
+            {stageList.map((st, i) => (
+              <span key={st.key} className="flex items-center gap-1">
+                {i > 0 && <span className="text-text-3">→</span>}
+                <button onClick={() => goStage(st.key)} title={`${st.name}: ${st.state} — ${st.why}`} aria-label={`Stage ${st.name}, ${st.state}: ${st.why}`} className={cn("px-1 py-0.5 font-semibold", st.state === "done" ? "text-ok" : st.state === "current" ? "text-accent-strong" : "text-text-3")}>
+                  {st.state === "done" ? "✓" : st.state === "current" ? "●" : "○"} {st.name.toUpperCase()}
+                </button>
+              </span>
+            ))}
+          </nav>
+        </>
+      )}
+      <div ref={box} className={cn("relative min-h-0 flex-1 overflow-hidden", !hud && "rounded-lg border border-line-1")} onPointerMove={onMove} onPointerUp={onUp}>
         <canvas ref={canvas} className="absolute inset-0 h-full w-full" aria-hidden />
         {ENVIRONMENTS[env].constellation && <div className="absolute inset-0">{constellation}</div>}
-        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">{children}</div>
+        <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -translate-y-1/2" style={{ top: (top + size.h - bottom) / 2 }}>{children}</div>
         {panelIds.map((pid, i) => {
           const r = rects[pid];
           if (r.hidden) return null;
@@ -502,29 +668,42 @@ export function OrbitSpace({ session, coreState, provisional, speaking, onAct, o
           const isExp = expanded === pid;
           const c = contents[pid]!;
           const provisionalPanel = !activePlanExists(session) && c.items.length > 0 && ["brief", "ideas", "plan"].includes(pid);
+          const [accent, Icon] = PANEL_LOOK[pid];
+          const pw = isExp ? size.w * 0.76 : p.w;
+          const ph = isExp ? size.h * 0.84 : p.h;
+          const on = focused === pid || isExp;
+          const edit = editing?.pid === pid ? editing : null;
+          const hasPlan = activePlanExists(session);
+          const actions: [string, string, () => void, boolean][] = [];
+          if (pid === "files") actions.push(["+ Share", "Share a file with Atlas", () => void api.shareFile().then(() => grants.reload()).catch(() => {}), false]);
+          if (pid === "ideas" && onPanelAction) {
+            actions.push(["Compare ideas", "Ask Atlas to compare the ideas", () => onPanelAction("compare_ideas"), true]);
+            if (hasPlan) actions.push(["+ Add", "Add an idea of your own", () => setEditing({ pid, value: "" }), false]);
+          }
+          if (pid === "brief" && onPanelAction && hasPlan) actions.push(["Edit brief", "Write or change the project brief", () => setEditing({ pid, value: activePlan(session)?.brief ?? "" }), false]);
           return (
             <section
               key={`${env}-${pid}`}
               role="region"
               aria-label={`${PANELS[pid][0]} panel`}
               onPointerDown={() => setFocused(pid)}
-              style={isExp ? { left: "12%", top: "8%", width: "76%", height: "84%", zIndex: 40, transformOrigin: "center" } : { left: p.x, top: p.y, width: p.w, height: p.h, zIndex: focused === pid ? 30 : 20, animationDelay: `${i * 70}ms`, transformOrigin: `${size.w / 2 - p.x}px ${size.h / 2 - p.y}px` }}
-              className={cn(
-                "absolute flex flex-col rounded-[10px] border bg-[linear-gradient(180deg,rgba(10,26,48,0.94),rgba(5,12,24,0.92))] shadow-[0_8px_30px_rgba(0,0,0,0.45)] backdrop-blur-sm transition-[border-color,opacity] duration-200",
-                focused === pid || isExp ? "border-[rgba(60,207,230,0.8)]" : "border-[rgba(60,207,230,0.28)]",
-                expanded && !isExp && "opacity-35",
-                !reduced && entry === 0 && "orbit-materialise",
-              )}
+              style={{
+                ...(isExp ? { left: "12%", top: "8%", width: "76%", height: "84%", zIndex: 40, transformOrigin: "center" } : { left: p.x, top: p.y, width: p.w, height: p.h, zIndex: on ? 30 : 20, animationDelay: `${i * 70}ms`, transformOrigin: `${size.w / 2 - p.x}px ${size.h / 2 - p.y}px` }),
+                clipPath: `polygon(${CHAMFER}px 0, 100% 0, 100% calc(100% - ${CHAMFER}px), calc(100% - ${CHAMFER}px) 100%, 0 100%, 0 ${CHAMFER}px)`,
+                background: `radial-gradient(120% 70% at 0% 0%, rgba(${accent},0.13), transparent 60%), linear-gradient(180deg, rgba(10,26,48,0.95), rgba(5,12,24,0.93))`,
+              }}
+              className={cn("absolute flex flex-col backdrop-blur-sm transition-opacity duration-200", expanded && !isExp && "opacity-35", !reduced && entry === 0 && "orbit-materialise")}
             >
-              <header className="flex cursor-grab items-center gap-1 px-2.5 py-1.5 active:cursor-grabbing" onPointerDown={onDown(pid, "move")} onDoubleClick={() => setExpanded(isExp ? null : pid)}>
-                <h3 className="text-[0.66rem] font-semibold tracking-[0.12em] text-accent-strong">{PANELS[pid][0].toUpperCase()}</h3>
+              <svg className="pointer-events-none absolute inset-0" width={pw} height={ph} aria-hidden>
+                <path d={chamferPath(pw, ph)} fill="none" stroke={`rgba(${accent},${on ? 0.75 : 0.28})`} strokeWidth={1} />
+                <path d={`M0.8 ${CHAMFER + 10} V${CHAMFER} L${CHAMFER} 0.8 H${CHAMFER + 22}`} fill="none" stroke={`rgba(${accent},${on ? 0.95 : 0.75})`} strokeWidth={1.6} />
+                <path d={`M${pw - 0.8} ${ph - CHAMFER - 10} V${ph - CHAMFER} L${pw - CHAMFER} ${ph - 0.8} H${pw - CHAMFER - 22}`} fill="none" stroke={`rgba(${accent},${on ? 0.95 : 0.75})`} strokeWidth={1.6} />
+              </svg>
+              <header className="relative flex cursor-grab items-center gap-1.5 py-1.5 pl-3 pr-2 active:cursor-grabbing" onPointerDown={onDown(pid, "move")} onDoubleClick={() => setExpanded(isExp ? null : pid)}>
+                <Icon className="size-3.5 shrink-0" style={{ color: `rgb(${accent})` }} aria-hidden />
+                <h3 className="truncate text-[0.8rem] font-semibold text-text-1">{PANELS[pid][0]}</h3>
                 <span className="text-[0.62rem] text-text-3">{c.items.length || ""}</span>
-                <span className="ml-auto flex items-center" onPointerDown={(e) => e.stopPropagation()}>
-                  {pid === "files" && (
-                    <button aria-label="Share a file with Atlas" title="Share a file with Atlas" className="px-1 text-accent-strong" onClick={() => void api.shareFile().then(() => grants.reload()).catch(() => {})}>
-                      <Plus className="size-3.5" />
-                    </button>
-                  )}
+                <span className="ml-auto flex shrink-0 items-center" onPointerDown={(e) => e.stopPropagation()}>
                   <button aria-label={`Collapse or open ${PANELS[pid][0]}`} className="px-1 text-text-3 hover:text-text-1" onClick={() => setPanel(pid, { collapsed: !r.collapsed })}>
                     <ChevronDown className={cn("size-3.5 transition-transform", r.collapsed && "-rotate-90")} />
                   </button>
@@ -537,14 +716,14 @@ export function OrbitSpace({ session, coreState, provisional, speaking, onAct, o
                 </span>
               </header>
               {!r.collapsed && (
-                <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-2 text-[0.8rem]">
+                <div className="relative min-h-0 flex-1 overflow-y-auto px-3 pb-2 text-[0.8rem]">
                   {provisionalPanel && <p className="mb-1 text-[0.65rem] text-text-3">arriving…</p>}
                   {!c.items.length && <p className="text-text-3">{c.empty}</p>}
                   {c.items.map((it, k) => {
                     const kind = pid === "files" ? "file" : it.state === "awaiting_approval" ? "approve" : "task";
                     const body = (
                       <>
-                        <span style={{ color: TONE[it.state] ?? "var(--accent)" }}>{MARK[it.state] ?? "•"}</span> <span className={cn(it.state === "title" && "text-[0.95rem] font-semibold")}>{it.text}</span>
+                        <span style={{ color: TONE[it.state] ?? `rgb(${accent})` }}>{MARK[it.state] ?? "•"}</span> <span className={cn(it.state === "title" && "text-[0.95rem] font-semibold")}>{it.text}</span>
                         {it.sub && <span className="block text-[0.68rem] text-text-3">{it.sub}</span>}
                       </>
                     );
@@ -560,10 +739,94 @@ export function OrbitSpace({ session, coreState, provisional, speaking, onAct, o
                   })}
                 </div>
               )}
-              {!r.collapsed && !isExp && <div className="absolute bottom-0.5 right-0.5 size-3 cursor-se-resize border-b border-r border-[rgba(60,207,230,0.5)]" onPointerDown={onDown(pid, "size")} aria-hidden />}
+              {!r.collapsed && edit && (
+                <form
+                  className="relative flex flex-col gap-1.5 px-3 pb-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const v = edit.value.trim();
+                    if (v && onPanelAction) onPanelAction(pid === "ideas" ? "add_idea" : "edit_brief", v);
+                    setEditing(null);
+                  }}
+                >
+                  {pid === "brief" ? (
+                    <textarea autoFocus aria-label="Project brief" maxLength={1200} rows={4} value={edit.value} onChange={(e) => setEditing({ pid, value: e.target.value })} className="w-full rounded border border-line-2 bg-bg-0/80 p-1.5 text-xs" />
+                  ) : (
+                    <input autoFocus aria-label="Your idea" maxLength={300} value={edit.value} onChange={(e) => setEditing({ pid, value: e.target.value })} onKeyDown={(e) => e.key === "Escape" && setEditing(null)} placeholder="Your idea…" className="w-full rounded border border-line-2 bg-bg-0/80 px-2 py-1 text-xs" />
+                  )}
+                  <div className="flex gap-1.5">
+                    <button type="submit" className="rounded-full border px-3 py-0.5 text-xs" style={{ borderColor: `rgba(${accent},0.6)`, background: `rgba(${accent},0.2)` }}>
+                      {pid === "brief" ? "Save brief" : "Add idea"}
+                    </button>
+                    <button type="button" className="rounded-full border border-line-2 px-3 py-0.5 text-xs text-text-2" onClick={() => setEditing(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+              {!r.collapsed && !edit && actions.length > 0 && (
+                <div className="relative flex flex-wrap gap-1.5 px-3 pb-2.5">
+                  {actions.map(([label, tip, fn, primary]) => (
+                    <button key={label} title={tip} aria-label={tip} onClick={fn} className="rounded-full border px-3 py-0.5 text-[0.72rem] text-text-1 hover:brightness-125 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent" style={{ borderColor: `rgba(${accent},0.55)`, background: primary ? `rgba(${accent},0.22)` : "rgba(255,255,255,0.03)" }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {!r.collapsed && !isExp && <div className="absolute bottom-1 right-[15px] size-3 cursor-se-resize border-b border-r" style={{ borderColor: `rgba(${accent},0.5)` }} onPointerDown={onDown(pid, "size")} aria-hidden />}
             </section>
           );
         })}
+        {hud && (
+          <div className="pointer-events-none absolute inset-0 z-[35]">
+            <div className={cn(pill, "pointer-events-none absolute left-3.5 top-3.5 text-[0.7rem] tracking-[0.1em]")} aria-live="polite">
+              <span className="text-accent-strong">●</span>&nbsp; {hud.status.toUpperCase()}
+              <span className="text-text-3"> · {stageList.find((x) => x.state === "current")?.name ?? "Complete"} stage</span>
+            </div>
+            <StageTrack title={title} list={stageList} onGo={goStage} />
+            <div className="pointer-events-auto absolute right-3.5 top-3 flex gap-1.5">
+              <div className="relative">
+                <button className={pill} onClick={() => setEnvMenu((v) => !v)} aria-expanded={envMenu} aria-label="ORBIT environment">
+                  {ENVIRONMENTS[env].name} <ChevronDown className="inline size-3" />
+                </button>
+                {envMenu && <div className="absolute right-0 top-8 z-50 flex w-44 flex-col gap-1 rounded-md border border-line-2 bg-bg-2 p-2 shadow-xl">{envButtons}</div>}
+              </div>
+              <button className={cn(pill, hud.conversationOpen && "bg-accent text-text-inverse")} onClick={hud.onConversation} aria-pressed={hud.conversationOpen} title="Show or hide the conversation beside ORBIT">
+                <MessageSquare className="mr-1 inline size-3.5" />
+                Conversation
+              </button>
+              <div className="relative">
+                <button className={pill} onClick={() => setShowFx((v) => !v)} aria-expanded={showFx} aria-label="ORBIT visual experience">
+                  <Settings2 className="inline size-3.5" />
+                </button>
+                {showFx && <FxPanel fx={fx} setFx={setFx} reduced={reduced} onClose={() => setShowFx(false)} />}
+              </div>
+              <button className={pill} onClick={hud.onExit} title="Leave immersive ORBIT (Esc)">
+                Exit
+              </button>
+            </div>
+            <form
+              className="pointer-events-auto absolute bottom-3 left-3.5 flex gap-1.5"
+              style={{ width: Math.min(360, size.w * 0.32) }}
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (msg.trim()) hud.onSend(msg);
+                setMsg("");
+              }}
+            >
+              <button type="button" className={pill} onClick={hud.onTalk} disabled={!hud.canTalk} title={hud.talkTitle}>
+                <Mic className="mr-1 inline size-3.5" />
+                {hud.talkLabel}
+              </button>
+              <input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder="Message Atlas…" aria-label="Message Atlas" className="min-w-0 flex-1 rounded-full border border-[rgba(60,207,230,0.32)] bg-[rgba(5,12,24,0.82)] px-3 py-1 text-xs text-text-1 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent" />
+            </form>
+            {hud.caption && (
+              <div className="absolute bottom-3 truncate rounded-full border border-[rgba(60,207,230,0.22)] bg-[rgba(5,12,24,0.82)] px-4 py-1.5 text-center text-[0.8rem] text-text-1" style={{ left: Math.max(Math.min(360, size.w * 0.32) + 28, size.w * 0.25), right: Math.max(24, size.w * 0.25) }} title={hud.caption} aria-label="Latest line">
+                {hud.caption}
+              </div>
+            )}
+          </div>
+        )}
         {entry > 0 && <EntryOverlay ms={entry} onSkip={() => setEntry(0)} />}
       </div>
     </div>

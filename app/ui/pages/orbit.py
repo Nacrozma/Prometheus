@@ -231,7 +231,7 @@ class OrbitStage(QWidget):
         return self.avatar_size() * (0.17 if self.avatar is not None else 0.42)
 
     def avatar_size(self) -> int:
-        k = 0.36 if self.avatar is not None else 0.2  # the GL sun is drawn smaller inside its widget
+        k = 0.4 if self.avatar is not None else 0.2  # the GL sun is drawn smaller inside its widget
         return int(max(110, min(380, min(self.width(), self.height()) * k * self.zoom)))
 
     def positions(self) -> Dict[str, QPointF]:
@@ -252,6 +252,8 @@ class OrbitStage(QWidget):
         super().resizeEvent(e)
         self._place_avatar()
         if self.universe is not None:
+            if self.universe.hud is not None:
+                self.universe.hud.place()
             self.universe.relayout()
 
     def _place_avatar(self) -> None:
@@ -276,15 +278,23 @@ class OrbitStage(QWidget):
             f0 = QFont(self.font())
             f0.setPointSizeF(7.5)
             p.setFont(f0)
-            for a, b, kind, _key in self.link_lines:
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            for a, ctrl, b, kind, _key in self.link_lines:
                 grad = QLinearGradient(a, b)
-                grad.setColorAt(0.0, QColor(244, 181, 44, 110))
-                grad.setColorAt(1.0, QColor(244, 181, 44, 35))
-                p.setPen(QPen(QBrush(grad), 1.1))
-                p.drawLine(a, b)
+                grad.setColorAt(0.0, QColor(244, 181, 44, 130))
+                grad.setColorAt(1.0, QColor(244, 181, 44, 40))
+                path = QPainterPath(a)
+                path.quadTo(ctrl, b)
+                p.setPen(QPen(QBrush(grad), 1.2))
+                p.drawPath(path)
+                p.setPen(Qt.PenStyle.NoPen)  # a small node where the line meets its panel
+                p.setBrush(QColor(247, 217, 139, 150))
+                p.drawEllipse(b, 2.6, 2.6)
+                p.setBrush(Qt.BrushStyle.NoBrush)
                 if kind != "context":
+                    mid = path.pointAtPercent(0.5)
                     p.setPen(QColor(T.TEXT_FAINT))
-                    p.drawText(QPointF((a.x() + b.x()) / 2 + 4, (a.y() + b.y()) / 2 - 4), kind)
+                    p.drawText(QPointF(mid.x() + 4, mid.y() - 4), kind)
             if not self.show_constellation:
                 p.end()
                 return
@@ -553,7 +563,10 @@ class OrbitPage(Page):
         self.imm_btn.setToolTip("Hide everything but ORBIT (Esc returns)")
         self.imm_btn.clicked.connect(lambda: self.set_immersive(not self.immersive))
         top.addWidget(self.imm_btn)
-        self.content.addLayout(top)
+        self.top_bar = QWidget()
+        self.top_bar.setLayout(top)
+        top.setContentsMargins(0, 0, 0, 0)
+        self.content.addWidget(self.top_bar)
 
         split = QSplitter(Qt.Orientation.Horizontal)
         split.setChildrenCollapsible(False)
@@ -592,7 +605,17 @@ class OrbitPage(Page):
         fx_btn.setToolTip("Animation intensity, particles, depth, camera, cinematic entry, energy effects, sounds")
         fx_btn.clicked.connect(self.visual_settings)
         bar.addWidget(fx_btn)
-        lv.addLayout(bar)
+        self.tool_row = QWidget()
+        self.tool_row.setLayout(bar)
+        bar.setContentsMargins(0, 0, 0, 0)
+        lv.addWidget(self.tool_row)
+        # the immersive heads-up layer: same actions as the page's own controls
+        from ..orbit_universe import Hud
+
+        self.hud = Hud(self.stage, on_stage=self.universe.go_stage, on_send=self.say, on_talk=self.talk_shortcut,
+                       on_env=lambda e: self.universe.set_env(e, user=True), on_conversation=self._toggle_conversation,
+                       on_visual=self.visual_settings, on_exit=lambda: self.set_immersive(False))
+        self.universe.hud = self.hud
         lv.addWidget(self.universe.stage_bar)
         self.outline = QTreeWidget()
         self.outline.setHeaderLabels(["Task", "Status", "Priority", "Done by"])
@@ -630,6 +653,7 @@ class OrbitPage(Page):
         split.addWidget(left)
 
         right = QWidget()
+        self.right = right
         right.setMinimumWidth(380)
         right.setMaximumWidth(520)
         rv = QVBoxLayout(right)
@@ -1022,9 +1046,27 @@ class OrbitPage(Page):
         self.view_btn.setText("Orbit view" if outline else "Outline")
 
     def set_immersive(self, on: bool) -> None:
+        """Immersive ORBIT: the window's chrome and the page's rows step aside and the stage fills the space, with
+        the heads-up layer (status, title and stages, caption, talk and message, environment, settings, exit)."""
         self.immersive = on
         self.imm_btn.setText("Exit immersive" if on else "Immersive")
+        for w in (self.top_bar, self.plan_line, self.tool_row, self.universe.stage_bar):
+            w.setVisible(not on)
+        self.right.setVisible(not on)
+        self.hud.conv_btn.setChecked(False)
+        if on and self.views.currentWidget() is not self.stage:
+            self.toggle_view()
+        self.hud.show(on)
         self.immersive_changed.emit(on)
+        QTimer.singleShot(0, self.universe.relayout)
+
+    def _toggle_conversation(self) -> None:
+        """Immersive only: the conversation slides in beside the stage, or away again."""
+        show = not self.right.isVisible()
+        self.right.setVisible(show)
+        self.hud.conv_btn.setChecked(show)
+        self.tabs.setCurrentIndex(0)
+        QTimer.singleShot(0, self.universe.relayout)
 
     def set_reduced_motion(self, reduced: bool) -> None:
         self.stage.set_reduced_motion(reduced)
@@ -1046,6 +1088,12 @@ class OrbitPage(Page):
         self.state_line.setText(f"● {text}" + ("  ·  microphone on" if state == "LISTENING" else ""))
         self.state_line.setStyleSheet(f"color: {colour};")
         self.state_line.setAccessibleName(f"Prometheus is {text.lower()}")
+        if getattr(self, "hud", None) is not None:
+            from ...services import orbit_space as SP
+
+            cur = next((st["name"] for st in SP.stages(self.session) if st["state"] == "current"), "Complete")
+            self.hud.set_status(text + (" · microphone on" if state == "LISTENING" else ""), colour, f"{cur} stage")
+            self.hud.talk_btn.setText("Send" if state == "LISTENING" else "Talk")
         self.state_changed.emit(state)
 
     # ----- the conversation -----
@@ -1069,6 +1117,10 @@ class OrbitPage(Page):
         colour = colour or (T.HIGHLIGHT if who == "You" else T.ACCENT if who == "Prometheus" else T.TEXT_SECONDARY)
         body = self._html(text)
         self._lines.append(f"<p><b style='color:{colour}'>{who}</b><br>{body}</p>")
+        if getattr(self, "hud", None) is not None:
+            from ..orbit_universe import caption_text
+
+            self.hud.set_caption(caption_text(who, text))
 
     def _html(self, text: str) -> str:
         try:
@@ -1078,6 +1130,10 @@ class OrbitPage(Page):
 
     def _flush(self, streaming: str = "") -> None:
         extra = f"<p><b style='color:{T.ACCENT}'>Prometheus</b><br>{streaming.replace('<', '&lt;')}</p>" if streaming else ""
+        if streaming and getattr(self, "hud", None) is not None:
+            from ..orbit_universe import caption_text
+
+            self.hud.set_caption(caption_text("Prometheus", O.strip_plan_blocks(streaming)))
         self.transcript.setHtml("".join(self._lines[-80:]) + extra)
         sb = self.transcript.verticalScrollBar()
         sb.setValue(sb.maximum())
@@ -1882,6 +1938,9 @@ class OrbitPage(Page):
 
         kind, _, ref = href.partition(":")
         ws = self.core.paths()["workspace"]
+        if kind == "action":
+            self._panel_action(ref)
+            return
         if kind == "attach":
             from PyQt6.QtWidgets import QFileDialog
 
@@ -1911,6 +1970,37 @@ class OrbitPage(Page):
             else:
                 self.stage.select(ref)
                 self.tabs.setCurrentIndex(1)
+
+    def _panel_action(self, action: str) -> None:
+        """Panel buttons. Each does exactly what it says: comparing sends a real message to Prometheus; adding an
+        idea or editing the brief makes a new plan version (undo restores the previous one)."""
+        from PyQt6.QtWidgets import QInputDialog
+
+        plan = self.plan()
+        if action == "compare_ideas":
+            ideas = list((plan or {}).get("ideas") or [])
+            if len(ideas) < 2:
+                self.notify("Nothing to compare yet", "Compare needs at least two ideas in the plan.", "accent")
+                return
+            if self.worker_busy():
+                self.notify("Prometheus is busy", "Wait for the current reply, then compare.", "accent")
+                return
+            listing = "; ".join(ideas)
+            self.say(f"Compare these ideas for the project and recommend one, with the trade-offs: {listing}")
+        elif action == "add_idea":
+            if plan is None:
+                self.notify("No plan yet", "Ideas join a plan: describe the project first.", "accent")
+                return
+            text, ok = QInputDialog.getText(self, "Add an idea", "Your idea:")
+            if ok and text.strip():
+                self.apply_edit("add_idea", title=text.strip())
+        elif action == "edit_brief":
+            if plan is None:
+                self.notify("No plan yet", "The brief arrives with the first plan; you can change it then.", "accent")
+                return
+            text, ok = QInputDialog.getMultiLineText(self, "Project brief", "What this project is and why (up to 1200 characters):", plan.get("brief", ""))
+            if ok and text.strip() != (plan.get("brief") or "").strip():
+                self.apply_edit("set_field", field="brief", value=text.strip())
 
     def _panels_menu(self) -> None:
         from ...services import orbit_space as SP

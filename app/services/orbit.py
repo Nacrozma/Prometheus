@@ -266,10 +266,28 @@ def edit(plan: Dict[str, Any], op: str, **a) -> Tuple[Dict[str, Any], str]:
         return p, f"“{y['title']}” now waits for “{x['title']}”."
     if op == "set_field":
         field = a.get("field")
-        if field not in ("title", "objective", "outcome", "scope"):
+        if field not in ("title", "objective", "outcome", "scope", "brief"):
             raise PlanError("Unknown field.")
-        p[field] = _clip(a.get("value"), 120 if field == "title" else MAX_TEXT)
+        p[field] = _clip(a.get("value"), 120 if field == "title" else 1200 if field == "brief" else MAX_TEXT)
         return p, f"Changed the {field}."
+    if op == "add_idea":
+        idea = _clip(a.get("title"), MAX_TEXT)
+        if not idea:
+            raise PlanError("An idea needs some words.")
+        ideas = p.setdefault("ideas", [])
+        if idea.lower() in (x.lower() for x in ideas):
+            raise PlanError("That idea is already there.")
+        if len(ideas) >= 20:
+            raise PlanError("This plan already has the maximum number of ideas.")
+        ideas.append(idea)
+        return p, f"Added the idea “{idea}”."
+    if op == "remove_idea":
+        ref = _clip(a.get("title"), MAX_TEXT).lower()
+        hits = [x for x in p.get("ideas") or [] if ref and ref in x.lower()]
+        if len(hits) != 1:
+            raise PlanError(f"No single idea matches “{a.get('title', '')}”.")
+        p["ideas"].remove(hits[0])
+        return p, f"Removed the idea “{hits[0]}”."
     raise PlanError(f"Unknown edit “{op}”.")
 
 
@@ -344,6 +362,7 @@ _CMDS = [
     (re.compile(r"^(?:please\s+)?make (.+?) (high|normal|low) priority$", re.I), "set_priority"),
     (re.compile(r"^(.+?) (?:must|should) (?:come )?after (.+)$", re.I), "add_dep_after"),
     (re.compile(r"^(?:please\s+)?undo(?: that)?$", re.I), "undo"),
+    (re.compile(r"^(?:please\s+)?add (?:an |the )?idea:?\s+(.+)$", re.I), "add_idea"),
 ]
 CONTROL_WORDS = {"stop": "stop_speaking", "wait": "stop_speaking", "hold on": "stop_speaking", "pause": "pause", "pause the workflow": "pause", "resume": "resume", "continue": "resume", "cancel the workflow": "cancel"}
 
@@ -379,6 +398,8 @@ def parse_command(text: str, plan: Optional[Dict[str, Any]]) -> Optional[Dict[st
             return {"op": "add_dep", "before": m.group(2), "after": m.group(1)} if task(plan, m.group(1)) and task(plan, m.group(2)) else None
         if kind == "undo":
             return {"undo": True}
+        if kind == "add_idea":
+            return {"op": "add_idea", "title": m.group(1)}
     return None
 
 

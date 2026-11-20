@@ -305,6 +305,9 @@ pub enum Edit {
     AddDep { before: String, after: String },
     RemoveDep { before: String, after: String },
     SetDetail { task: String, detail: String },
+    AddIdea { idea: String },
+    RemoveIdea { idea: String },
+    SetBrief { brief: String },
 }
 
 pub fn edit(plan: &Plan, e: &Edit) -> Result<(Plan, String)> {
@@ -361,6 +364,33 @@ pub fn edit(plan: &Plan, e: &Edit) -> Result<(Plan, String)> {
             let t = need(task)?;
             p.tasks.iter_mut().find(|x| x.id == t.id).unwrap().detail = clip(detail, 600);
             format!("Updated the detail of \u{201c}{}\u{201d}.", t.title)
+        }
+        Edit::AddIdea { idea } => {
+            let idea = clip(idea, 300);
+            if idea.is_empty() {
+                return Err(bad("Say the idea."));
+            }
+            if p.ideas.len() >= 20 {
+                return Err(bad("This plan already has the maximum number of ideas."));
+            }
+            if p.ideas.iter().any(|x| x.to_lowercase() == idea.to_lowercase()) {
+                return Err(bad("That idea is already in the plan."));
+            }
+            p.ideas.push(idea.clone());
+            format!("Added the idea \u{201c}{idea}\u{201d}.")
+        }
+        Edit::RemoveIdea { idea } => {
+            let q = idea.trim().to_lowercase();
+            let hits: Vec<String> = p.ideas.iter().filter(|x| !q.is_empty() && x.to_lowercase().contains(&q)).cloned().collect();
+            if hits.len() != 1 {
+                return Err(bad(format!("No single idea matches \u{201c}{}\u{201d}.", idea.trim())));
+            }
+            p.ideas.retain(|x| x != &hits[0]);
+            format!("Removed the idea \u{201c}{}\u{201d}.", hits[0])
+        }
+        Edit::SetBrief { brief } => {
+            p.brief = clip(brief, 1200);
+            "Updated the project brief.".to_string()
         }
         Edit::MoveToPhase { task, phase } => {
             let t = need(task)?;
@@ -1107,6 +1137,20 @@ mod tests {
         assert_eq!(recover(w), 1);
         assert!(w.paused && next_node(w).is_none());
         assert!(w.nodes[0].history.last().unwrap().event.contains("not repeated"));
+    }
+
+    #[test]
+    fn ideas_and_brief_are_edited_without_guessing() {
+        let p = normalise(&json!({"title": "T", "ideas": ["Static site", "Blog"], "tasks": [{"title": "x"}]}));
+        let (p, msg) = edit(&p, &Edit::AddIdea { idea: "Newsletter".into() }).unwrap();
+        assert!(msg.contains("Newsletter") && p.ideas.len() == 3);
+        assert!(edit(&p, &Edit::AddIdea { idea: "blog".into() }).is_err(), "no duplicates");
+        assert!(edit(&p, &Edit::AddIdea { idea: "  ".into() }).is_err());
+        assert!(edit(&p, &Edit::RemoveIdea { idea: "s".into() }).is_err(), "several ideas match: never guess");
+        let (p, _) = edit(&p, &Edit::RemoveIdea { idea: "static".into() }).unwrap();
+        assert_eq!(p.ideas, vec!["Blog".to_string(), "Newsletter".to_string()]);
+        let (p, _) = edit(&p, &Edit::SetBrief { brief: "x".repeat(2000) }).unwrap();
+        assert_eq!(p.brief.chars().count(), 1200);
     }
 
     #[test]

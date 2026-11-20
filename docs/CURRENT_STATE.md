@@ -1,7 +1,7 @@
 # Prometheus: current state
 
-**Updated:** 2026-11-19 · **Branch:** `claude/prometheus-ai-evaluation-pxqzfr` · **Desktop version:** 2.4.0
-(released 2026-11-19 with the owner's approval) · Atlas (`atlas/`) is a separate product with its own state file.
+**Updated:** 2026-11-20 · **Branch:** `claude/prometheus-ai-evaluation-pxqzfr` · **Desktop version:** 2.5.0
+(published under the owner's standing release authorisation once every Windows check passes) · Atlas (`atlas/`) is a separate product with its own state file.
 
 Prometheus 2.0 "Renaissance" is implemented and tested on Linux, through three passes: the Renaissance
 (design system, shell, new capabilities), the experience-first redesign (a distinct environment per
@@ -10,7 +10,9 @@ states, approval cards with real diffs, memory map, grouped search, secure-stora
 CI builds, installs and runs the tests on every push. **Released 2026-11-17 with the owner's approval as
 [prometheus-desktop-v2.0.0](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.0.0)** (unsigned installer).
 
-**2.4.0 (2026-11-20):** the ORBIT universe (layered solar core, holographic panels, project journey, four environments); see `ORBIT_UNIVERSE_REPORT.md`.
+**2.5.0 (2026-11-20):** ORBIT closer to the owner's reference image — particle-torus core with a geodesic shell, curved connections, chamfered panels with real actions (Compare ideas, + Add, Edit brief), full-screen heads-up layer in immersive mode; see `RELEASE_NOTES_2.5.0.md`.
+
+**2.4.0 (2026-11-20, [published](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.4.0)):** the ORBIT universe (layered solar core, holographic panels, project journey, four environments); see `ORBIT_UNIVERSE_REPORT.md`.
 
 **2.3.0 (2026-11-19):** [spoken replies with a local voice](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.3.0), one shared speech service; see `VOICE_EXPERIENCE_REPORT.md`.
 
