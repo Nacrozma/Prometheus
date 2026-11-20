@@ -84,7 +84,7 @@ def _tid() -> str:
 # ----- plans ----------------------------------------------------------------------------------------
 
 def empty_plan(title: str = "", objective: str = "") -> Dict[str, Any]:
-    return {"title": _clip(title, 120) or "Untitled plan", "objective": _clip(objective), "outcome": "", "scope": "", "phases": [], "tasks": [], "deps": [], "assumptions": [], "questions": [], "risks": []}
+    return {"title": _clip(title, 120) or "Untitled plan", "objective": _clip(objective), "outcome": "", "scope": "", "brief": "", "ideas": [], "phases": [], "tasks": [], "deps": [], "assumptions": [], "questions": [], "risks": []}
 
 
 def normalise_plan(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -93,7 +93,8 @@ def normalise_plan(raw: Dict[str, Any]) -> Dict[str, Any]:
     p = empty_plan(raw.get("title", ""), raw.get("objective", ""))
     for k in ("outcome", "scope"):
         p[k] = _clip(raw.get(k, ""))
-    for k in ("assumptions", "questions", "risks"):
+    p["brief"] = _clip(raw.get("brief", ""), 1200)
+    for k in ("assumptions", "questions", "risks", "ideas"):
         p[k] = [_clip(x) for x in (raw.get(k) or []) if _clip(x)][:20]
     seen = set()
     for ph in raw.get("phases") or []:
@@ -287,7 +288,8 @@ PLAN_FENCE = re.compile(r"```orbit-plan\s*(\{.*?\})\s*```", re.S)
 INSTRUCTION = (
     "[ORBIT planning context — not from the user] You are working with the user in ORBIT. Talk naturally. "
     "Whenever you propose or change a plan, append ONE fenced block ```orbit-plan {json} ``` with keys: title, "
-    "objective, outcome, phases (list of names), tasks (list of {id, title, phase, detail, priority high|normal|low, "
+    "objective, outcome, brief (2-4 sentences: what the project is and why), ideas (short list of options or concepts "
+    "worth considering), phases (list of names), tasks (list of {id, title, phase, detail, priority high|normal|low, "
     "estimate (only if you have a basis, else empty)}), deps (list of {from: task id, to: task id} meaning "
     "'from' must finish before 'to'), assumptions, questions (what you still need to know), risks. Never invent "
     "facts or confirmed requirements; put unknowns in questions. Keep task ids stable between versions.\n"
@@ -307,17 +309,22 @@ def extract_plan(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def partial_plan(text: str) -> Dict[str, List[str]]:
-    """While a reply streams: the phase names and task titles that have fully arrived so far, so the plan can
-    appear progressively. Shown as provisional; replaced by the complete block when it arrives."""
+def partial_plan(text: str) -> Dict[str, Any]:
+    """While a reply streams: what has fully arrived so far (project title, brief, ideas, phase names, task titles),
+    so the project can materialise progressively. Shown as provisional; replaced by the complete block."""
+    empty: Dict[str, Any] = {"title": "", "brief": "", "ideas": [], "phases": [], "tasks": []}
     i = (text or "").rfind("```orbit-plan")
     if i < 0:
-        return {"phases": [], "tasks": []}
+        return empty
     body = text[i:]
     phases = re.findall(r'"phases"\s*:\s*\[([^\]]*)\]', body)
     names = re.findall(r'"([^"]{1,80})"', phases[0]) if phases else []
+    ideas = re.findall(r'"ideas"\s*:\s*\[([^\]]*)\]', body)
     titles = re.findall(r'"title"\s*:\s*"([^"]{1,160})"\s*,\s*"phase"', body)
-    return {"phases": names[:20], "tasks": titles[:MAX_TASKS]}
+    title = re.match(r'```orbit-plan\s*\{\s*"title"\s*:\s*"([^"]{1,120})"', body)
+    brief = re.search(r'"brief"\s*:\s*"((?:[^"\\]|\\.){1,1200})"', body)
+    return {"title": title.group(1) if title else "", "brief": brief.group(1).replace('\\"', '"') if brief else "",
+            "ideas": (re.findall(r'"([^"]{1,300})"', ideas[0]) if ideas else [])[:20], "phases": names[:20], "tasks": titles[:MAX_TASKS]}
 
 
 def strip_plan_blocks(text: str) -> str:
@@ -490,7 +497,10 @@ def recover(workflow: Dict[str, Any]) -> int:
 def new_session(title: str = "", context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     return {"schema": SCHEMA, "id": uuid.uuid4().hex, "title": _clip(title, 80) or "New ORBIT session", "created": now(), "updated": now(),
             "conversation_id": "", "context": context or {}, "view": "conversation", "autonomy": "approval_first", "allowed": [],
-            "plan_versions": [], "active_version": 0, "approved_version": 0, "workflow": None, "events": [], "archived": False}
+            "plan_versions": [], "active_version": 0, "approved_version": 0, "workflow": None, "events": [], "archived": False,
+            # the spatial workspace (orbit_space): files attached or written in ORBIT, review/complete marks made by
+            # the owner, and panel layout per environment; older sessions without these keys read as empty
+            "files": [], "reviewed": False, "completed": False, "environment": "command", "layout": {}}
 
 
 def current_plan(s: Dict[str, Any]) -> Optional[Dict[str, Any]]:

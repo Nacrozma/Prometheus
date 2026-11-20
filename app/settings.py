@@ -50,6 +50,17 @@ DEFAULTS: Dict[str, Any] = {
     "speech_voice_local": "en_GB-alba-medium",
     "speech_voice_online": "en-US-ChristopherNeural",
     "speech_speed": 1.0,
+    #: ORBIT visual experience (each value really changes rendering; Reduce motion above overrides all motion).
+    "orbit_fx_intensity": "spectacular",
+    "orbit_fx_particles": "high",
+    "orbit_fx_depth": "immersive",
+    "orbit_fx_camera": "gentle",
+    "orbit_fx_cinematic": True,
+    "orbit_fx_energy": True,
+    "orbit_fx_sound": False,
+    "orbit_fx_volume": 0.5,
+    #: the full entry sequence plays the first time; later entries are short
+    "orbit_intro_seen": False,
     #: ORBIT: the last session, reopened when you return.
     "orbit_session": "",
 }

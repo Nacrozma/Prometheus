@@ -472,6 +472,10 @@ SMOKE = textwrap.dedent(
         orb.toggle_view()
         out["orbit_outline"] = orb.views.currentWidget() is orb.outline and orb.outline.topLevelItemCount() >= 1
         orb.toggle_view()
+        orb.universe.set_env("operations", user=True)
+        out["orbit_universe"] = orb.universe.env == "operations" and orb.session.get("environment") == "operations" and "operations" in orb.universe.panels and orb.universe.panels["operations"].isVisible()
+        out["orbit_stagebar"] = "CURRENT" not in orb.universe.stage_bar.buttons["overview"].text() and len(orb.universe.stage_bar.buttons) == 7
+        orb.universe.set_env("command", user=True)
         reopened = orb.store.get(orb.session["id"])
         out["orbit_recovered"] = reopened is not None and reopened["workflow"]["nodes"][0]["status"] == "paused"
         # one speech service for the whole app; its controls live in Settings, Voice
@@ -511,7 +515,7 @@ class TestWindowSmoke(unittest.TestCase):
         self.assertTrue(out["new_conv"] and out["renamed"] and out["deleted"])
         self.assertTrue(out["toast"] and out["activity"] and out["last_section"])
         self.assertTrue(out["launch_ok"] and out["states_ok"])
-        for k in ("orbit_versions", "orbit_undo", "orbit_build_needs_approval", "orbit_workflow", "orbit_go_ahead", "orbit_architect_refused", "orbit_card", "orbit_denied", "orbit_immersive", "orbit_immersive_exit", "orbit_outline", "orbit_recovered", "speech_shared", "speech_engine_decided"):
+        for k in ("orbit_versions", "orbit_undo", "orbit_build_needs_approval", "orbit_workflow", "orbit_go_ahead", "orbit_architect_refused", "orbit_card", "orbit_denied", "orbit_immersive", "orbit_immersive_exit", "orbit_outline", "orbit_recovered", "speech_shared", "speech_engine_decided", "orbit_universe", "orbit_stagebar"):
             self.assertTrue(out[k], k)
         self.assertTrue(out["dangerous"])
         self.assertFalse(out["auto_default"])

@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import time
 from typing import Any, Dict, List, Optional
 
 from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
+from PyQt6.QtGui import QBrush, QColor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -72,13 +73,34 @@ class _Vignette(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
     def paintEvent(self, _e) -> None:
-        from PyQt6.QtGui import QRadialGradient
+        from PyQt6.QtGui import QImage, QRadialGradient
 
+        stage = self.parentWidget()
+        cache = getattr(stage, "_bg_cache", {})
+        if cache.get("pm") is not None and getattr(stage, "universe", None) is not None:
+            img = QImage(self.size(), QImage.Format.Format_ARGB32_Premultiplied)
+            img.fill(Qt.GlobalColor.transparent)
+            q = QPainter(img)
+            ox, oy = cache.get("off", (0, 0))
+            q.drawPixmap(ox - self.x(), oy - self.y(), cache["pm"])
+            q.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+            c0 = QPointF(self.width() / 2, self.height() / 2)
+            g0 = QRadialGradient(c0, min(self.width(), self.height()) / 2 * 1.42)
+            g0.setColorAt(0.0, QColor(0, 0, 0, 0))
+            g0.setColorAt(0.46, QColor(0, 0, 0, 0))
+            g0.setColorAt(0.70, QColor(0, 0, 0, 255))
+            g0.setColorAt(1.0, QColor(0, 0, 0, 255))
+            q.fillRect(img.rect(), QBrush(g0))
+            q.end()
+            p = QPainter(self)
+            p.drawImage(0, 0, img)
+            p.end()
+            return
         p = QPainter(self)
         c = QPointF(self.width() / 2, self.height() / 2)
         r = min(self.width(), self.height()) / 2
         g = QRadialGradient(c, r * 1.42)
-        bg, clear = QColor(T.BG), QColor(T.BG)
+        bg, clear = QColor(24, 20, 15), QColor(24, 20, 15)
         clear.setAlpha(0)
         g.setColorAt(0.0, clear)
         g.setColorAt(0.46, clear)
@@ -115,6 +137,10 @@ class OrbitStage(QWidget):
         self._drag: Optional[Dict[str, Any]] = None
         self._born: Dict[str, float] = {}
         self.reduced = False
+        self.universe = None  # the spatial universe (orbit_universe.Universe) when attached
+        self.show_constellation = True
+        self.link_lines: List[tuple] = []
+        self._bg_cache: Dict[str, Any] = {}
         self._anim = QTimer(self)
         self._anim.setInterval(33)
         self._anim.timeout.connect(self._tick)
@@ -200,6 +226,10 @@ class OrbitStage(QWidget):
         step = (outer - inner) / max(1, n - 1) if n > 1 else 0
         return (inner + step * i if n > 1 else (inner + outer) / 2) * self.zoom
 
+    def core_radius(self) -> float:
+        """Visible radius of the sun's disc inside its widget (the GL sun is drawn at disc_scale 0.42)."""
+        return self.avatar_size() * (0.17 if self.avatar is not None else 0.42)
+
     def avatar_size(self) -> int:
         k = 0.36 if self.avatar is not None else 0.2  # the GL sun is drawn smaller inside its widget
         return int(max(110, min(380, min(self.width(), self.height()) * k * self.zoom)))
@@ -221,6 +251,8 @@ class OrbitStage(QWidget):
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._place_avatar()
+        if self.universe is not None:
+            self.universe.relayout()
 
     def _place_avatar(self) -> None:
         s = self.avatar_size()
@@ -235,8 +267,29 @@ class OrbitStage(QWidget):
         self._place_avatar()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.fillRect(self.rect(), QColor(T.BG))
         c = self.centre()
+        if self.universe is not None:
+            from ..orbit_universe import paint_background
+
+            paint_background(p, self, self._bg_cache, self.universe.core.t, self.universe.settings)
+            # real relationships between the core and the panels (pulses travel along them in the core layer)
+            f0 = QFont(self.font())
+            f0.setPointSizeF(7.5)
+            p.setFont(f0)
+            for a, b, kind, _key in self.link_lines:
+                grad = QLinearGradient(a, b)
+                grad.setColorAt(0.0, QColor(244, 181, 44, 110))
+                grad.setColorAt(1.0, QColor(244, 181, 44, 35))
+                p.setPen(QPen(QBrush(grad), 1.1))
+                p.drawLine(a, b)
+                if kind != "context":
+                    p.setPen(QColor(T.TEXT_FAINT))
+                    p.drawText(QPointF((a.x() + b.x()) / 2 + 4, (a.y() + b.y()) / 2 - 4), kind)
+            if not self.show_constellation:
+                p.end()
+                return
+        else:
+            p.fillRect(self.rect(), QColor(T.BG))
         phases = self.phases()
         f = QFont(self.font())
         f.setPointSizeF(9.0)
@@ -404,6 +457,9 @@ class OrbitStage(QWidget):
             super().keyPressEvent(e)
 
 
+NEW_PROJECT = re.compile(r"^(?:ok(?:ay)?[, ]+)?(?:let'?s|let us|please|can we|i want to)?\s*(?:create|start|make|begin)\s+(?:a\s+)?new\s+project\b", re.I)
+
+
 class OrbitPage(Page):
     title = "ORBIT"
     header = "none"
@@ -509,13 +565,35 @@ class OrbitPage(Page):
         self.plan_line = label("", "sub")
         self.plan_line.setWordWrap(True)
         self.plan_line.setTextFormat(Qt.TextFormat.RichText)
-        lv.addWidget(self.plan_line)
         self.views = QStackedWidget()
         self.stage = OrbitStage()
         self.stage.selected.connect(self.select_task)
         self.stage.activated.connect(lambda tid: (self.select_task(tid), self.tabs.setCurrentIndex(1)))
         self.stage.move_requested.connect(lambda tid, ph: self.apply_edit("move_to_phase", ref=tid, phase=ph))
         self.stage.remove_requested.connect(lambda tid: self.apply_edit("remove_task", ref=tid))
+        # the spatial universe: stage bar, environments, holographic panels and the layered solar core
+        from ...services.orbit_sound import Sounds
+        from ..orbit_universe import Universe
+
+        self.sounds = Sounds(lambda: bool(self.settings.get("orbit_fx_sound")), lambda: float(self.settings.get("orbit_fx_volume")),
+                             lambda: bool(getattr(self, "tts", None) is not None and self.tts.is_busy))
+        self.universe = Universe(self.stage, self.settings, lambda: getattr(self, "session", None) or None, self._save, self._space_link,
+                                 self.core.paths()["workspace"], self.sounds)
+        lv.addWidget(self.plan_line)
+        bar = QHBoxLayout()
+        bar.setSpacing(8)
+        bar.addWidget(self.universe.env_bar)
+        bar.addStretch(1)
+        self.panels_btn = QPushButton("Panels ▾")
+        self.panels_btn.setToolTip("Show hidden panels or reset this environment's layout")
+        self.panels_btn.clicked.connect(self._panels_menu)
+        bar.addWidget(self.panels_btn)
+        fx_btn = QPushButton("Visual…")
+        fx_btn.setToolTip("Animation intensity, particles, depth, camera, cinematic entry, energy effects, sounds")
+        fx_btn.clicked.connect(self.visual_settings)
+        bar.addWidget(fx_btn)
+        lv.addLayout(bar)
+        lv.addWidget(self.universe.stage_bar)
         self.outline = QTreeWidget()
         self.outline.setHeaderLabels(["Task", "Status", "Priority", "Done by"])
         self.outline.setAccessibleName("Plan outline")
@@ -538,6 +616,8 @@ class OrbitPage(Page):
             ("resume", "Resume", self.resume_workflow, "Continue from where the workflow paused"),
             ("retry", "Retry step", self.retry_step, "Run the selected failed, cancelled or blocked step again"),
             ("cancel", "Cancel workflow", self.cancel_workflow, "Stop the running step and cancel the rest"),
+            ("reviewed", "Mark reviewed", self.mark_reviewed, "You have looked at the results of every step"),
+            ("complete", "Mark complete", self.mark_complete, "Close the project as complete (it stays in your sessions)"),
         ):
             btn = QPushButton(text)
             btn.setToolTip(tip)
@@ -727,6 +807,8 @@ class OrbitPage(Page):
         self.autonomy.setCurrentIndex(max(0, i))
         self.autonomy.blockSignals(False)
         self._render_transcript()
+        self.universe._seen = {}
+        self.universe.set_env(s.get("environment") or "command", animate=False)
         self.render_all()
         self._fill_sessions()
 
@@ -807,6 +889,8 @@ class OrbitPage(Page):
         self._fill_versions()
         self._update_controls()
         self.select_task(self.stage.sel)
+        if getattr(self, "universe", None) is not None:
+            self.universe.refresh()
         ev = self.session.get("events", [])[-40:]
         self.events.setHtml("<br>".join(f"<span style='color:{T.TEXT_FAINT}'>{e['ts'][11:16]}</span> {e['kind']} {e['detail']}" for e in reversed(ev)))
 
@@ -912,6 +996,8 @@ class OrbitPage(Page):
             "resume": bool(wf) and bool(wf.get("paused")),
             "retry": bool(wf) and not running and self._selected_node_status() in ("failed", "cancelled", "blocked"),
             "cancel": bool(wf) and state not in ("completed", "cancelled"),
+            "reviewed": bool(wf) and state == "completed" and not self.session.get("reviewed"),
+            "complete": bool(self.session.get("reviewed")) and not self.session.get("completed"),
         }
         # only what can be done now is shown; Pause and Cancel stay visible while a workflow exists
         for k, b in self.wf_buttons.items():
@@ -942,6 +1028,7 @@ class OrbitPage(Page):
 
     def set_reduced_motion(self, reduced: bool) -> None:
         self.stage.set_reduced_motion(reduced)
+        self.universe.apply_settings()  # Reduce motion stops the frame timer: the scene is drawn still
 
     # ----- avatar and state -----
     def set_state(self, state: str) -> None:
@@ -954,6 +1041,7 @@ class OrbitPage(Page):
         progress = (sum(1 for n in wf["nodes"] if n["status"] == "completed") / len(wf["nodes"])) if wf and wf["nodes"] else 0.0
         avatar = {"RUNNING": "EXECUTING"}.get(state, state)
         self.stage.set_state(avatar, progress)
+        self.universe.core.set_state(state, progress)
         _, text, colour = ORB_STATES.get(state, ORB_STATES["IDLE"])
         self.state_line.setText(f"● {text}" + ("  ·  microphone on" if state == "LISTENING" else ""))
         self.state_line.setStyleSheet(f"color: {colour};")
@@ -1000,6 +1088,9 @@ class OrbitPage(Page):
         if not text:
             return
         self.input.clear()
+        if NEW_PROJECT.match(text) and (self.plan() or self.session.get("conversation_id")) and not self.worker_busy():
+            self._save()  # “Let's create a new project”: a fresh session, so the new project materialises on its own
+            self.new_session()
         cmd = O.parse_command(text, self.plan())
         if cmd and "control" in cmd:
             self._line("You", text)
@@ -1061,11 +1152,12 @@ class OrbitPage(Page):
         if self.worker_kind != "talk":
             return
         partial = O.partial_plan(raw)
-        if partial["tasks"] or partial["phases"]:
+        if partial["tasks"] or partial["phases"] or partial["brief"] or partial["ideas"] or partial["title"]:
             if self.state != "PLANNING":
                 self.set_state("PLANNING")
             if not self.plan():
                 self.stage.set_provisional(partial)
+            self.universe.refresh(provisional=partial)  # the project materialises as its data arrives
         self._flush(O.strip_plan_blocks(raw))
 
     def _status(self, text: str, _c: str = "") -> None:
@@ -1085,6 +1177,17 @@ class OrbitPage(Page):
             self._flush(O.strip_plan_blocks(self._stream))
         else:
             self._node_event(self.worker_kind, f"tool {tool}: {status}")
+        if status == "success" and tool in ("write_file", "edit_file"):  # a real file written in ORBIT → Files panel
+            from ...services import orbit_space as SP
+
+            try:
+                path = json.loads(_args or "{}").get("path", "")
+            except Exception:
+                path = ""
+            node = self.worker_kind if self.worker_kind != "talk" else ""
+            if path and SP.add_file(self.session, self.core.paths()["workspace"], path, "written", node):
+                self._save()
+                self.universe.refresh()
 
     def _confirm(self, tool: str, args_json: str) -> None:
         """A tool with real-world effects asks, every time, whatever the autonomy level."""
@@ -1606,6 +1709,7 @@ class OrbitPage(Page):
     def _mic_level(self, level: float) -> None:
         self.level.setValue(int(level * 100))
         self.stage.set_level(level)
+        self.universe.core.set_level(level)  # the listening ring follows the real microphone level
         if not self.listening or not self.continuous:
             return
         ev = self.turns.feed(level, time.monotonic())
@@ -1645,9 +1749,9 @@ class OrbitPage(Page):
             QTimer.singleShot(400, self.listen)
 
     def _play_level(self, level: float) -> None:
-        # called from the playback thread; Qt widgets are updated on the next frame by the avatar itself
         try:
             (self.stage.avatar or self.stage.glyph).set_audio_level(level)
+            self.universe.core.set_level(level)  # the speaking ring follows the real playback level
         except RuntimeError:
             pass
 
@@ -1768,4 +1872,103 @@ class OrbitPage(Page):
         if self.voice is not None:
             self.voice.stop_recording()
             self.voice.wait(1500)
+        self.universe.core.running(False)
         self._save()
+
+    # ----- the spatial universe -----
+    def _space_link(self, pid: str, href: str) -> None:
+        """A click inside a panel: open a file, select a task, approve a waiting step, attach a file."""
+        from ...services import orbit_space as SP
+
+        kind, _, ref = href.partition(":")
+        ws = self.core.paths()["workspace"]
+        if kind == "attach":
+            from PyQt6.QtWidgets import QFileDialog
+
+            path, _f = QFileDialog.getOpenFileName(self, "Attach a file from the workspace", ws)
+            if path:
+                if SP.add_file(self.session, ws, path, "attached") is None:
+                    self.notify("Not attached", "Only files inside the workspace can be attached.", "warn")
+                    return
+                self._ensure_saved_session()
+                self._save()
+                self.render_all()
+        elif kind == "file":
+            try:
+                text = SP.read_preview(ws, ref)
+                self.universe.show_preview("files", ref, f"<pre style='white-space:pre-wrap'>{self.md.esc(text)}</pre>")
+                self.sounds.play("select")
+            except (FileNotFoundError, OSError) as e:
+                self.notify("Could not open the file", str(e), "warn")
+        elif kind == "task":
+            self.stage.select(ref)
+            self.select_task(ref)
+            self.tabs.setCurrentIndex(1)
+        elif kind == "approve":
+            node = self._node(ref)
+            if node and node["status"] == "awaiting_approval" and self.card is None and not self.worker_busy():
+                self.approve_step()
+            else:
+                self.stage.select(ref)
+                self.tabs.setCurrentIndex(1)
+
+    def _panels_menu(self) -> None:
+        from ...services import orbit_space as SP
+
+        m = QMenu(self)
+        lay = SP.layout(self.session, self.universe.env)
+        hidden = [pid for pid, r in lay.items() if r["hidden"]]
+        for pid in hidden:
+            m.addAction(f"Show {SP.PANELS[pid][0]}", lambda p=pid: self.universe.show_panel(p))
+        if not hidden:
+            a = m.addAction("All panels of this environment are shown")
+            a.setEnabled(False)
+        m.addSeparator()
+        m.addAction("Reset this environment's layout", self.universe.reset_layout)
+        m.exec(self.panels_btn.mapToGlobal(self.panels_btn.rect().bottomLeft()))
+
+    def visual_settings(self) -> None:
+        from ..orbit_universe import VisualSettings
+
+        dlg = VisualSettings(self.settings, self)
+        dlg.changed.connect(self.universe.apply_settings)
+        dlg.exec()
+
+    def mark_reviewed(self) -> None:
+        from ...services import orbit_space as SP
+
+        try:
+            SP.mark_reviewed(self.session)
+        except SP.StageError as e:
+            self.notify("Not yet", str(e), "warn")
+            return
+        self._save()
+        self.render_all()
+        self.notify("Results reviewed", "The project can now be marked complete.", "ok")
+
+    def mark_complete(self) -> None:
+        from ...services import orbit_space as SP
+
+        try:
+            SP.mark_complete(self.session)
+        except SP.StageError as e:
+            self.notify("Not yet", str(e), "warn")
+            return
+        self._save()
+        self.render_all()
+        self.universe.core.event_fx("workflow.completed")
+        self.sounds.play("milestone")
+        self.notify("Project complete", self.session.get("title", ""), "ok")
+
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        self.universe.core.running(True)
+        first = not self.settings.get("orbit_intro_seen")
+        seq = self.universe.entry(first, self)
+        if seq is not None:
+            self.settings.set("orbit_intro_seen", True)
+            seq.done.connect(lambda: self.universe.refresh(materialise=True))
+
+    def hideEvent(self, e) -> None:
+        super().hideEvent(e)
+        self.universe.core.running(False)

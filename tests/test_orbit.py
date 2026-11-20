@@ -43,7 +43,11 @@ class TestPlanModel(unittest.TestCase):
         self.assertEqual(O.strip_plan_blocks(reply), "Here is a plan.\n\nThoughts?")
         self.assertIsNone(O.extract_plan("```orbit-plan {not json}```"))
         part = O.partial_plan('ok ```orbit-plan {"phases":["A","B"],"tasks":[{"id":"1","title":"First","phase":"A"},{"id":"2","title":"Sec')
-        self.assertEqual(part, {"phases": ["A", "B"], "tasks": ["First"]})
+        self.assertEqual((part["phases"], part["tasks"]), (["A", "B"], ["First"]))
+        live = O.partial_plan('```orbit-plan {"title": "Site", "brief": "A \\"small\\" site.", "ideas": ["Static", "Blog"], "phases": ["A"')
+        self.assertEqual((live["title"], live["brief"], live["ideas"]), ("Site", 'A "small" site.', ["Static", "Blog"]))
+        full = O.extract_plan('```orbit-plan {"title": "T", "brief": "Why.", "ideas": ["x", ""], "tasks": [{"title": "Do"}]}```')
+        self.assertEqual((full["brief"], full["ideas"]), ("Why.", ["x"]))
         self.assertEqual(O.strip_plan_blocks('Talking ```orbit-plan {"pha'), "Talking")
 
     def test_edits(self):

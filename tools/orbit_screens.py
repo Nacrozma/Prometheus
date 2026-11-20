@@ -38,7 +38,9 @@ os.makedirs(OUT, exist_ok=True)
 
 SAMPLE_REPLY = """Here is a first plan. Two things I still need: which hosting you prefer, and the launch date.
 ```orbit-plan {"title": "Rocket-sim public release", "objective": "Publish rocket-sim with docs and a tested installer",
-"outcome": "A tagged release people can install", "phases": ["Understand", "Build", "Verify", "Release"],
+"outcome": "A tagged release people can install",
+"brief": "Rocket-sim is a small two-stage trajectory model. This project turns it into something other people can install and trust: a guide, a tested installer and a tagged release.",
+"ideas": ["Ship a one-file Windows installer", "Add a gallery of example trajectories", "Publish the docs as a static site", "Offer a drag model switch for advanced users"], "phases": ["Understand", "Build", "Verify", "Release"],
 "tasks": [
  {"id": "u1", "title": "Review the trajectory model", "phase": "Understand", "detail": "Read src/trajectory.py and list assumptions."},
  {"id": "u2", "title": "List what users need", "phase": "Understand"},
@@ -68,18 +70,31 @@ def run(win) -> None:
     if dlg is not None and dlg.isVisible():
         dlg.accept()
     orb = win.orbit
-    win.go("ORBIT")
+    ws = orb.core.paths()["workspace"]
+    os.makedirs(os.path.join(ws, "rocket-sim", "docs"), exist_ok=True)
+    with open(os.path.join(ws, "rocket-sim", "README.md"), "w") as f:
+        f.write("# Rocket sim\n\nA small two-stage trajectory model.\n")
     steps = []
 
     def add(name, fn, wait=900):
         steps.append((name, fn, wait))
 
-    add("01-orbit-empty", lambda: None)
+    # the real entry sequence, caught mid-way (first entry plays the long version)
+    add("00-orbit-entry", lambda: win.go("ORBIT"), 1100)
+    add("01-orbit-empty", lambda: None, 2600)
+
+    def materialising():
+        orb._ensure_saved_session()
+        orb.universe._seen = {"sid": orb.session["id"], "versions": 0, "approved": 0, "done": 0, "wf": "", "files": 0, "waiting": 0}
+        partial = O.partial_plan(SAMPLE_REPLY[: SAMPLE_REPLY.index('"phases"') + 60])
+        orb.set_state("PLANNING")
+        orb.universe.refresh(provisional=partial, materialise=True)
+
+    add("02-orbit-project-materialising", materialising, 900)
 
     def proposed():
-        orb._ensure_saved_session()
         conv = win.conversations.get(orb.session["conversation_id"])
-        conv["messages"] += [{"role": "user", "content": "I want to publish rocket-sim properly, with docs and an installer."}, {"role": "assistant", "content": SAMPLE_REPLY}]
+        conv["messages"] += [{"role": "user", "content": "Let's create a new project: publish rocket-sim properly, with docs and an installer."}, {"role": "assistant", "content": SAMPLE_REPLY}]
         win.conversations.save(conv)
         orb.session["title"] = "Rocket-sim public release"
         O.add_version(orb.session, O.extract_plan(SAMPLE_REPLY), "prometheus", "Proposed in conversation")
@@ -88,41 +103,41 @@ def run(win) -> None:
         orb._render_transcript()
         orb.render_all()
         orb.set_state("SPEAKING")
+        orb.universe.core.set_level(0.6)
 
-    add("02-orbit-plan-proposed", proposed, 1400)
+    add("03-orbit-command-project-created", proposed, 700)
 
-    def edited():
-        orb.say("make add a drag model option low priority")
-        orb.say("move Verify before Build")
-        orb.say("undo")
+    def intelligence():
+        orb.set_state("RESEARCHING")
+        orb.universe.set_env("intelligence", user=True)
+
+    add("04-orbit-intelligence", intelligence, 1000)
+
+    def design():
+        orb.set_state("THINKING")
+        orb.universe.set_env("design", user=True)
         orb.stage.select("b1")
-        orb.tabs.setCurrentIndex(1)
-        orb.set_state("IDLE")
 
-    add("03-orbit-edited-step", edited)
+    add("05-orbit-design", design, 1000)
 
-    def outline():
-        orb.toggle_view()
-
-    add("04-orbit-outline", outline)
-
-    def workflow():
-        orb.toggle_view()
-        orb.autonomy.setCurrentIndex(orb.autonomy.findData("balanced"))
+    def operations():
         orb.approve_plan()
         orb.build_workflow()
         wf = orb.session["workflow"]
         for nid in ("u1", "u2"):
             O.transition(wf, nid, "running")
             O.transition(wf, nid, "completed", "sample result")
+        wf["nodes"][0]["output"] = "Assumptions found: fixed Isp per stage, no wind, flat Earth below 30 km."
         O.transition(wf, "b1", "running")
-        orb.worker_kind = "b1"
-        orb.stage.select("b1")
+        from app.services import orbit_space as SP
+
+        SP.add_file(orb.session, ws, "rocket-sim/README.md", "written", "b1")
         orb._save()
+        orb.universe.set_env("operations", user=True)
         orb.render_all()
         orb.set_state("RUNNING")
 
-    add("05-orbit-workflow-running", workflow, 1400)
+    add("06-orbit-operations-running", operations, 1100)
 
     def approval():
         class W:
@@ -136,49 +151,69 @@ def run(win) -> None:
                 pass
 
         orb.worker = W()
+        orb.worker_kind = "b1"
         orb._stream = "I will write the guide into docs/USER_GUIDE.md."
-        orb._confirm("write_file", json.dumps({"path": "rocket-sim/docs/USER_GUIDE.md", "content": "# Rocket-sim user guide\n\nInstall, run, read the results.\n"}))
+        orb._confirm("write_file", json.dumps({"path": "rocket-sim/docs/USER_GUIDE.md", "content": "# Rocket-sim user guide\n"}))
         orb.render_all()
 
-    add("06-orbit-tool-approval", approval, 1200)
+    add("07-orbit-waiting-for-approval", approval, 1000)
 
-    def versions():
+    def file_preview():
         orb._clear_card()
         orb.worker, orb.worker_kind = None, ""
-        node = orb._node("b1")
-        O.transition(orb.session["workflow"], "b1", "running") if node["status"] == "awaiting_approval" else None
-        O.transition(orb.session["workflow"], "b1", "failed", "sample: the provider timed out")
+        n = orb._node("b1")
+        if n["status"] == "awaiting_approval":
+            O.transition(orb.session["workflow"], "b1", "running")
+        orb.universe.set_env("command", user=True)
+        orb.set_state("IDLE")
+        orb._space_link("files", "file:rocket-sim/README.md")
+
+    add("08-orbit-file-preview-expanded", file_preview, 900)
+
+    def complete():
+        p = orb.universe.panels["files"]
+        if p.expanded:
+            orb.universe._link("files", "back:")
+            p.toggle_expand()
+        wf = orb.session["workflow"]
+        for n in wf["nodes"]:
+            while n["status"] not in ("completed",):
+                nxt = {"ready": "running", "waiting": "ready", "running": "completed", "paused": "ready", "awaiting_approval": "running"}.get(n["status"])
+                if not nxt:
+                    break
+                O.transition(wf, n["id"], nxt, "sample")
+        orb.universe.set_env("operations", user=True)
         orb.render_all()
-        orb.tabs.setCurrentIndex(2)
-        orb.versions.setCurrentRow(orb.versions.count() - 1)
-        orb.set_state("ERROR")
+        orb.set_state("SUCCESS")
 
-    add("07-orbit-versions-failed-step", versions)
+    add("09-orbit-workflow-complete", complete, 600)
 
-    def immersive():
-        orb.tabs.setCurrentIndex(0)
+    def listening():
+        orb.universe.set_env("command", user=True)
         orb.set_immersive(True)
         orb.set_state("LISTENING")
-        orb.stage.set_level(0.55)
+        orb.universe.core.set_level(0.55)
 
-    add("08-orbit-immersive-listening", immersive, 1200)
+    add("10-orbit-immersive-listening", listening, 1200)
 
     def small():
         orb.set_immersive(False)
         win.resize(1280, 800)
-        orb.set_state("PLANNING")
+        orb.set_state("THINKING")
 
-    add("09-orbit-1280x800", small, 1400)
+    add("11-orbit-1280x800", small, 1300)
 
     def reduced():
         win.resize(1440, 900)
+        win.settings.set("reduced_motion", True)
         orb.set_reduced_motion(True)
-        orb.set_state("RUNNING")
+        orb.set_state("ERROR")
 
-    add("10-orbit-reduced-motion-executing", reduced, 900)
+    add("12-orbit-reduced-motion-error", reduced, 900)
 
     def step(i=0):
         if i >= len(steps):
+            win.settings.set("reduced_motion", False)
             win.quit()
             return
         name, fn, wait = steps[i]
@@ -195,6 +230,7 @@ def patched(self):
     win = next(w for w in QApplication.topLevelWidgets() if w.__class__.__name__ == "MainWindow")
     win.resize(1440, 900)
     win.settings.set("launch_animation", False)
+    win.go("Home")
     QTimer.singleShot(3000, lambda: run(win))
     return _orig()
 
