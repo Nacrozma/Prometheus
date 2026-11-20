@@ -454,7 +454,8 @@ async fn send_in(h: &Harness, conv: &str, text: &str, approve: Option<bool>) -> 
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
-    let r = tokio::time::timeout(Duration::from_secs(10), handle).await.unwrap().unwrap().unwrap();
+    // A generous bound: Forge turns run real test commands (Python, twice) and cold Windows runners can be slow.
+    let r = tokio::time::timeout(Duration::from_secs(60), handle).await.unwrap().unwrap().unwrap();
     let ev = events.lock().unwrap().clone();
     (r, ev)
 }
@@ -665,7 +666,7 @@ async fn forge_reconstructor_adds_files_but_cannot_edit_or_overwrite() {
     let atlas = h.atlas.clone();
     let conv2 = conv.clone();
     let handle = tokio::spawn(async move { atlas.send_message(TurnParams { conversation_id: conv2, text: "Recover the docs".into(), ..Default::default() }, Box::new(|_| {})).await });
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(60); // generous: real file work on cold Windows runners
     while !handle.is_finished() && Instant::now() < deadline {
         for ap in h.atlas.pending_approvals().unwrap() {
             h.atlas.decide_approval(&ap.id, true).unwrap();
