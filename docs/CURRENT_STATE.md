@@ -1,6 +1,6 @@
 # Prometheus: current state
 
-**Updated:** 2026-11-19 · **Branch:** `claude/prometheus-ai-evaluation-pxqzfr` · **Desktop version:** 2.3.0
+**Updated:** 2026-11-19 · **Branch:** `claude/prometheus-ai-evaluation-pxqzfr` · **Desktop version:** 2.4.0
 (released 2026-11-19 with the owner's approval) · Atlas (`atlas/`) is a separate product with its own state file.
 
 Prometheus 2.0 "Renaissance" is implemented and tested on Linux, through three passes: the Renaissance
@@ -9,6 +9,8 @@ screen, toasts, activity centre) and the Second Birth (the birth-of-the-sun laun
 states, approval cards with real diffs, memory map, grouped search, secure-storage explanation). Windows
 CI builds, installs and runs the tests on every push. **Released 2026-11-17 with the owner's approval as
 [prometheus-desktop-v2.0.0](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.0.0)** (unsigned installer).
+
+**2.4.0 (2026-11-20):** the ORBIT universe (layered solar core, holographic panels, project journey, four environments); see `ORBIT_UNIVERSE_REPORT.md`.
 
 **2.3.0 (2026-11-19):** [spoken replies with a local voice](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.3.0), one shared speech service; see `VOICE_EXPERIENCE_REPORT.md`.
 

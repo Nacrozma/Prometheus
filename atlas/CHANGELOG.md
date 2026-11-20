@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.0 — 2026-11-20
+
+### Fixed
+- **ORBIT no longer freezes when a session is open.** In 0.5.0 the ORBIT page subscribed to conversation state in a
+  way that made it re-render endlessly as soon as a session existed; it now reads the stored state directly. Found by
+  the new ORBIT visual harness.
+
+### Added
+- **The ORBIT universe** — Atlas's ORBIT becomes a living electric-blue command environment around Atlas's own voice
+  ring: a layered core (tilted orbital rings, energy mesh, particles, arcs, shield, an audio ring that follows the real
+  microphone or playback level), a deep-navy atmosphere with a hexagonal grid and parallax, and holographic panels
+  (Project brief, Ideas, Files, Project plan, Next steps, Live activity, Structure, Operations, Approvals, Research,
+  Open questions, Assumptions and risks) that assemble from the core and can be dragged, resized, collapsed, expanded
+  and hidden. Lines join only real relationships, with light travelling along them.
+- **Project journey**: Overview → Ideas → Plan → Design → Build → Review → Complete from the real session; *Mark
+  reviewed* and *Mark complete* are checked by the core.
+- **Four environments**: Command, Design, Operations, Intelligence; the chosen one and the panel layout are saved in
+  the session (`set_layout`, at most 16 KB, checked by the core).
+- **Plans carry a brief and ideas**, streamed into their panels while Atlas's reply arrives.
+- **Entry sequence** (long the first time, short afterwards, skippable), **visual settings** (intensity, particles,
+  depth, camera, cinematic entry, energy effects, sounds, volume) and **optional synthesised sounds** (off by default,
+  never over Atlas's speech). Reduced motion turns all motion off.
+- `Files` shows the files you have shared with Atlas; *+* shares another.
+
 ## 0.5.0 — 2026-11-19
 
 ### Added

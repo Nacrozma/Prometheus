@@ -35,6 +35,14 @@ immersive + palette + `/orbit`, settings `orbit_*`, Companion Esc scoped to the 
 Atlas: `core/src/orbit.rs` (rules in the core), schema 10, engine `orbit_session` context, 7 Tauri commands,
 `src/features/orbit/*`, route/rail/immersive; Rust + vitest tests pass. Atlas page not visually checked.
 
+## ORBIT universe (2026-11-20) — Prometheus 2.4.0, ATLAS 0.6.0
+New: `app/services/orbit_space.py`, `orbit_motion.py`, `orbit_sound.py`, `app/ui/orbit_universe.py`; ATLAS
+`src/features/orbit/orbitSpace.ts`, `OrbitSpace.tsx`, core actions mark_reviewed/mark_complete/set_layout, visual
+harness `atlas/tests/visual/orbit-shots.mjs` (run `npx vite --port 5179` first). Fixed the ATLAS 0.5.0 ORBIT
+infinite re-render. Report: `docs/ORBIT_UNIVERSE_REPORT.md`. Owner asked: commit and push once CI is done without
+waiting for approval; publish when every check passes (CLAUDE.md §20).
+Note: the session disk filled once from `atlas/target` (25 GB of stale test binaries); stale binaries were deleted.
+
 ## Released 2026-11-19 (owner-approved)
 * Prometheus 2.1.0 (run 15) and 2.2.0 (run 16, `8cec89e`): 2.2.0 adds Settings → Voice → Set up voice input.
   Windows CI really downloaded the engine + Tiny model, verified SHA-256 and ran one transcription.
