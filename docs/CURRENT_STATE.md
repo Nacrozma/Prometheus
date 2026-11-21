@@ -14,7 +14,7 @@ CI builds, installs and runs the tests on every push. **Released 2026-11-17 with
 stiffness-method structures, machine design, design optimisation, 1976 atmosphere to 86 km, compressible flow, nozzles,
 RK4 3-DOF trajectories, control sandbox, arm dynamics, uncertainty, experiment records, reports. Arm firmware boots
 disarmed with an optional hardware e-stop loop; bench HIL harness; bring-up procedure. **No hardware test has been
-done**: see `VALIDATION.md` (status of every model) and `ENGINEERING_JOURNAL.md`.
+done**: see `VALIDATION.md` (status of every model) and `ENGINEERING_JOURNAL.md`. [Published](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.6.0) (commit `c140050`); installer SHA-256 `6e18bc6e6fbba8b86e646c684e321e60f397005b9563bf81ade668cce36ea45d`.
 
 **2.5.0 (2026-11-20):** ORBIT closer to the owner's reference image — particle-torus core with a geodesic shell, curved connections, chamfered panels with real actions (Compare ideas, + Add, Edit brief), full-screen heads-up layer in immersive mode; see `RELEASE_NOTES_2.5.0.md`. [Published](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.5.0) (run 20); installer SHA-256 `79446b8b976842861d46cc833305b49108c10e5b2fedfdc3220f5625cddb6dd5`.
 

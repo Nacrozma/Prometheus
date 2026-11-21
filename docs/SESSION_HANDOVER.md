@@ -56,6 +56,8 @@ benchmark plots `python tools/eng_benchmarks.py` → `docs/validation/`; lab scr
 * Software follow-ups: event-locate atmosphere layer crossings in `eng/trajectory.py` (restores 4th order with drag);
   CAD import (only parameterised geometry exists; no CAD file reader — not promised); gesture filter tuning waits for
   real recordings; frame elements have no internal hinges; no 6-DOF.
+* **Published** 2.6.0 (commit `c140050`, all Windows checks passed), installer SHA-256 `6e18bc6e6fbba8b86e646c684e321e60f397005b9563bf81ade668cce36ea45d`.
+* Next action: the owner's physical bring-up (ARM_BRINGUP.md §3-4, then `python -m eng.hil --port ... --servo-power-disconnected`).
 * Experiment data lives in `<data>/engineering/` (experiments/, reports/, arm_calibration.json, arm_benchmark_sheet.csv).
 
 ## ORBIT reference look (2026-11-20) — Prometheus 2.5.0, ATLAS 0.7.0
