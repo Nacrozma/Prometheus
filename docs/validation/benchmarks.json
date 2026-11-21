@@ -1,0 +1,250 @@
+{
+  "model_version": "1.0.0",
+  "note": "all values are model outputs (software); none is a physical measurement",
+  "arm_fast_move": {
+    "peak_dynamic_Nm": 0.9044901313681112,
+    "peak_static_Nm": 0.5654438200431343,
+    "feasible": false,
+    "flags": [
+      "shoulder: needs 0.686 N m at 2.73 rad/s (t=0.12 s) but the MG996R gives 0.548 N m there (80% of its torque-speed line)"
+    ]
+  },
+  "design_best": {
+    "b": 0.01,
+    "h": 0.05,
+    "mass_kg": 0.675,
+    "max_stress_Pa": 23999999.999999993,
+    "safety_factor": 11.500000000000004,
+    "tip_deflection_m": 0.001159420289855072,
+    "violations": [],
+    "feasible": true
+  },
+  "frame_max_nodal_error_m": 5.0306980803327406e-17,
+  "rk4_convergence": {
+    "vacuum": {
+      "dt": [
+        0.4,
+        0.2,
+        0.1,
+        0.05,
+        0.025
+      ],
+      "apogee_m": [
+        102147.00048912746,
+        102147.00024943257,
+        102147.00023442235,
+        102147.00023346403,
+        102147.0002334007
+      ],
+      "differences": [
+        0.00023969488393049687,
+        1.5010227798484266e-05,
+        9.58316377364099e-07,
+        6.332993507385254e-08
+      ],
+      "observed_order": [
+        3.9971813394095523,
+        3.969300037426704,
+        3.919542518664851
+      ],
+      "richardson_estimate": 102147.00023339648,
+      "note": "RK4 is 4th order: halving dt should shrink the difference ~16x (order ~4) where the solution is smooth"
+    },
+    "atmosphere": {
+      "dt": [
+        0.4,
+        0.2,
+        0.1,
+        0.05,
+        0.025
+      ],
+      "apogee_m": [
+        22961.43721410636,
+        22961.474182381735,
+        22961.466436079252,
+        22961.46818759171,
+        22961.467646865793
+      ],
+      "differences": [
+        0.03696827537351055,
+        0.0077463024827011395,
+        0.0017515124563942663,
+        0.0005407259159255773
+      ],
+      "observed_order": [
+        2.2547079982874134,
+        2.144906589443453,
+        1.6956318396105938
+      ],
+      "richardson_estimate": 22961.4676108174,
+      "note": "RK4 is 4th order: halving dt should shrink the difference ~16x (order ~4) where the solution is smooth"
+    }
+  },
+  "trajectory": {
+    "apogee_m": 22961.46818759171,
+    "apogee_time_s": 67.23104841816019,
+    "apogee_downrange_m": 2953.4732388700204,
+    "max_speed_m_s": 927.8567728535575,
+    "max_mach": 2.9501153607270165,
+    "max_q_Pa": 269686.66602152673,
+    "max_q_time_s": 13.484143749999998,
+    "max_accel_m_s2": 75.09041600350622,
+    "burnout_s": 13.484143749999998,
+    "burnout_altitude_m": 6468.653868207514,
+    "burnout_speed_m_s": 927.8567728535575,
+    "impact": {
+      "time_s": 150.5432172875595,
+      "downrange_m": 5461.713376130403,
+      "speed_m_s": 272.2890067654283
+    },
+    "steps": 3012,
+    "dt_s": 0.05
+  },
+  "nozzle_eps20": {
+    "cstar_ideal_m_s": 1721.9949258687911,
+    "cstar_m_s": 1721.9949258687911,
+    "exit_mach": 3.7585049866630844,
+    "exit_pressure_Pa": 35493.37075695656,
+    "pc_over_pe": 197.2199272910147,
+    "exhaust_velocity_ideal_m_s": 2960.2103744877313,
+    "mass_flow_kg_s": 4.065052628693617,
+    "CF_ambient": 1.5309683399195144,
+    "thrust_ambient_N": 10716.7783794366,
+    "isp_ambient_s": 268.82979539467306,
+    "CF_sea_level": 1.5309683399195144,
+    "thrust_sea_level_N": 10716.7783794366,
+    "isp_sea_level_s": 268.82979539467306,
+    "CF_vacuum": 1.8204683399195145,
+    "thrust_vacuum_N": 12743.2783794366,
+    "isp_vacuum_s": 319.6644362800942,
+    "optimum_expansion_for_ambient": false
+  },
+  "control": {
+    "pid": {
+      "rise_time_s": 0.31,
+      "overshoot_pct": 46.54898887162231,
+      "settling_time_s": 2.98,
+      "steady_state_error": -0.0009701475893110212,
+      "control_effort": 0.008185252197074309,
+      "peak_control": 0.1729096891388053,
+      "disturbance_peak_deviation": 0.03049740933284359,
+      "disturbance_recovery_s": null
+    },
+    "state_feedback": {
+      "rise_time_s": 0.39,
+      "overshoot_pct": 1.331849881414704,
+      "settling_time_s": 0.61,
+      "steady_state_error": 7.563247786385174e-05,
+      "control_effort": 0.008764973165305532,
+      "peak_control": 0.32987183237357737,
+      "disturbance_peak_deviation": 0.011475878024360064,
+      "disturbance_recovery_s": null
+    }
+  },
+  "gesture_suite": {
+    "clean": {
+      "frames": 240,
+      "sent_fraction": 0.9791666666666666,
+      "max_step_mm": 27.140007369195757,
+      "moved_while_lost": 0,
+      "rejected_frames": 0,
+      "jitter_mm": 2.8092019119101083e-14,
+      "lag_frames": 4,
+      "frames_to_stop_after_loss": null
+    },
+    "noise_0.003": {
+      "frames": 240,
+      "sent_fraction": 0.9791666666666666,
+      "max_step_mm": 27.10239841785225,
+      "moved_while_lost": 0,
+      "rejected_frames": 0,
+      "jitter_mm": 1.4279664805079018,
+      "lag_frames": 5,
+      "frames_to_stop_after_loss": null
+    },
+    "noise_0.008": {
+      "frames": 240,
+      "sent_fraction": 0.9791666666666666,
+      "max_step_mm": 27.478173156161606,
+      "moved_while_lost": 0,
+      "rejected_frames": 0,
+      "jitter_mm": 3.8477892350903398,
+      "lag_frames": 5,
+      "frames_to_stop_after_loss": null
+    },
+    "glitch_5pct": {
+      "frames": 240,
+      "sent_fraction": 0.9791666666666666,
+      "max_step_mm": 27.140007369195757,
+      "moved_while_lost": 0,
+      "rejected_frames": 16,
+      "jitter_mm": 2.8092019119101083e-14,
+      "frames_to_stop_after_loss": null
+    },
+    "dropout_10pct": {
+      "frames": 240,
+      "sent_fraction": 0.9791666666666666,
+      "max_step_mm": 27.140007369195757,
+      "moved_while_lost": 0,
+      "rejected_frames": 0,
+      "jitter_mm": 2.8092019119101083e-14,
+      "frames_to_stop_after_loss": null
+    },
+    "occlusion_10pct": {
+      "frames": 240,
+      "sent_fraction": 0.9791666666666666,
+      "max_step_mm": 27.140007369195757,
+      "moved_while_lost": 0,
+      "rejected_frames": 25,
+      "jitter_mm": 2.8092019119101083e-14,
+      "frames_to_stop_after_loss": null
+    },
+    "fast_2x": {
+      "frames": 240,
+      "sent_fraction": 0.9791666666666666,
+      "max_step_mm": 27.140007369195757,
+      "moved_while_lost": 0,
+      "rejected_frames": 0,
+      "lag_frames": 2,
+      "frames_to_stop_after_loss": null
+    },
+    "hand_lost": {
+      "frames": 120,
+      "sent_fraction": 0.75,
+      "max_step_mm": 27.140007369195757,
+      "moved_while_lost": 0,
+      "rejected_frames": 0,
+      "frames_to_stop_after_loss": 15
+    }
+  },
+  "gesture_deadband": [
+    {
+      "alpha": 0.35,
+      "deadband_m": 0.0,
+      "jitter_mm": 2.428045820009385,
+      "lag_frames": 5,
+      "max_step_mm": 27.295787220741598
+    },
+    {
+      "alpha": 0.35,
+      "deadband_m": 0.002,
+      "jitter_mm": 2.435398786110145,
+      "lag_frames": 5,
+      "max_step_mm": 27.295787220741598
+    },
+    {
+      "alpha": 0.35,
+      "deadband_m": 0.004,
+      "jitter_mm": 2.4094435287980702,
+      "lag_frames": 5,
+      "max_step_mm": 27.176092434343822
+    },
+    {
+      "alpha": 0.35,
+      "deadband_m": 0.008,
+      "jitter_mm": 2.368405325592519,
+      "lag_frames": 5,
+      "max_step_mm": 27.230313990110368
+    }
+  ]
+}

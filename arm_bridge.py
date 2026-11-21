@@ -7,18 +7,22 @@ arm_bridge.py - host side of the arm's serial protocol, plus a software model of
                                      order: yaw, shoulder, elbow, wrist, gripper
                   0x02 HEARTBEAT     (empty)
                   0x03 ESTOP         freeze at the current pose until CLEAR_ESTOP
-                  0x04 CLEAR_ESTOP
+                  0x04 CLEAR_ESTOP   the deliberate (re-)arm: leaves ESTOP or DISARMED (refused while the
+                                     hardware e-stop loop is open)
                   0x05 GET_STATUS
-    arm -> host   0x85 STATUS        state (0 ok, 1 link lost / no link yet, 2 estop) + 5 x uint16 current angles
+    arm -> host   0x85 STATUS        state (0 ok, 1 link lost, 2 estop, 3 disarmed) + 5 x uint16 current angles
 
 Safety is layered so that no single mistake moves the arm somewhere unsafe:
   1. the host refuses angles outside the limits,
   2. the firmware clamps to its own limits again (it does not trust the host),
   3. the firmware limits how fast any joint moves,
   4. if no valid frame arrives for WATCHDOG_S the firmware holds position,
-  5. ESTOP freezes the arm and ignores motion commands until cleared.
-A held pose is still powered: ESTOP and the watchdog stop MOTION, they do not cut power. A hard stop
-is a physical switch on the servo supply.
+  5. ESTOP freezes the arm and ignores motion commands until cleared,
+  6. the firmware boots DISARMED and moves only after an explicit arm (CLEAR_ESTOP), so a board reset never
+     resumes motion by itself,
+  7. an optional hardware e-stop loop (normally closed) latches ESTOP and blocks re-arming while open.
+A held pose is still powered: ESTOP, DISARMED and the watchdog stop MOTION, they do not cut power. A hard
+stop is the e-stop interrupting the servo supply (docs/hardware/ARM_BRINGUP.md).
 
 STATUS: FirmwareSim below is a Python model of arduino/arm_controller/arm_controller.ino, and
 tests/test_arm_bridge.py checks that the two agree on every protocol constant. The sketch itself has
@@ -33,7 +37,8 @@ SOF = 0xA5
 MAX_PAYLOAD = 16
 CMD_SET_ANGLES, CMD_HEARTBEAT, CMD_ESTOP, CMD_CLEAR_ESTOP, CMD_GET_STATUS = 0x01, 0x02, 0x03, 0x04, 0x05
 RSP_STATUS = 0x85
-STATE_OK, STATE_LINK_LOST, STATE_ESTOP = 0, 1, 2
+STATE_OK, STATE_LINK_LOST, STATE_ESTOP, STATE_DISARMED = 0, 1, 2, 3
+STATE_NAMES = {STATE_OK: "ok", STATE_LINK_LOST: "link lost", STATE_ESTOP: "e-stop", STATE_DISARMED: "disarmed"}
 NUM_JOINTS = 5
 CRC_POLY = 0x07
 WATCHDOG_S = 0.5
@@ -127,12 +132,14 @@ def clamp_to_limits(angles: Sequence[float], limits=LIMITS_DEG) -> Tuple[Tuple[f
 class FirmwareSim:
     """Python model of the Arduino firmware's behaviour (same rules, same constants)."""
 
-    def __init__(self, now: float = 0.0, limits=LIMITS_DEG, rest=REST_DEG, slew_dps: float = MAX_SLEW_DPS, watchdog_s: float = WATCHDOG_S):
+    def __init__(self, now: float = 0.0, limits=LIMITS_DEG, rest=REST_DEG, slew_dps: float = MAX_SLEW_DPS, watchdog_s: float = WATCHDOG_S,
+                 estop_loop_closed: bool = True):
         self.limits, self.slew, self.watchdog = limits, slew_dps, watchdog_s
         self.parser = FrameParser()
         self.current = list(rest)
         self.target = list(rest)
-        self.state = STATE_LINK_LOST              # no link yet: hold the rest pose
+        self.state = STATE_DISARMED               # boots disarmed: hold the rest pose until the host arms
+        self.estop_loop_closed = estop_loop_closed  # hardware e-stop loop (True = healthy, button not pressed)
         self.last_valid = now
         self.last_tick = now
         self.out = bytearray()
@@ -148,7 +155,7 @@ class FirmwareSim:
             if cmd == CMD_SET_ANGLES:
                 if len(payload) != NUM_JOINTS * 2:
                     self.rejected_commands += 1
-                elif self.state == STATE_ESTOP:
+                elif self.state != STATE_OK:                 # e-stop or disarmed: motion refused
                     self.rejected_commands += 1
                 else:
                     self.target, clamped = clamp_to_limits(decode_angles(payload), self.limits)
@@ -158,7 +165,7 @@ class FirmwareSim:
                 self.state = STATE_ESTOP
                 self.target = list(self.current)
             elif cmd == CMD_CLEAR_ESTOP:
-                if self.state == STATE_ESTOP:
+                if self.state in (STATE_ESTOP, STATE_DISARMED) and self.estop_loop_closed:
                     self.state = STATE_OK
                     self.target = list(self.current)
             elif cmd == CMD_GET_STATUS:
@@ -166,9 +173,17 @@ class FirmwareSim:
             elif cmd != CMD_HEARTBEAT:
                 self.rejected_commands += 1
 
+    def set_estop_loop(self, closed: bool, now: float) -> None:
+        """The hardware e-stop loop opens (button pressed / wire broken) or closes again."""
+        self.estop_loop_closed = bool(closed)
+        self.tick(now)
+
     def tick(self, now: float) -> None:
         dt = max(0.0, now - self.last_tick)
         self.last_tick = now
+        if not self.estop_loop_closed and self.state != STATE_ESTOP:
+            self.state = STATE_ESTOP
+            self.target = list(self.current)
         if self.state == STATE_OK and now - self.last_valid > self.watchdog:
             self.state = STATE_LINK_LOST
             self.target = list(self.current)
@@ -256,6 +271,10 @@ class ArmBridge:
 
     def clear_estop(self) -> None:
         self.transport.write(encode_frame(CMD_CLEAR_ESTOP))
+
+    def arm(self) -> None:
+        """The deliberate arm / re-arm (same frame as clear_estop). Only a person should decide to send it."""
+        self.clear_estop()
 
     def poll(self) -> Optional[dict]:
         for cmd, payload in self.parser.feed(self.transport.read()):

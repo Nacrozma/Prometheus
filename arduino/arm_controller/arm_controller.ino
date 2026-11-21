@@ -1,10 +1,21 @@
 // arm_controller.ino - firmware for the Prometheus hobby arm.
 //
-// *** NOT COMPILED OR RUN ON A BOARD BY ITS AUTHOR. Bring-up checklist is in the README. ***
+// *** NOT COMPILED OR RUN ON A BOARD BY ITS AUTHOR. Bring-up checklist: docs/hardware/ARM_BRINGUP.md ***
 // It implements the protocol in arm_bridge.py (tests/test_arm_bridge.py checks that the constants below
 // match the Python model). Servos need their OWN 5-6 V supply with a common ground; never power them
-// from the Arduino's 5V pin. Keep a physical switch on that supply: ESTOP and the watchdog stop motion
-// but leave the servos powered.
+// from the Arduino's 5V pin.
+//
+// Safety layers in this sketch (none of them replaces cutting servo power):
+//   * boots DISARMED: no motion until the host sends CLEAR_ESTOP (the deliberate "arm" command). A board
+//     reset (for example a brown-out) therefore never resumes motion on its own;
+//   * software ESTOP latches until CLEAR_ESTOP;
+//   * optional hardware e-stop input (USE_ESTOP_INPUT): a normally-closed loop from ESTOP_PIN to GND. Pressing
+//     the button or breaking a wire opens the loop and latches ESTOP; re-arming is refused while it is open.
+//     This is a SECOND channel: the e-stop button must also interrupt the servo supply itself;
+//   * watchdog: no valid frame for WATCHDOG_MS -> hold the current pose;
+//   * clamps every angle to its own limits and limits every joint's speed.
+// ESTOP, DISARMED and the watchdog stop MOTION; the servos stay powered and hold. Only the power switch /
+// e-stop contactor on the servo supply removes power.
 
 #include <Servo.h>
 
@@ -20,18 +31,20 @@ const uint8_t CRC_POLY = 0x07;
 const uint8_t NUM_JOINTS = 5;
 const unsigned long WATCHDOG_MS = 500;
 const float MAX_SLEW_DPS = 90.0;
+#define USE_ESTOP_INPUT 1                                         // 1: hardware e-stop loop required (fail-safe default)
+const uint8_t ESTOP_PIN = 2;                                      // NC button between this pin and GND; open loop = stop
 
 const uint8_t PINS[NUM_JOINTS] = {3, 5, 6, 9, 10};              // yaw, shoulder, elbow, wrist, gripper (PWM-capable pins)
 const int LIMIT_MIN[NUM_JOINTS] = {0, 0, 0, 0, 10};
 const int LIMIT_MAX[NUM_JOINTS] = {180, 180, 180, 180, 100};
 const float REST_DEG[NUM_JOINTS] = {90, 90, 90, 90, 40};        // set to the pose your arm really rests in
 
-enum State : uint8_t { STATE_OK = 0, STATE_LINK_LOST = 1, STATE_ESTOP = 2 };
+enum State : uint8_t { STATE_OK = 0, STATE_LINK_LOST = 1, STATE_ESTOP = 2, STATE_DISARMED = 3 };
 
 Servo servos[NUM_JOINTS];
 float current[NUM_JOINTS];
 float target[NUM_JOINTS];
-State state = STATE_LINK_LOST;
+State state = STATE_DISARMED;                                    // nothing moves until the host arms
 unsigned long lastValidMs = 0;
 unsigned long lastTickMs = 0;
 
@@ -74,12 +87,20 @@ void holdHere() {
   for (uint8_t i = 0; i < NUM_JOINTS; i++) target[i] = current[i];
 }
 
+bool estopInputOpen() {
+#if USE_ESTOP_INPUT
+  return digitalRead(ESTOP_PIN) == HIGH;                          // pull-up: a closed loop reads LOW
+#else
+  return false;
+#endif
+}
+
 void handleFrame(uint8_t cmd, const uint8_t *payload, uint8_t len) {
   lastValidMs = millis();
-  if (state == STATE_LINK_LOST) state = STATE_OK;
+  if (state == STATE_LINK_LOST) state = STATE_OK;                 // the link is back; the old target was dropped
   switch (cmd) {
     case CMD_SET_ANGLES:
-      if (len == NUM_JOINTS * 2 && state != STATE_ESTOP) {
+      if (len == NUM_JOINTS * 2 && state == STATE_OK) {
         for (uint8_t i = 0; i < NUM_JOINTS; i++) {
           float deg = (payload[i * 2] | (payload[i * 2 + 1] << 8)) / 10.0;
           if (deg < LIMIT_MIN[i]) deg = LIMIT_MIN[i];     // the firmware does not trust the host
@@ -92,8 +113,8 @@ void handleFrame(uint8_t cmd, const uint8_t *payload, uint8_t len) {
       state = STATE_ESTOP;
       holdHere();
       break;
-    case CMD_CLEAR_ESTOP:
-      if (state == STATE_ESTOP) {
+    case CMD_CLEAR_ESTOP:                                         // the deliberate re-arm
+      if ((state == STATE_ESTOP || state == STATE_DISARMED) && !estopInputOpen()) {
         state = STATE_OK;
         holdHere();
       }
@@ -132,6 +153,9 @@ void parse() {
 
 void setup() {
   Serial.begin(115200);
+#if USE_ESTOP_INPUT
+  pinMode(ESTOP_PIN, INPUT_PULLUP);
+#endif
   for (uint8_t i = 0; i < NUM_JOINTS; i++) {
     current[i] = target[i] = REST_DEG[i];
     servos[i].attach(PINS[i]);
@@ -145,6 +169,10 @@ void loop() {
     if (n >= sizeof(buf)) n = 0;                          // cannot happen (parse() drains); belt and braces
     buf[n++] = (uint8_t)Serial.read();
     parse();
+  }
+  if (estopInputOpen() && state != STATE_ESTOP) {                 // hardware e-stop: latch, hold
+    state = STATE_ESTOP;
+    holdHere();
   }
   unsigned long now = millis();
   if (state == STATE_OK && now - lastValidMs > WATCHDOG_MS) {

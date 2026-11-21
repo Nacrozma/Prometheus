@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" width="720" height="420" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">
+<rect width="720" height="420" fill="#ffffff"/>
+<text x="360.0" y="22" text-anchor="middle" font-size="14" font-weight="600" fill="#1d1f24">Gesture filter: noise leak vs lag (SYNTHETIC landmarks, noise 0.005)</text>
+<line x1="201.6" y1="46" x2="201.6" y2="362" stroke="#e6e8ee"/>
+<text x="201.6" y="378" text-anchor="middle" fill="#4a4f5c">5</text>
+<line x1="356.1" y1="46" x2="356.1" y2="362" stroke="#e6e8ee"/>
+<text x="356.1" y="378" text-anchor="middle" fill="#4a4f5c">10</text>
+<line x1="510.6" y1="46" x2="510.6" y2="362" stroke="#e6e8ee"/>
+<text x="510.6" y="378" text-anchor="middle" fill="#4a4f5c">15</text>
+<line x1="665.1" y1="46" x2="665.1" y2="362" stroke="#e6e8ee"/>
+<text x="665.1" y="378" text-anchor="middle" fill="#4a4f5c">20</text>
+<line x1="78" y1="283.5" x2="696" y2="283.5" stroke="#e6e8ee"/>
+<text x="72" y="287.5" text-anchor="end" fill="#4a4f5c">2</text>
+<line x1="78" y1="181.5" x2="696" y2="181.5" stroke="#e6e8ee"/>
+<text x="72" y="185.5" text-anchor="end" fill="#4a4f5c">4</text>
+<line x1="78" y1="79.5" x2="696" y2="79.5" stroke="#e6e8ee"/>
+<text x="72" y="83.5" text-anchor="end" fill="#4a4f5c">6</text>
+<rect x="78" y="46" width="618" height="316" fill="none" stroke="#9aa0ad"/>
+<text x="387.0" y="404" text-anchor="middle" fill="#1d1f24">lag to 90% of a step [frames at 30 fps]</text>
+<text transform="translate(18,204.0) rotate(-90)" text-anchor="middle" fill="#1d1f24">command jitter [mm]</text>
+<circle cx="696.0" cy="347.6" r="3.2" fill="#f4b52c" stroke="#1d1f24" stroke-width="0.5"/>
+<circle cx="479.7" cy="330.5" r="3.2" fill="#f4b52c" stroke="#1d1f24" stroke-width="0.5"/>
+<circle cx="294.3" cy="296.1" r="3.2" fill="#f4b52c" stroke="#1d1f24" stroke-width="0.5"/>
+<circle cx="201.6" cy="261.7" r="3.2" fill="#f4b52c" stroke="#1d1f24" stroke-width="0.5"/>
+<circle cx="139.8" cy="209.3" r="3.2" fill="#f4b52c" stroke="#1d1f24" stroke-width="0.5"/>
+<circle cx="108.9" cy="138.6" r="3.2" fill="#f4b52c" stroke="#1d1f24" stroke-width="0.5"/>
+<circle cx="78.0" cy="60.4" r="3.2" fill="#f4b52c" stroke="#1d1f24" stroke-width="0.5"/>
+<rect x="88" y="50" width="14" height="4" fill="#f4b52c"/>
+<text x="108" y="56" fill="#1d1f24">EMA alpha 0.1 ... 0.9</text>
+</svg>

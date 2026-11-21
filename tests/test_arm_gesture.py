@@ -167,6 +167,7 @@ class WholeChain(unittest.TestCase):
     def test_the_simulated_arm_follows_the_hand_and_stays_safe(self):
         t = br.SimTransport()
         host = br.ArmBridge(t)
+        host.arm()                                                 # the firmware boots disarmed
         ctrl = g.GestureController(arm_after=4)
         max_step = 0.0
         prev = list(t.firmware.current)
@@ -190,6 +191,7 @@ class WholeChain(unittest.TestCase):
     def test_if_the_pipeline_dies_the_arm_stops(self):
         t = br.SimTransport()
         host = br.ArmBridge(t)
+        host.arm()
         ctrl = g.GestureController(arm_after=3)
         for _ in range(30):
             cmd = ctrl.step(g.synthetic_hand(0.3, 0.5, 0.15))

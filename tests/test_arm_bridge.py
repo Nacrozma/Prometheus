@@ -13,9 +13,13 @@ INO = os.path.join(ROOT, "arduino", "arm_controller", "arm_controller.ino")
 REST = b.REST_DEG
 
 
-def link():
+def link(armed: bool = True):
+    """A simulated firmware + host. The firmware boots DISARMED; most tests start from a deliberate arm."""
     t = b.SimTransport()
-    return t, b.ArmBridge(t)
+    host = b.ArmBridge(t)
+    if armed:
+        host.arm()
+    return t, host
 
 
 class Framing(unittest.TestCase):
@@ -84,11 +88,54 @@ class Framing(unittest.TestCase):
 
 
 class FirmwareRules(unittest.TestCase):
-    def test_boots_holding_rest_with_no_link(self):
-        t, _ = link()
+    def test_boots_disarmed_holding_rest(self):
+        t, host = link(armed=False)
         t.advance(2.0)
-        self.assertEqual(t.firmware.state, b.STATE_LINK_LOST)
+        self.assertEqual(t.firmware.state, b.STATE_DISARMED)
         self.assertEqual(tuple(t.firmware.current), tuple(float(v) for v in REST))
+        host.heartbeat()                                          # a live link alone does not arm it
+        host.send_angles((120, 90, 90, 90, 40))
+        t.advance(1.0)
+        self.assertEqual(t.firmware.state, b.STATE_DISARMED)
+        self.assertEqual(tuple(t.firmware.current), tuple(float(v) for v in REST))
+        self.assertGreaterEqual(t.firmware.rejected_commands, 1)
+
+    def test_a_board_reset_never_resumes_motion_by_itself(self):
+        t, host = link()
+        host.send_angles((150, 90, 90, 90, 40))
+        t.advance(0.2)
+        t.firmware = b.FirmwareSim(now=t.now)                     # brown-out: the board restarts with RAM cleared
+        for _ in range(20):                                       # the host keeps streaming as if nothing happened
+            host.send_angles((150, 90, 90, 90, 40))
+            t.advance(0.05)
+        self.assertEqual(t.firmware.state, b.STATE_DISARMED)
+        self.assertEqual(t.firmware.current[0], float(REST[0]))
+
+    def test_hardware_estop_loop_latches_and_blocks_rearming(self):
+        t, host = link()
+        host.send_angles((170, 90, 90, 90, 40))
+        t.advance(0.2)
+        t.firmware.set_estop_loop(False, t.now)                   # button pressed or wire broken
+        held = t.firmware.current[0]
+        self.assertEqual(t.firmware.state, b.STATE_ESTOP)
+        host.arm()                                                # refused while the loop is open
+        host.send_angles((10, 90, 90, 90, 40))
+        t.advance(0.5)
+        self.assertEqual(t.firmware.state, b.STATE_ESTOP)
+        self.assertEqual(t.firmware.current[0], held)
+        t.firmware.set_estop_loop(True, t.now)                    # button released: still latched
+        t.advance(0.5)
+        self.assertEqual(t.firmware.state, b.STATE_ESTOP)
+        host.arm()                                                # only a deliberate re-arm clears it
+        self.assertEqual(t.firmware.state, b.STATE_OK)
+        self.assertEqual(t.firmware.target[0], held)
+
+    def test_open_estop_loop_at_boot_prevents_arming(self):
+        t = b.SimTransport(b.FirmwareSim(estop_loop_closed=False))
+        host = b.ArmBridge(t)
+        t.advance(0.1)
+        host.arm()
+        self.assertEqual(t.firmware.state, b.STATE_ESTOP)
 
     def test_first_valid_frame_establishes_the_link_and_motion_is_slew_limited(self):
         t, host = link()
@@ -115,6 +162,7 @@ class FirmwareRules(unittest.TestCase):
 
     def test_firmware_clamps_even_if_the_host_does_not(self):
         t = b.SimTransport()
+        t.write(b.encode_frame(b.CMD_CLEAR_ESTOP))                                                    # arm
         t.write(b.encode_frame(b.CMD_SET_ANGLES, b.encode_angles((90, 90, 90, 90, 150))))          # gripper limit is 100
         self.assertEqual(t.firmware.target[4], 100.0)
         self.assertEqual(t.firmware.clamped_commands, 1)
@@ -235,7 +283,8 @@ class SketchParity(unittest.TestCase):
         self.assertEqual(self.const("MAX_SLEW_DPS"), b.MAX_SLEW_DPS)
 
     def test_states_match(self):
-        for name, value in (("STATE_OK", b.STATE_OK), ("STATE_LINK_LOST", b.STATE_LINK_LOST), ("STATE_ESTOP", b.STATE_ESTOP)):
+        for name, value in (("STATE_OK", b.STATE_OK), ("STATE_LINK_LOST", b.STATE_LINK_LOST), ("STATE_ESTOP", b.STATE_ESTOP),
+                            ("STATE_DISARMED", b.STATE_DISARMED)):
             self.assertIn(f"{name} = {value}", self.src)
 
     def test_limits_and_rest_pose_match(self):
@@ -251,6 +300,13 @@ class SketchParity(unittest.TestCase):
     def test_sketch_keeps_the_safety_rules(self):
         for needle in ("WATCHDOG_MS", "LIMIT_MIN", "LIMIT_MAX", "MAX_SLEW_DPS", "STATE_ESTOP", "does not trust the host"):
             self.assertIn(needle, self.src)
+
+    def test_sketch_boots_disarmed_and_has_the_estop_input(self):
+        self.assertIn("State state = STATE_DISARMED", self.src)
+        self.assertIn("state == STATE_OK) {", self.src)                   # motion only when armed and linked
+        self.assertIn("#define USE_ESTOP_INPUT 1", self.src)               # fail-safe default
+        self.assertIn("INPUT_PULLUP", self.src)
+        self.assertIn("!estopInputOpen()", self.src)                       # re-arm refused while the loop is open
 
 
 if __name__ == "__main__":
