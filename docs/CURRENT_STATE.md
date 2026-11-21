@@ -1,7 +1,7 @@
 # Prometheus: current state
 
 **Updated:** 2026-11-20 · **Branch:** `claude/prometheus-ai-evaluation-pxqzfr` · **Desktop version:** 2.5.0
-(published under the owner's standing release authorisation once every Windows check passes) · Atlas (`atlas/`) is a separate product with its own state file.
+(published under the owner's standing release authorisation once every Windows check passes) · Atlas (`atlas/`) is a separate product with its own state file (ATLAS 0.7.0 published 2026-11-21).
 
 Prometheus 2.0 "Renaissance" is implemented and tested on Linux, through three passes: the Renaissance
 (design system, shell, new capabilities), the experience-first redesign (a distinct environment per

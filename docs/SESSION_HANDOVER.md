@@ -57,6 +57,7 @@ full-screen HUD). Built in both, from real data only:
   `orbitUniverse.ts` (renamed from `orbitSpace.ts`: it collided with `OrbitSpace.tsx` on Windows and broke the 0.6.0
   release build; `tests/unit/filenames.test.ts` now guards this), canvas torus/shell/curves, chamfered panels with
   lucide icons and actions (inline editors), immersive HUD (`hud` prop) and caption in `Orbit.tsx`.
+* **Published:** Prometheus 2.5.0 (run 20, SHA-256 `79446b8b976842861d46cc833305b49108c10e5b2fedfdc3220f5625cddb6dd5`) and ATLAS 0.7.0 (atlas-release run 12, commit `53fa7e2`, setup SHA-256 `2745acc62f7cf8f038c17431d73cff3217a8b537979b158a86e6bfae8a476cf8`, MSI `bd6ccca2da0c101825dc3edef2f9ca66728091133ed064c1781720001fe23a69`). Run 11 failed because the first casing guard used Node APIs absent from the app tsconfig; always check with `pnpm typecheck` (tsc -b), not `tsc -p`.
 * ATLAS 0.6.0 was never published (release run 9: Forge test 10 s timeout on Windows → raised to 60 s; run 10: the
   casing collision). Its content ships in 0.7.0; the changelog says so.
 
