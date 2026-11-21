@@ -192,6 +192,41 @@ MODELS: Dict[str, Tuple[Callable[..., dict], str, str]] = {
 }
 
 
+_TRUSS = dict(nodes={"A": [0, 0], "B": [2, 0], "C": [4, 0], "D": [1, 1.5], "E": [3, 1.5]},
+              members=[["A", "B"], ["B", "C"], ["A", "D"], ["D", "B"], ["B", "E"], ["E", "C"], ["D", "E"], ["A", "E"]],
+              supports={"A": "pin", "C": "pin"}, loads={"D": [0, -10000], "E": [2000, -5000]}, E=200e9, A=5e-4)
+EXAMPLES: Dict[str, dict] = {        # a valid, meaningful starting input for every model (used by the desktop lab and tests)
+    "truss_stiffness": _TRUSS,
+    "frame": dict(nodes={"A": [0, 0], "B": [0, 3], "C": [4, 3], "D": [4, 0]},
+                  members=[{"nodes": ["A", "B"]}, {"nodes": ["B", "C"], "w": -5000, "c": 0.1}, {"nodes": ["C", "D"]}],
+                  supports={"A": "fixed", "D": "fixed"}, loads={"B": [2000, 0, 0]}, E=200e9, A=5e-3, I=8e-5),
+    "kt_elliptical_hole": dict(a=0.004, b=0.002),
+    "fatigue_kf": dict(Kt=2.1, r=0.002, Sut=690e6, loading="bending"),
+    "marin": dict(Sut=690e6, surface="machined", d=0.025, loading="bending", reliability=99),
+    "fatigue": dict(sigma_a=120e6, sigma_m=80e6, Se=210e6, Sut=690e6, Sy=490e6),
+    "finite_life": dict(sigma_rev=300e6, Se=245e6, Sut=490e6),
+    "shaft": dict(Ma=70, Mm=0, Ta=0, Tm=45, Sut=700e6, Sy=560e6, n=1.5, Kf=1.58, Kfs=1.39),
+    "bolted_joint": dict(d=0.012, pitch=0.00175, grip=0.03, load_per_bolt=5000, property_class="8.8"),
+    "cantilever_optimisation": dict(length=0.5, load=200, material="aluminium_6061_t6", shape="rectangle", min_safety_factor=3, max_deflection=0.002),
+    "truss_sizing": dict(nodes={"A": [0, 0], "B": [1, 1], "C": [2, 0]}, members=[["A", "B"], ["B", "C"], ["A", "C"]],
+                         supports={"A": "pin", "C": "roller"}, loads={"B": [0, -5000]}, areas=[2e-5, 5e-5, 1e-4, 2e-4, 4e-4], material="steel_s275"),
+    "standard_atmosphere_1976": dict(altitude_m=30000),
+    "isentropic": dict(M=2.0), "normal_shock": dict(M1=2.0), "oblique_shock": dict(M1=2.0, theta_deg=10.0), "expansion_fan": dict(M1=2.0, turn_deg=10.0),
+    "mach_sweep": dict(M_max=5.0),
+    "nozzle": dict(pc=7e6, Tc=3300, gamma=1.2, molar_mass=0.022, throat_area=1e-3, expansion_ratio=20),
+    "nozzle_sweep": dict(pc=7e6, Tc=3300, gamma=1.2, molar_mass=0.022, throat_area=1e-3, eps_max=150),
+    "trajectory": dict(mass_initial_kg=50, propellant_kg=25, thrust_vac_N=4000, isp_vac_s=220, exit_area_m2=0.0, ref_area_m2=0.0177, cd0=0.45,
+                       kind="gravity_turn", kick_time_s=3, kick_angle_deg=4, dt=0.05),
+    "trajectory_convergence": dict(mass_initial_kg=50, propellant_kg=25, thrust_vac_N=4000, isp_vac_s=220, kick_time_s=3, kick_angle_deg=4,
+                                   dts=[0.4, 0.2, 0.1, 0.05], flat=True, aero=False),
+    "control": dict(kind="attitude", inertia=0.05, u_max=0.5, rate_limit=10.0, c_kind="pid", c_Kp=0.8, c_Ki=0.4, c_Kd=0.15, c_Tf=0.01, c_Ts=0.01,
+                    reference=0.2, duration=8, noise_std=0.001, delay_samples=1, disturbance=0.02, disturbance_time=5.0),
+    "arm_trajectory": dict(q_start_deg=[0, 30, -30, 0], q_end_deg=[0, 100, -60, 0], kind="cubic", duration=0.5, payload_kg=0.05, servo="MG996R"),
+    "uncertainty": dict(expression="cantilever_tip_deflection", values={"P": 100, "L": 0.5, "E": 69e9, "I": 2e-9},
+                        uncertainties={"P": 2, "L": 0.001, "E": 2e9, "I": 1e-10}, samples=20000),
+}
+
+
 def catalog() -> str:
     return "\n".join(f"- {n} [{cat}]: {doc}" for n, (_, cat, doc) in sorted(MODELS.items()))
 

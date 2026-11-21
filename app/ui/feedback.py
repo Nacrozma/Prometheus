@@ -106,7 +106,10 @@ class ToastHost:
         self.place()
 
     def place(self) -> None:
-        y = self.window.height() - 40
+        try:
+            y = self.window.height() - 40
+        except RuntimeError:                      # the window is already gone (application shutting down)
+            return
         for t in reversed(self.toasts):
             try:
                 t.adjustSize()

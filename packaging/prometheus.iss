@@ -1,5 +1,5 @@
 ; Inno Setup script for Prometheus Desktop (Windows x64). Built by .github/workflows/prometheus-desktop.yml:
-;   iscc /DAppVersion=2.5.0 packaging\prometheus.iss
+;   iscc /DAppVersion=2.6.0 packaging\prometheus.iss
 ; Per-user install (no administrator rights). Uninstalling removes the program only: personal data in
 ; %APPDATA%\Prometheus and keys in Windows Credential Manager are kept unless the user deletes them.
 ; The installer is NOT code-signed; Windows SmartScreen will warn about an unknown publisher.

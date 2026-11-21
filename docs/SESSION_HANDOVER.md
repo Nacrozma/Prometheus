@@ -3,7 +3,7 @@
 ## Run and test
 * Run: `pip install -r requirements.txt` then `python -m app` (set `PROMETHEUS_HOME`/`PROMETHEUS_WORKSPACE`
   to throwaway folders when testing).
-* Tests: `python -m pytest tests -q` (547 pass, 2 skipped by design). Window smoke test is in `tests/test_desktop_app.py`.
+* Tests: `python -m pytest tests -q` (638 pass, 2 skipped by design). Window smoke test is in `tests/test_desktop_app.py`.
 * Screenshots: `xvfb-run -s "-screen 0 1600x1000x24" python tools/renaissance_screens.py docs/screenshots/renaissance [names]`.
 
 ## Done (Renaissance)
@@ -42,6 +42,21 @@ harness `atlas/tests/visual/orbit-shots.mjs` (run `npx vite --port 5179` first).
 infinite re-render. Report: `docs/ORBIT_UNIVERSE_REPORT.md`. Owner asked: commit and push once CI is done without
 waiting for approval; publish when every check passes (CLAUDE.md §20).
 Note: the session disk filled once from `atlas/target` (25 GB of stale test binaries); stale binaries were deleted.
+
+## Engineering evolution (2026-11-21) — Prometheus 2.6.0
+Owner's master prompt "Prometheus Engineering Evolution". Done in software (phases 0–7): audit
+(`docs/ENGINEERING_AUDIT.md`); firmware boots DISARMED + deliberate arm + optional NC hardware e-stop loop (sketch,
+`FirmwareSim`, tests); `eng/` package (calibration, hil, arm_dynamics, arm_benchmark, gesture_lab, structures, machine,
+optimize, atmosphere, compressible, propulsion, trajectory, control, uncertainty, experiments, plots, report, registry);
+`engineering_lab` tool + system-prompt guidance; Engineering → Engineering lab (`app/ui/eng_lab.py`); 13 scalar eng
+calculators in the calculation studio; `docs/VALIDATION.md`, `docs/ENGINEERING_JOURNAL.md`, `docs/hardware/ARM_BRINGUP.md`;
+benchmark plots `python tools/eng_benchmarks.py` → `docs/validation/`; lab screenshots `tools/eng_screens.py` →
+`docs/screenshots/engineering/`.
+* Not done / pending physical: everything in VALIDATION.md "Known gaps" (no board, servo, camera or instrument here).
+* Software follow-ups: event-locate atmosphere layer crossings in `eng/trajectory.py` (restores 4th order with drag);
+  CAD import (only parameterised geometry exists; no CAD file reader — not promised); gesture filter tuning waits for
+  real recordings; frame elements have no internal hinges; no 6-DOF.
+* Experiment data lives in `<data>/engineering/` (experiments/, reports/, arm_calibration.json, arm_benchmark_sheet.csv).
 
 ## ORBIT reference look (2026-11-20) — Prometheus 2.5.0, ATLAS 0.7.0
 The owner sent a reference image (particle torus, geodesic sphere, curved links, chamfered panels with actions,

@@ -66,6 +66,45 @@ class Tools(unittest.TestCase):
             t.assertEqual(p.audit_log.tail(1)[0]["tool"], "engineering_calc")
         self.run_case(body)
 
+    def test_engineering_lab_runs_records_reproduces_and_reports(self):
+        import tempfile
+
+        def body(t, p):
+            with tempfile.TemporaryDirectory() as d:
+                old = p.ENG_DIR
+                p.ENG_DIR = d                                     # never write into the real data folder from a test
+                try:
+                    cat = t.dispatch("engineering_lab", action="catalog")
+                    t.assertIn("truss_stiffness", cat["models"])
+                    r = t.dispatch("engineering_lab", action="run", model="normal_shock", params={"M1": 2.0})
+                    t.assertEqual(r["status"], "success")
+                    t.assertAlmostEqual(r["results"]["p2_over_p1"], 4.5)
+                    tr = t.dispatch("engineering_lab", action="run", model="trajectory",
+                                    params={"mass_initial_kg": 50, "propellant_kg": 25, "thrust_vac_N": 4000, "isp_vac_s": 220})
+                    t.assertNotIn("series", tr)                       # the model gets a summary, not every point
+                    t.assertIn("profile", tr["plots_available"])
+                    rec = t.dispatch("engineering_lab", action="run", model="nozzle", record=True, title="ideal nozzle",
+                                     params={"pc": 7e6, "Tc": 3300, "gamma": 1.2, "molar_mass": 0.022, "throat_area": 1e-3, "expansion_ratio": 20})
+                    t.assertEqual(rec["validation_status"], "simulation tested")
+                    again = t.dispatch("engineering_lab", action="rerun", experiment_id=rec["experiment_id"])
+                    t.assertTrue(again["reproduced"])
+                    rep = t.dispatch("engineering_lab", action="report", experiment_id=rec["experiment_id"], formats=["md"])
+                    t.assertTrue(os.path.exists(rep["files"]["md"]))
+                    st = t.dispatch("engineering_lab", action="validation_status")
+                    t.assertEqual(st["hardware_tested"], [])
+                    t.assertFalse(st["arm_parameters"]["fully_measured"])
+                    hil = t.dispatch("engineering_lab", action="hil_simulation")
+                    t.assertTrue(hil["passed"] and hil["simulation_only"])
+                    sheet = t.dispatch("engineering_lab", action="arm_benchmark_sheet", params={"n_points": 2, "repeats": 2})
+                    t.assertTrue(os.path.exists(sheet["sheet"]))
+                    t.assertEqual(t.dispatch("engineering_lab", action="run", model="nope")["status"], "error")
+                    t.assertEqual(t.dispatch("engineering_lab", action="get", experiment_id="../x")["status"], "error")
+                    t.assertEqual(t.dispatch("engineering_lab", action="fly")["status"], "error")
+                    t.assertNotIn("engineering_lab", p.DANGEROUS_TOOLS)
+                finally:
+                    p.ENG_DIR = old
+        self.run_case(body)
+
 
 if __name__ == "__main__":
     unittest.main()

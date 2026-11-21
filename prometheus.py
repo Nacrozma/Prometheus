@@ -2020,6 +2020,90 @@ def tool_arm_plan(x: float, y: float, z: float, pitch_deg: Optional[float] = Non
             "assumptions": "placeholder link lengths/masses (arm_sim.DEFAULT_ARM), static holding torque only, servo stall torque derated 50%"}
 
 
+ENG_DIR = os.path.join(DATA_DIR, "engineering")
+
+# Physical validations that are pending (kept in step with docs/VALIDATION.md "Known gaps and next validation steps").
+ENG_PENDING_VALIDATION = [
+    "bench HIL on the real board with servo power disconnected (python -m eng.hil --port <port> --servo-power-disconnected)",
+    "arm calibration: link lengths, masses, centre-of-mass positions, rest-pose offsets with uncertainties",
+    "watchdog stop time and e-stop power interruption with servos powered (video at a known frame rate)",
+    "accuracy / repeatability / sag benchmark with a calibrated instrument (eng.arm_benchmark)",
+    "real MediaPipe recordings under varied conditions, replayed through eng.gesture_lab",
+    "servo characterisation: stall torque, no-load speed, continuous capability",
+]
+
+
+def _eng_brief(out: dict) -> dict:
+    """A model result without the bulky plot series (the model sees what is plottable, not every point)."""
+    if not isinstance(out, dict):
+        return out
+    brief = {k: v for k, v in out.items() if k not in ("series", "candidates")}
+    if out.get("series"):
+        brief["plots_available"] = {k: f"{len(v.get('x', []))} points: {v.get('ylabel', k)} vs {v.get('xlabel', '')}" for k, v in out["series"].items()}
+    if out.get("candidates"):
+        brief["candidate_count"] = len(out["candidates"])
+    return brief
+
+
+def tool_engineering_lab(action: str = "catalog", model: str = "", params: Optional[dict] = None, title: str = "", objective: str = "",
+                         record: bool = False, experiment_id: str = "", formats: Optional[list] = None, remember: bool = False) -> dict:
+    """The engineering laboratory (eng/): verified solvers, experiment records, reports. Software only: no action here
+    can power or move hardware (physical tests follow docs/hardware/ARM_BRINGUP.md with a person present)."""
+    from eng import EngError, experiments as eng_exp, registry as eng_reg, report as eng_report
+    act = str(action or "catalog")
+    store = eng_exp.ExperimentStore(os.path.join(ENG_DIR, "experiments"))
+    try:
+        if act == "catalog":
+            return {"status": "success", "models": eng_reg.catalog(),
+                    "note": "SI units. Educational/experimental engineering, not certified design. Run with action='run'."}
+        if act == "run":
+            if params is not None and not isinstance(params, dict):
+                return {"status": "error", "message": "params must be an object of named parameters"}
+            if record:
+                rec = store.run(str(model), dict(params or {}), title=title or f"{model} run", objective=objective)
+                out = {"status": "success", "experiment_id": rec["id"], "validation_status": rec["validation_status"],
+                       "results": rec["outputs"], "assumptions": rec["assumptions"]}
+                if remember:
+                    update_memory_fact(f"Engineering experiment {rec['id']}: {rec['title']} ({rec['model']}, {rec['validation_status']})",
+                                       kind="fact", source="engineering_lab")
+                    out["remembered"] = True
+                return out
+            return _eng_brief(eng_reg.run(str(model), **dict(params or {})))
+        if act == "list":
+            return {"status": "success", "experiments": store.list()[:50]}
+        if act == "get":
+            return {"status": "success", "experiment": _eng_brief(store.get(str(experiment_id)))}
+        if act == "rerun":
+            return {"status": "success", **store.rerun(str(experiment_id))}
+        if act == "report":
+            rec = store.get(str(experiment_id))
+            fmts = [str(f).lower() for f in (formats or ["md", "html"])]
+            files = eng_report.write_all(rec, os.path.join(ENG_DIR, "reports"), pdf="pdf" in fmts)
+            return {"status": "success", "files": files}
+        if act == "validation_status":
+            from eng import calibration as eng_cal
+            cal = eng_cal.Calibration.load(os.path.join(ENG_DIR, "arm_calibration.json"))
+            return {"status": "success", "hardware_tested": [], "pending_physical_validation": ENG_PENDING_VALIDATION,
+                    "arm_parameters": cal.summary(), "see": "docs/VALIDATION.md"}
+        if act == "hil_simulation":
+            import arm_bridge
+            from eng import hil
+            rep = hil.run_bench(arm_bridge.SimTransport())
+            return {"status": "success", "simulation_only": True, **rep.to_dict()}
+        if act == "arm_benchmark_sheet":
+            from eng import arm_benchmark
+            trials = arm_benchmark.make_plan(**{k: v for k, v in (params or {}).items() if k in ("n_points", "payloads", "speeds", "repeats", "seed")})
+            os.makedirs(ENG_DIR, exist_ok=True)
+            path = os.path.join(ENG_DIR, "arm_benchmark_sheet.csv")
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(arm_benchmark.to_csv(trials))
+            return {"status": "success", "sheet": path, "trials": len(trials),
+                    "next": "measure the tip at each trial with a calibrated instrument and fill the meas_* columns; nothing has been measured"}
+        return {"status": "error", "message": "action must be catalog, run, list, get, rerun, report, validation_status, hil_simulation or arm_benchmark_sheet"}
+    except EngError as e:
+        return {"status": "error", "message": str(e)}
+
+
 def tool_get_tool_stats() -> dict:
     return {"status": "success", "tools": tool_stats.summary(),
             "struggling": [{"tool": t, "recent_failure_rate": round(r, 2), "last_error": e}
@@ -2586,6 +2670,10 @@ You run locally with full OS-level authority and feature an integrated cognitive
 17. Engineering — for beam, stress, truss, atmosphere, orbit or rocket arithmetic call engineering_calc
     instead of computing in your head, and pass on the formula and assumptions it returns. arm_plan
     is a SIMULATION of the planned robot arm; never describe it as hardware that exists or moves.
+    For structures (stiffness method), fatigue, shafts, bolts, design trade-offs, shocks, nozzles, trajectories,
+    control loops, arm dynamics and uncertainty use engineering_lab; record=true keeps a re-runnable experiment.
+    Say which validation class a result has (analytically verified, numerically verified, simulation tested,
+    hardware tested, awaiting physical validation) and never present a model output as a measurement.
 
 OPERATIONAL RULES:
 - Lead directly with authoritative substance. Eliminate introductory fluff, greetings, or robotic setups.
@@ -3838,6 +3926,22 @@ _RAW_TOOL_SPECS: List[Dict[str, Any]] = [
             "params": {"type": "object", "description": "named parameters for that calculation (SI units)"}}}
     },
     {
+        "name": "engineering_lab",
+        "description": "Prometheus's engineering laboratory: verified solvers (direct-stiffness trusses and frames, fatigue/Goodman/"
+                        "Soderberg, shafts, bolted joints, design optimisation with Pareto front, 1976 atmosphere to 86 km, "
+                        "isentropic/normal/oblique shocks, Prandtl-Meyer, ideal nozzles, RK4 3-DOF trajectories with convergence "
+                        "studies, PID/state-feedback control sandbox, arm dynamic torques, GUM/Monte Carlo uncertainty), experiment "
+                        "records that can be re-run, and reports (md/html/json/csv/pdf). action: catalog | run (model, params, record, "
+                        "title, objective, remember) | list | get | rerun | report (experiment_id, formats) | validation_status | "
+                        "hil_simulation | arm_benchmark_sheet. Software only: it never powers or moves hardware. Report results with their "
+                        "assumptions and validation status; never call a simulation a measurement.",
+        "parameters": {"type": "object", "properties": {
+            "action": {"type": "string"}, "model": {"type": "string"}, "params": {"type": "object"},
+            "title": {"type": "string"}, "objective": {"type": "string"}, "record": {"type": "boolean"},
+            "experiment_id": {"type": "string"}, "formats": {"type": "array", "items": {"type": "string"}},
+            "remember": {"type": "boolean", "description": "also add a memory note pointing to the experiment (only when the user wants it)"}}}
+    },
+    {
         "name": "arm_plan",
         "description": "Plan the simulated 4-joint robot arm: inverse kinematics for a target (metres, x forward, y left, z up), "
                         "servo angles, holding torque and servo margin, max payload. SIMULATION ONLY, no hardware is touched.",
@@ -4195,6 +4299,11 @@ def _dispatch_tool_inner(name: str, arguments: Union[Dict[str, Any], str]) -> Di
 
         elif name == "engineering_calc":
             return tool_engineering_calc(arguments.get("calc", ""), arguments.get("params"))
+
+        elif name == "engineering_lab":
+            return tool_engineering_lab(arguments.get("action", "catalog"), arguments.get("model", ""), arguments.get("params"),
+                                        arguments.get("title", ""), arguments.get("objective", ""), bool(arguments.get("record", False)),
+                                        arguments.get("experiment_id", ""), arguments.get("formats"), bool(arguments.get("remember", False)))
 
         elif name == "arm_plan":
             return tool_arm_plan(arguments.get("x"), arguments.get("y"), arguments.get("z"), arguments.get("pitch_deg"),

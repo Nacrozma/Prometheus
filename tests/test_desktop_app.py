@@ -466,6 +466,14 @@ SMOKE = textwrap.dedent(
         orb.worker, orb.worker_kind = None, ""
         orb.set_immersive(True)
         out["orbit_immersive"] = not win.nav.isVisible() and not win.topbar.isVisible()
+        eng = win.pages["Engineering"]
+        eng.mode.button(1).setChecked(True)
+        eng._mode(1)
+        lab = eng.lab
+        lab._pick("trajectory")
+        lab._done(lab.registry.run("trajectory", **lab.registry.EXAMPLES["trajectory"]))
+        out["eng_lab"] = lab.plot_pick.count() >= 5 and "apogee" in lab.out.toPlainText() and "not a measurement" in lab.out.toPlainText()
+        out["eng_lab_models"] = lab.models.count() > len(lab.registry.MODELS)
         out["orbit_hud"] = orb.hud.track.isVisible() and orb.hud.composer.isVisible() and not orb.top_bar.isVisible() and not orb.right.isVisible() and orb.universe.hud.reserve() == (orb.hud.TOP, orb.hud.BOTTOM)
         orb.hud.conv_btn.click()
         out["orbit_hud_conversation"] = orb.right.isVisible() and orb.hud.conv_btn.isChecked()
@@ -518,7 +526,7 @@ class TestWindowSmoke(unittest.TestCase):
         self.assertTrue(out["new_conv"] and out["renamed"] and out["deleted"])
         self.assertTrue(out["toast"] and out["activity"] and out["last_section"])
         self.assertTrue(out["launch_ok"] and out["states_ok"])
-        for k in ("orbit_versions", "orbit_undo", "orbit_build_needs_approval", "orbit_workflow", "orbit_go_ahead", "orbit_architect_refused", "orbit_card", "orbit_denied", "orbit_immersive", "orbit_immersive_exit", "orbit_outline", "orbit_recovered", "speech_shared", "speech_engine_decided", "orbit_universe", "orbit_stagebar", "orbit_hud", "orbit_hud_conversation"):
+        for k in ("orbit_versions", "orbit_undo", "orbit_build_needs_approval", "orbit_workflow", "orbit_go_ahead", "orbit_architect_refused", "orbit_card", "orbit_denied", "orbit_immersive", "orbit_immersive_exit", "orbit_outline", "orbit_recovered", "speech_shared", "speech_engine_decided", "orbit_universe", "orbit_stagebar", "orbit_hud", "orbit_hud_conversation", "eng_lab", "eng_lab_models"):
             self.assertTrue(out[k], k)
         self.assertTrue(out["dangerous"])
         self.assertFalse(out["auto_default"])

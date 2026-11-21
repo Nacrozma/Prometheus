@@ -5,15 +5,16 @@
 > [release page](https://github.com/Nacrozma/Prometheus/releases/tag/atlas-v0.7.0)).
 > Its source is in [`atlas/`](atlas/) and does not share code with Prometheus.
 
-> **Prometheus Desktop — latest: 2.5.0** (Windows 10/11, 64-bit, unsigned):
-> **[⬇ download Prometheus-Setup-2.5.0-x64-unsigned.exe](https://github.com/Nacrozma/Prometheus/releases/download/prometheus-desktop-v2.5.0/Prometheus-Setup-2.5.0-x64-unsigned.exe)**
-> · [release page](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.5.0)
+> **Prometheus Desktop — latest: 2.6.0** (Windows 10/11, 64-bit, unsigned):
+> **[⬇ download Prometheus-Setup-2.6.0-x64-unsigned.exe](https://github.com/Nacrozma/Prometheus/releases/download/prometheus-desktop-v2.6.0/Prometheus-Setup-2.6.0-x64-unsigned.exe)**
+> · [release page](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.6.0)
 > · SHA-256 on the release page (`SHA256SUMS.txt`)
 > · [all releases](https://github.com/Nacrozma/Prometheus/releases).
 > Windows will warn about an unknown publisher: check the SHA-256, then *More info → Run anyway*.
 >
 > | Version | What it added |
 > |---|---|
+> | [2.6.0](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.6.0) | The **engineering laboratory**: stiffness-method structures, fatigue and machine design, design optimisation, compressible flow, nozzles, RK4 trajectories, control sandbox, arm dynamics, uncertainty, experiment records and reports; arm firmware boots disarmed (hardware still untested) |
 > | [2.5.0](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.5.0) | ORBIT closer to the reference: particle-torus core, curved connections, chamfered panels with real actions (Compare ideas, + Add, Edit brief), full-screen heads-up layer |
 > | [2.4.0](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.4.0) | The **ORBIT universe**: layered solar core, holographic panels, project journey, four environments, entry sequence, visual settings |
 > | [2.3.0](https://github.com/Nacrozma/Prometheus/releases/tag/prometheus-desktop-v2.3.0) | Spoken replies with a **local voice** (on your PC, no internet) or Microsoft online; voice, speed, Test voice (Settings → Voice) |
@@ -127,7 +128,8 @@ limits only. Docker must be an *engine that answers*, not just the `docker` comm
 stops doing arithmetic "in its head": unit conversion, section properties, beam reactions / moment /
 deflection (simply supported and cantilever, point and distributed loads), bending, torsion and plane
 stress (principal stresses, von Mises), Euler buckling, 2-D pin-jointed truss member forces (method of
-joints, refuses indeterminate or unstable structures), ISA atmosphere to 20 km, lift / stall speed /
+joints, refuses indeterminate or unstable structures; the stiffness method in `eng/` handles those), ISA
+atmosphere to 20 km (1976 standard to 86 km in `eng/`), lift / stall speed /
 Reynolds number, circular orbits, vis-viva, Hohmann transfers and the rocket equation. Every result
 carries its formula and assumptions. `tests/test_engineering.py` checks them against textbook values
 (ISA tables, the LEO-to-GEO Hohmann transfer, hand-worked trusses and beams). These are first-pass design
@@ -140,8 +142,8 @@ numbers (linear elastic, small deflection, ideal pins), not FEA or a code check.
 | `arm_sim.py` | forward kinematics, closed-form inverse kinematics (elbow up/down, leaning back over the base), joint limits that fit a 180-degree servo, floor/base keep-out, static holding torque and servo selection, smooth joint-space moves, workspace map, SVG drawing | hand-worked poses, 1,600+ random FK-to-IK round trips, torque vs. hand calculation |
 | `arm_gesture.py` | hand landmarks to arm targets: validation, arming (hand must be still first), glitch rejection, smoothing + dead-band, workspace clamping, hold-then-stop when the hand is lost | synthetic hands, 2,000-frame random session |
 | `arm_bridge.py` | binary serial protocol (CRC-8, resync), host-side limits, and `FirmwareSim`, a model of the firmware's slew limit, watchdog and e-stop | framing fuzz tests, safety-rule tests, end-to-end gesture-to-firmware run |
-| `arduino/arm_controller/arm_controller.ino` | the firmware itself | **not compiled or run on a board**; a test only checks its protocol constants match the Python model |
-| `arm_demo.py` | `--synthetic` runs the whole chain in simulation; `--camera` / `--port` for webcam and real hardware | synthetic mode tested; camera and serial modes **not tested** |
+| `arduino/arm_controller/arm_controller.ino` | the firmware: boots disarmed, deliberate arm, software e-stop latch, optional fail-safe hardware e-stop loop, watchdog, clamps, slew limit | **not compiled or run on a board**; tests check its constants and safety rules against the Python model |
+| `arm_demo.py` | `--synthetic` runs the whole chain in simulation; `--camera` / `--port` for webcam and real hardware (asks you to type ARM); `--dry-run` prints commands and opens no port; `--record` saves landmarks for the gesture lab | synthetic mode tested; camera and serial modes **not tested** |
 
 `docs/arm_pose.svg` shows an IK solution inside the reachable workspace (regenerate with
 `python arm_demo.py --synthetic --svg docs/`). Prometheus can plan with it through the `arm_plan` tool, which
@@ -151,12 +153,32 @@ Everything about the arm is **simulation until it has run on real hardware**. Li
 torques are placeholders for a typical small arm: measure yours (`arm_sim.ArmSpec`, `Masses`). Whether
 MediaPipe's landmarks are steady enough to drive it is untested, and is the first thing to try.
 
-Hardware bring-up checklist (when the board arrives):
-1. Servos on their own 5-6 V supply with a common ground to the board, behind a physical switch. Never power them from the board's 5V pin.
-2. Set `REST_DEG` in the sketch to the pose the arm really rests in: servos jump to it at power-up.
-3. With the arm unloaded and nothing in reach, upload the sketch and drive it by hand from a Python shell (`ArmBridge(SerialTransport(port))`): heartbeat, one small `send_angles`, `request_status`, then pull the USB cable and confirm the arm stops within about half a second.
-4. Test ESTOP, then confirm it does not release on a heartbeat.
-5. Only then try `python arm_demo.py --camera --port <port>`, hand held still for the first seconds.
+Hardware bring-up: follow **[docs/hardware/ARM_BRINGUP.md](docs/hardware/ARM_BRINGUP.md)** (power architecture,
+power budget, two-channel e-stop, step-by-step checklist with pass criteria). The firmware boots **disarmed** and
+moves only after a deliberate arm; `python -m eng.hil --port <port> --servo-power-disconnected` checks the board's
+protocol, arming, e-stop latch and watchdog with the servos unpowered. None of this has been run on hardware yet.
+
+## Engineering laboratory (`eng/`)
+
+An integrated engineering lab built on the same principles: every model states its equations, assumptions and
+validity range, is checked against analytic or published references, and is available to Prometheus (the
+`engineering_lab` tool) and in the desktop app (**Engineering → Engineering lab**, with plots, experiment records and
+reports). What has and has not been validated, and how: **[docs/VALIDATION.md](docs/VALIDATION.md)**. The genuine
+development record, including what went wrong: **[docs/ENGINEERING_JOURNAL.md](docs/ENGINEERING_JOURNAL.md)**.
+
+| Area | Models |
+|---|---|
+| Robot arm | recursive Newton–Euler dynamics, trapezoidal / cubic / quintic trajectories, servo torque–speed feasibility; ISO 9283 accuracy / repeatability benchmark planner and analyser; calibration records with provenance; gesture stress lab; bench hardware-in-the-loop checks |
+| Structures | direct-stiffness 2-D trusses (determinate and indeterminate, support settlement) and 2-D rigid frames (Euler–Bernoulli, distributed loads) with equilibrium and conditioning checks |
+| Machine design | Kt (Inglis), notch sensitivity and Kf, Marin-corrected endurance limit, Goodman / Soderberg / Gerber, Basquin life, DE-Goodman shaft sizing, bolted joints (ISO 898-1) |
+| Design | mass vs safety factor vs deflection sweeps with constraint reports and a Pareto front |
+| Aerospace | U.S. Standard Atmosphere 1976 to 86 km; isentropic flow, normal and oblique shocks, Prandtl–Meyer; ideal rocket nozzle (c*, CF, thrust, Isp, sensitivities); planar 3-DOF point-mass RK4 trajectory with timestep convergence |
+| Control | discrete PID / state-feedback sandbox with noise, delay, saturation, rate limits, disturbances; discrete eigenvalue and Routh–Hurwitz stability |
+| Method | GUM and Monte Carlo uncertainty, Type A/B measurement statistics; experiment records with provenance hash and exact re-run; reports in Markdown, HTML, JSON, CSV and PDF; SVG plots |
+
+Reproduce the validation plots: `python tools/eng_benchmarks.py` (writes `docs/validation/`). Screenshots of the lab:
+`docs/screenshots/engineering/`. Educational and experimental engineering, not certified design; no result is a
+physical measurement until an experiment record with measured data says so.
 
 ## Reflection and evaluation
 

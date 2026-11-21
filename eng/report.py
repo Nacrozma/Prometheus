@@ -15,7 +15,7 @@ from . import EngError
 from .plots import line_plot
 
 
-def plots_for(rec: dict) -> Dict[str, str]:
+def plots_for(rec: dict, width: int = 720, height: int = 420) -> Dict[str, str]:
     out = {}
     for name, s in (rec.get("series") or {}).items():
         series = [{"x": s["x"], "y": s["y"], "label": s.get("ylabel", name), "style": s.get("style", "line")}]
@@ -25,6 +25,7 @@ def plots_for(rec: dict) -> Dict[str, str]:
             series.append({"x": s["front_x"], "y": s["front_y"], "label": "Pareto front", "style": "line"})
         try:
             out[name] = line_plot(series, title=f"{rec.get('title', '')}: {name}", xlabel=s.get("xlabel", ""), ylabel=s.get("ylabel", ""),
+                                  width=width, height=height,
                                   log_x=bool(s.get("log")), log_y=bool(s.get("log")),
                                   note=f"{rec.get('id', '')} · model {rec.get('software', {}).get('eng_model_version', '?')} · {rec.get('validation_status', '')}")
         except EngError:

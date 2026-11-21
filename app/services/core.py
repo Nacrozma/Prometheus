@@ -68,13 +68,17 @@ class Core:
     def engineering_calcs(self) -> Dict[str, inspect.Signature]:
         import engineering
 
-        names = [n for n in ("convert_units", "section_properties", "beam", "bending_stress", "safety_factor", "torsion_shear", "euler_buckling", "plane_stress", "thermal_expansion", "isa_atmosphere", "lift", "stall_speed", "reynolds_number", "circular_orbit", "vis_viva", "hohmann", "rocket_equation") if hasattr(engineering, n)]
-        return {n: inspect.signature(getattr(engineering, n)) for n in names}
+        return {n: inspect.signature(fn) for n, (fn, _doc) in engineering.CALCULATIONS.items()}
 
     def engineering_doc(self, name: str) -> str:
         import engineering
 
-        return inspect.getdoc(getattr(engineering, name, None)) or ""
+        entry = engineering.CALCULATIONS.get(name)
+        return (inspect.getdoc(entry[0]) or entry[1]) if entry else ""
+
+    def engineering_lab(self, action: str, **kw) -> Dict[str, Any]:
+        """The engineering laboratory (eng/) through the same tool Prometheus uses (audited, software only)."""
+        return self.dispatch("engineering_lab", action=action, **kw)
 
     # ----- skills, patches -----
     def skills(self) -> List[Dict[str, Any]]:

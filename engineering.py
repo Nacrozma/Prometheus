@@ -277,7 +277,8 @@ def truss(nodes: Dict[str, Tuple[float, float]], members: List[Tuple[str, str]],
 def isa_atmosphere(altitude_m: float) -> Dict[str, Any]:
     h = _num("altitude_m", altitude_m)
     if not 0 <= h <= 20000:
-        raise CalcError("this implementation covers 0 to 20,000 m of the International Standard Atmosphere")
+        raise CalcError("this implementation covers 0 to 20,000 m of the International Standard Atmosphere; "
+                        "use standard_atmosphere_1976 for 0 to 86 km")
     if h <= 11000:
         t = 288.15 - 0.0065 * h
         p = 101325.0 * (t / 288.15) ** (G0 / (0.0065 * R_AIR))
@@ -385,6 +386,33 @@ CALCULATIONS: Dict[str, Tuple[Callable[..., Dict[str, Any]], str]] = {
 }
 
 
+def _register_eng() -> None:
+    """Scalar models from the eng package, so they appear wherever CALCULATIONS is used (tool, desktop studio)."""
+    try:
+        from eng import atmosphere, compressible, machine, propulsion
+    except ImportError:                                     # eng is optional for this module
+        return
+    for name, fn, doc in (
+        ("standard_atmosphere_1976", atmosphere.standard_atmosphere_1976, "standard_atmosphere_1976(altitude_m): U.S. Standard Atmosphere 1976, 0-86 km"),
+        ("isentropic", compressible.isentropic, "isentropic(M, gamma=1.4): T0/T, p0/p, rho0/rho, A/A*, Mach angle"),
+        ("normal_shock", compressible.normal_shock, "normal_shock(M1, gamma=1.4): M2, p2/p1, rho2/rho1, T2/T1, p02/p01"),
+        ("oblique_shock", compressible.oblique_shock, "oblique_shock(M1, theta_deg, strong=False, gamma=1.4): shock angle, M2, ratios"),
+        ("expansion_fan", compressible.expansion_fan, "expansion_fan(M1, turn_deg, gamma=1.4): Prandtl-Meyer expansion"),
+        ("nozzle", propulsion.nozzle, "nozzle(pc, Tc, gamma, molar_mass, throat_area, expansion_ratio, pa=101325): ideal c*, CF, thrust, Isp"),
+        ("kt_elliptical_hole", machine.kt_elliptical_hole, "kt_elliptical_hole(a, b): Inglis stress concentration"),
+        ("fatigue_kf", machine.fatigue_kf, "fatigue_kf(Kt, r, Sut, loading='bending'): notch sensitivity q and Kf"),
+        ("marin", machine.marin, "marin(Sut, surface='machined', d=None, loading='bending', temperature_C=None, reliability=50): endurance limit Se"),
+        ("fatigue", machine.fatigue, "fatigue(sigma_a, sigma_m, Se, Sut, Sy): Goodman, Soderberg, Gerber, yield factors, life"),
+        ("finite_life", machine.finite_life, "finite_life(sigma_rev, Se, Sut): cycles to failure (Basquin)"),
+        ("shaft", machine.shaft, "shaft(Ma, Mm, Ta, Tm, Sut, Sy, n=2, Kf=1, Kfs=1, d=None): DE-Goodman shaft size or check"),
+        ("bolted_joint", machine.bolted_joint, "bolted_joint(d, pitch, grip, load_per_bolt, property_class='8.8'): preload, joint constant, factors"),
+    ):
+        CALCULATIONS.setdefault(name, (fn, doc))
+
+
+_register_eng()
+
+
 def calculate(calc: str, **params) -> Dict[str, Any]:
     """Run a named calculation. Never raises: bad input comes back as {'status': 'error', 'message': ...}."""
     entry = CALCULATIONS.get(str(calc))
@@ -394,6 +422,10 @@ def calculate(calc: str, **params) -> Dict[str, Any]:
         out = entry[0](**params)
     except CalcError as e:
         return {"status": "error", "calc": calc, "message": str(e)}
+    except ValueError as e:
+        if type(e).__name__ == "EngError":                   # eng package input errors read like CalcError
+            return {"status": "error", "calc": calc, "message": str(e)}
+        return {"status": "error", "calc": calc, "message": f"numerical problem: {e}"}
     except TypeError as e:
         return {"status": "error", "calc": calc, "message": f"wrong parameters ({e}). Usage: {entry[1]}"}
     except (OverflowError, ZeroDivisionError, ValueError) as e:

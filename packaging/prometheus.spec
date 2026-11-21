@@ -10,7 +10,12 @@ ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))  # noqa: F821 (SPECPATH is 
 CORE_MODULES = [
     "prometheus", "gui_orb", "gui_markdown", "gui_config", "gui_session", "gui_birth", "state_io",
     "safety", "memory_graph", "skill_forge", "patch_gate", "reflection", "engineering", "arm_sim",
-    "obsidian_memory", "sibling_adapter",
+    "obsidian_memory", "sibling_adapter", "arm_bridge", "arm_gesture",
+    # the engineering laboratory (imported lazily by the engineering_lab tool and the desktop lab)
+    "eng", "eng._util", "eng.calibration", "eng.hil", "eng.arm_dynamics", "eng.arm_benchmark", "eng.gesture_lab", "eng.structures",
+    "eng.machine", "eng.optimize", "eng.atmosphere", "eng.compressible", "eng.propulsion", "eng.trajectory", "eng.control",
+    "eng.uncertainty", "eng.experiments", "eng.plots", "eng.report", "eng.registry",
+    "PyQt6.QtSvg", "PyQt6.QtSvgWidgets",
 ]
 
 a = Analysis(  # noqa: F821

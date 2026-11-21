@@ -276,7 +276,8 @@ Verify the actual implementation before modifying it.
 > Repository note (verified 2026-11-17): the stack above is **Atlas's** (`atlas/`: Tauri 2, React, TypeScript,
 > Vite, Tailwind/shadcn, Rust, SQLite). **Prometheus** is built differently:
 > * Core: Python 3 (`prometheus.py` and its modules: `memory_graph.py`, `safety.py`, `reflection.py`,
->   `engineering.py`, `skill_forge.py`, `patch_gate.py`, `obsidian_memory.py`, `arm_sim.py`, `state_io.py`).
+>   `engineering.py`, `skill_forge.py`, `patch_gate.py`, `obsidian_memory.py`, `arm_sim.py`, `state_io.py`), and the
+>   engineering laboratory package `eng/` (numpy only; validation status in `docs/VALIDATION.md`).
 > * Desktop app: PyQt6 (`app/`), with the GLSL solar shader from `gui_orb.py`; the terminal
 >   (`python prometheus.py`) and the HUD (`python gui_orb.py`) also use the same core.
 > * Persistence: JSON state files in the data folder, written atomically through `state_io.py` (no SQLite).

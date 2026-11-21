@@ -1,8 +1,12 @@
-"""Engineering: a workbench with two modes.
+"""Engineering: a workbench with three modes.
 
 **Calculation studio** — a searchable library of the 17 calculators grouped by domain, a form built from
 each calculator's real signature, and a result sheet that leads with the headline value, then the full
 table with units, the formula and warnings. Calculations run through the engineering_calc tool (audited).
+
+**Engineering lab** — the eng/ models (direct-stiffness structures, fatigue and machine design, design
+optimisation, aerospace, control, arm dynamics, uncertainty) with plots, experiment records and reports
+(app/ui/eng_lab.py).
 
 **Project intelligence** — for a project in the workspace: branch and changes (read-only Git), what it is
 made of (languages, files, lines), entry points, the test files found, and plain-text code search whose
@@ -26,8 +30,10 @@ from ..widgets import Page, label, run_bg
 DOMAINS = {
     "Units": ["convert_units"],
     "Structures": ["section_properties", "beam", "bending_stress", "safety_factor", "torsion_shear", "euler_buckling", "plane_stress", "thermal_expansion"],
-    "Aerodynamics": ["isa_atmosphere", "lift", "stall_speed", "reynolds_number"],
-    "Orbital mechanics": ["circular_orbit", "vis_viva", "hohmann", "rocket_equation"],
+    "Machine design": ["kt_elliptical_hole", "fatigue_kf", "marin", "fatigue", "finite_life", "shaft", "bolted_joint"],
+    "Aerodynamics": ["isa_atmosphere", "standard_atmosphere_1976", "lift", "stall_speed", "reynolds_number"],
+    "Compressible flow": ["isentropic", "normal_shock", "oblique_shock", "expansion_fan"],
+    "Propulsion & orbits": ["nozzle", "circular_orbit", "vis_viva", "hohmann", "rocket_equation"],
 }
 DISCLAIMER = "First-pass numbers from closed-form formulas (SI units unless a field says otherwise). Not finite-element analysis, not a certified design, not a code-compliance check."
 
@@ -100,8 +106,8 @@ class EngineeringPage(Page):
         tl.addWidget(label("Engineering", "h1"))
         tl.addSpacing(20)
         self.mode = QButtonGroup(self)
-        for i, name in enumerate(("Calculation studio", "Project intelligence")):
-            b = QPushButton(icons.icon("bolt" if i == 0 else "git", T.TEXT_SECONDARY, active=T.ACCENT), f" {name}")
+        for i, name in enumerate(("Calculation studio", "Engineering lab", "Project intelligence")):
+            b = QPushButton(icons.icon(("bolt", "engineering", "git")[i], T.TEXT_SECONDARY, active=T.ACCENT), f" {name}")
             b.setObjectName("chip")
             b.setCheckable(True)
             b.setChecked(i == 0)
@@ -111,6 +117,10 @@ class EngineeringPage(Page):
         self.content.addWidget(top)
         self.stack = QStackedWidget()
         self.stack.addWidget(self._studio())
+        from ..eng_lab import EngineeringLab
+
+        self.lab = EngineeringLab(core)
+        self.stack.addWidget(self.lab)
         self.stack.addWidget(self._intel())
         self.mode.idClicked.connect(self._mode)
         self.content.addWidget(self.stack, 1)
@@ -119,6 +129,8 @@ class EngineeringPage(Page):
     def _mode(self, i: int) -> None:
         self.stack.setCurrentIndex(i)
         if i == 1:
+            self.lab.refresh_experiments()
+        if i == 2:
             self._load_projects()
 
     # ----- calculation studio -----
